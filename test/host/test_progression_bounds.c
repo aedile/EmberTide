@@ -34,7 +34,7 @@ static void test_pin_raw_255(void)
 static void test_pin_raw_1_nonzero(void)
 {
     uint8_t result = fq_effective_stat(1u);
-    TEST_ASSERT_TRUE(result != 0u);
+    TEST_ASSERT_EQUAL_UINT8(3u, result);
 }
 
 /* raw=0 boundary — must equal 0 (ln(0+1) == 0). */

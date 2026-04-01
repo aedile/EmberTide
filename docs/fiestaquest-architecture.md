@@ -4,6 +4,8 @@
 **Reference:** FiestaQuest Game Design Document v5
 **Methodology:** TDD red-first, clean architecture, defense in depth
 
+**v2.1 amendment:** fq_prng_range signature changed from int to uint32_t — avoids signed/unsigned conversion hazards in modulo arithmetic.
+
 **v2 changelog:** Combat stepper API (replaces all-at-once resolver). Typed event bus (tagged union, no void*). Mini-game contracts (scoring + running split). Training session FSM. BLE service contract. Captive portal module. View model layer (decouples presentation from game state). Visual test harness (host-rendered PNGs for LLM review before flashing). CRC32 frozen alongside PRNG. PRNG modulo bias accepted and documented. Effective stat lookup table committed. Production error logging. PSRAM policy expanded.
 
 ---
@@ -201,7 +203,7 @@ typedef struct { uint32_t state; } fq_prng_t;
 
 void     fq_prng_init(fq_prng_t *rng, uint32_t seed);
 uint32_t fq_prng_next(fq_prng_t *rng);
-int      fq_prng_range(fq_prng_t *rng, int min, int max);
+uint32_t fq_prng_range(fq_prng_t *rng, uint32_t min, uint32_t max);
 
 #endif
 ```
@@ -222,9 +224,11 @@ uint32_t fq_prng_next(fq_prng_t *rng) {
     return x;
 }
 
-int fq_prng_range(fq_prng_t *rng, int min, int max) {
-    uint32_t raw = fq_prng_next(rng);
-    return min + (int)(raw % (uint32_t)(max - min + 1));
+uint32_t fq_prng_range(fq_prng_t *rng, uint32_t min, uint32_t max) {
+    if (min >= max) { return min; }  /* defensive: no state advancement */
+    uint32_t span = max - min + 1u;
+    if (span == 0u) { return fq_prng_next(rng); }  /* full-range overflow guard */
+    return min + (fq_prng_next(rng) % span);
 }
 ```
 
@@ -255,7 +259,7 @@ uint32_t fq_crc32(const uint8_t *data, size_t len);
 // Generated from: eff = round(10 * ln(raw + 1) / ln(11))
 // This table is FROZEN. Used in combat formulas on both devices.
 static const uint8_t FQ_EFFECTIVE_STAT_TABLE[256] = {
-    0,  3,  5,  6,  7,  7,  8,  8,  9,  9, 10, 10, 10, 10, 11, 11,
+    0,  3,  5,  6,  7,  7,  8,  9,  9, 10, 10, 10, 11, 11, 11, 12,
    11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 14, 14, 14,
    // ... (remaining 224 entries generated at build, validated by test)
 };

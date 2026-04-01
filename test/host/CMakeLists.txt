@@ -85,7 +85,7 @@ macro(assert_compile_fails label source_file)
         _${label}_compiled
         "${BOUNDARY_TMP}/${label}"
         "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}"
-        CMAKE_FLAGS "-DCMAKE_C_STANDARD=11"
+        CMAKE_FLAGS "-DCMAKE_C_STANDARD=11" "-DCMAKE_C_FLAGS=-Wall -Werror -Wimplicit-function-declaration"
     )
     if(_${label}_compiled)
         message(FATAL_ERROR

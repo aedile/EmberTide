@@ -69,6 +69,12 @@ uint32_t fq_prng_next(fq_prng_t *rng);
  * Edge cases:
  *   - min > max : returns min (defensive, no state advancement).
  *   - min == max: returns min (no state advancement).
+ *
+ * NOTE — BLE stream sync: When min >= max, state is NOT advanced. The BLE
+ *   combat protocol must account for this: if both peers call fq_prng_range
+ *   with min >= max, neither advances the PRNG stream. Any asymmetry in
+ *   whether a degenerate range call occurs will cause stream desync. Ensure
+ *   both devices see the same call pattern (Phase 5+ BLE integration).
  *   - max == UINT32_MAX and min == 0: span overflows to 0; returns
  *     fq_prng_next() directly (full 32-bit range, no modulo).
  *

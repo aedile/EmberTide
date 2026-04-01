@@ -27,6 +27,10 @@
  * Algorithm: init=0xFFFFFFFF, per-byte XOR through the 256-entry lookup
  * table, finalize by XOR with 0xFFFFFFFF.
  *
+ * NOTE — NULL vs empty: Both NULL data and len==0 return 0. Callers that
+ *   need to distinguish an error condition (NULL pointer) from a valid empty
+ *   input must validate the data pointer BEFORE calling this function.
+ *
  * @param data  Pointer to the data buffer. If NULL, returns 0 immediately
  *              (no dereference).
  * @param len   Number of bytes to hash. If 0, returns 0x00000000.

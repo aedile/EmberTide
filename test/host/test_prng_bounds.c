@@ -20,10 +20,10 @@ static void test_zero_seed_not_deadlocked(void)
     fq_prng_t rng;
     fq_prng_init(&rng, 0);
     /* State must have been forced to 1 — never 0 */
-    TEST_ASSERT_TRUE(rng.state != 0u);
-    /* First value must be non-zero (xorshift32(1) is deterministic) */
+    TEST_ASSERT_EQUAL_UINT32(1u, rng.state);
+    /* First value must equal xorshift32(1) — deterministic and non-zero */
     uint32_t v = fq_prng_next(&rng);
-    TEST_ASSERT_TRUE(v != 0u);
+    TEST_ASSERT_EQUAL_UINT32(0x00042021u, v);
 }
 
 /* PRNG-NT-1: min > max — defensive return of min. */
@@ -122,6 +122,36 @@ static void test_uninit_struct_zero_guard(void)
     TEST_ASSERT_TRUE(v != 0u);
 }
 
+/* PRNG-NT-7: Distribution fairness — no catastrophic modulo bias.
+ *
+ * Seed=1, call fq_prng_range(&rng, 0u, 10u) 100,000 times.
+ * Count occurrences in 11 buckets (values 0-10).
+ * Fair share = 100,000 / 11 ≈ 9090.
+ * Assert each bucket falls in [8090, 10090] (fair share ± ~10%).
+ * A catastrophic bias (e.g., one value appearing 50%+ of the time due to a
+ * modulo bug) would be caught immediately; minor statistical modulo bias
+ * (accepted per architecture doc v2) passes this check easily. */
+static void test_range_distribution_no_catastrophic_bias(void)
+{
+    fq_prng_t rng;
+    fq_prng_init(&rng, 1u);
+
+    uint32_t buckets[11];
+    for (int i = 0; i < 11; i++) {
+        buckets[i] = 0u;
+    }
+
+    for (uint32_t i = 0u; i < 100000u; i++) {
+        uint32_t val = fq_prng_range(&rng, 0u, 10u);
+        buckets[val]++;
+    }
+
+    for (int i = 0; i < 11; i++) {
+        TEST_ASSERT_TRUE(buckets[i] >= 8090u);
+        TEST_ASSERT_TRUE(buckets[i] <= 10090u);
+    }
+}
+
 int main(void)
 {
     test_zero_seed_not_deadlocked();
@@ -131,5 +161,6 @@ int main(void)
     test_never_returns_zero();
     test_state_serialization_round_trip();
     test_uninit_struct_zero_guard();
+    test_range_distribution_no_catastrophic_bias();
     return 0;
 }
