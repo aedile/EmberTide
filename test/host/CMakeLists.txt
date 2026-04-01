@@ -494,7 +494,7 @@ add_app_test(test_p11_fsm_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_feat
 # ---------------------------------------------------------------------------
 # Phase-12: HAL E-Paper + Flash (host mocks)
 #
-# HAL headers live in components/hal/include/ — this path is deliberately
+# HAL headers live in components/fq_hal/include/ — this path is deliberately
 # NOT added to the game/ or presentation/ include lists (boundary preserved).
 # Mock .c files live in test/host/ and are linked directly into the test
 # executables, replacing the real target implementations.
@@ -505,7 +505,7 @@ add_app_test(test_p11_fsm_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_feat
 # the test source. Only hal/include is added — no game/ or presentation/
 # include paths, keeping HAL tests fully isolated at the bottom layer.
 # ---------------------------------------------------------------------------
-set(HAL_INCLUDE "${PROJECT_ROOT}/components/hal/include")
+set(HAL_INCLUDE "${PROJECT_ROOT}/components/fq_hal/include")
 
 function(add_hal_test target source mock_src)
     add_executable(${target} ${source} ${mock_src})
@@ -599,3 +599,16 @@ add_hal_test(test_p14_hal_ble_feature
 add_hal_test(test_p14_hal_wifi_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p14_hal_wifi_feature.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_wifi.c")
+
+# ---------------------------------------------------------------------------
+# F-02 Remediation: fq_character_create
+#
+# character.c lives in game/ — use add_host_test() which links all GAME_SOURCES
+# (the file(GLOB) at the top of this file picks up character.c automatically).
+# ---------------------------------------------------------------------------
+
+# Bound tests (Rule 22 Phase A — BOUND RED)
+add_host_test(test_character_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_character_bounds.c")
+
+# Feature tests (Rule 22 Phase B — FEATURE RED)
+add_host_test(test_character "${CMAKE_CURRENT_SOURCE_DIR}/test_character.c")

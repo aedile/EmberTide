@@ -1,7 +1,9 @@
 # FiestaQuest -- Architectural Design Document v2
-**v2.14 amendment (Phase 14 HAL BLE + WiFi Captive Portal — review findings applied):** hal_ble.h added to hal/include/: HAL_BLE_MAX_MTU=256u, HAL_BLE_SERVICE_UUID="FQ01", hal_ble_err_t enum (OK/ERR_INIT/ERR_NOT_CONNECTED/ERR_MTU_EXCEEDED/ERR_NULL/ERR_SEND), hal_ble_state_t enum (IDLE/ADVERTISING/CONNECTED/DISCONNECTED), hal_ble_rx_callback_t typedef, hal_ble_init/start_advertising/send/get_state/disconnect/deinit. send guard order: NULL -> MTU -> init -> connected. Malicious-MTU guard: len > HAL_BLE_MAX_MTU returns ERR_MTU_EXCEEDED before any copy. Silent-drop guard: BLE_GAP_EVENT_DISCONNECT must transition to DISCONNECTED (spec-challenger requirement). disconnect() is a no-op unless state is CONNECTED (stays in current state). hal_wifi.h added: HAL_WIFI_SSID_MAX=32u, HAL_WIFI_PASS_MAX=64u, hal_wifi_err_t (OK=0/ERR_INIT=1/ERR_CONNECT=2/ERR_NULL=3/ERR_SSID_TOO_LONG=4/ERR_NOT_CONNECTED=5/ERR_PASS_TOO_LONG=6), hal_wifi_state_t (IDLE/AP_MODE/STA_CONNECTING/STA_CONNECTED/STA_DISCONNECTED), hal_wifi_init/start_ap/connect_sta/get_state/disconnect/deinit. SSID buffer-overflow guard: strlen(ssid) >= HAL_WIFI_SSID_MAX returns ERR_SSID_TOO_LONG. Password buffer-overflow guard: strlen(password) >= HAL_WIFI_PASS_MAX returns ERR_PASS_TOO_LONG. connect_sta guard order: NULL(ssid) -> NULL(pass) -> ssid-length -> pass-length -> init. hal_wifi_connect_sta() sets state to STA_CONNECTING (asynchronous; use mock_wifi_simulate_connected()/simulate_link_lost() in tests). HTTPD DoS mitigation: max_open_sockets=4, recv_wait_timeout=3 (spec-challenger requirement). Target stubs in hal/src/ are ESP-IDF-free. Mock headers added: mock_hal_ble.h (mock_ble_reset/simulate_connect/disconnect/inject_rx/get_last_sent/get_send_count), mock_hal_wifi.h (mock_wifi_reset/get_last_ssid/get_last_password/simulate_connected/simulate_link_lost). 4 test files: test_p14_hal_ble_bounds.c, test_p14_hal_ble_feature.c (disconnect no-op from ADVERTISING/IDLE), test_p14_hal_wifi_bounds.c (ERR_PASS_TOO_LONG + null-before-init), test_p14_hal_wifi_feature.c (STA state transition sequence). All 63 ctest tests pass. ADV-P14-01 ADVISORY Rule 8: hal_ble and hal_wifi exist at HAL layer only; connectivity/ble_service.c wiring to event bus deferred — blocked on NimBLE hardware bring-up. NimBLE REQUIRES (bt), WiFi REQUIRES (esp_wifi esp_http_server nvs_flash) deferred to hardware phase.
+**v2.15 amendment (Comprehensive Audit Remediation — fix/comprehensive-audit-remediation):** (1) ESP-IDF name collision fix: components/hal/ renamed to components/fq_hal/ so the component registers as `fq_hal` and no longer shadows ESP-IDF's built-in `hal` component. All fq_hal/include/ and fq_hal/src/ references updated throughout this document. test/host/CMakeLists.txt HAL_INCLUDE updated accordingly. (2) F-02 character creation: character.h/character.c added to components/game/: fq_character_create(ch, class_id, id, name) zeroes struct, sets class stats from k_class_base table, sets equipped_count=4, calculates hp_max=base_hp+(strength*2), calls fq_legacy_apply_bonuses(). Returns GAME_OK/GAME_ERR_NULL_PTR/GAME_ERR_INVALID. Host tests: test_character_bounds.c (5 bound tests), test_character.c (6 feature tests). All 65 ctest tests pass. (3) Dead code removed: renderer.c/renderer.h (empty placeholder, no declarations) removed from components/presentation/. wifi_service.c/wifi_service.h (stub, real impl in fq_hal/src/hal_wifi.c) removed from components/connectivity/. (4) DOC-01/DOC-02: stale names updated — fq_view_home_t→fq_vm_home_t, fq_view_combat_t→fq_vm_combat_t, fq_view_inventory_t→fq_vm_inventory_t, screen_home_render→fq_render_home, render_combat_screen→fq_render_combat, render_inventory_screen→fq_render_inventory, framebuffer.h→fq_framebuffer.h. Section 3 file tree updated to reflect actual delivered files. (5) DOC-03: field rename note — the design doc used `legacy_unlocked_nodes` as the bitmask field name; the implementation in fq_character_t uses `legacy_tree`. See field annotation in types.h offset 8.
 
-**v2.12 amendment (Phase 12 HAL Part 1 — E-Paper + Flash):** hal_epaper.h added to hal/include/: HAL_EPAPER_FB_SIZE=5000u (200*200/8), hal_epaper_err_t enum (OK/ERR_INIT/ERR_BUSY_TIMEOUT/ERR_SPI/ERR_NULL), hal_epaper_init/flush/sleep/deinit. flush guard order: NULL check -> size check -> init check. No ESP-IDF types in public API — host-compilable. hal_flash.h added: HAL_FLASH_SAVE_MAX_SIZE=512u, hal_flash_err_t (OK/ERR_MOUNT/ERR_NOT_FOUND/ERR_WRITE/ERR_READ/ERR_NULL/ERR_SIZE), hal_flash_init/read_save/write_save/deinit. write_save uses atomic temp-file+rename pattern on target to guard mid-write power loss. Target stubs in hal/src/ are ESP-IDF-free (no spi_master.h or esp_vfs_littlefs.h included) — real driver implementation deferred to hardware bring-up. Host mocks (test/host/mock_hal_epaper.c, mock_hal_flash.c) simulate behaviour in RAM: epaper mock captures last flushed buffer + flush_count; flash mock persists data across deinit/reinit cycles. add_hal_test() CMake helper added to test/host/CMakeLists.txt — links mock instead of real HAL, includes only hal/include (no game/ or presentation/ paths, boundary preserved). ADV-P12-01 ADVISORY Rule 8: hal_epaper and hal_flash exist at HAL layer only; screen_mgr.c (presentation) wiring deferred — blocked on hardware bring-up.
+**v2.14 amendment (Phase 14 HAL BLE + WiFi Captive Portal — review findings applied):** hal_ble.h added to fq_hal/include/: HAL_BLE_MAX_MTU=256u, HAL_BLE_SERVICE_UUID="FQ01", hal_ble_err_t enum (OK/ERR_INIT/ERR_NOT_CONNECTED/ERR_MTU_EXCEEDED/ERR_NULL/ERR_SEND), hal_ble_state_t enum (IDLE/ADVERTISING/CONNECTED/DISCONNECTED), hal_ble_rx_callback_t typedef, hal_ble_init/start_advertising/send/get_state/disconnect/deinit. send guard order: NULL -> MTU -> init -> connected. Malicious-MTU guard: len > HAL_BLE_MAX_MTU returns ERR_MTU_EXCEEDED before any copy. Silent-drop guard: BLE_GAP_EVENT_DISCONNECT must transition to DISCONNECTED (spec-challenger requirement). disconnect() is a no-op unless state is CONNECTED (stays in current state). hal_wifi.h added: HAL_WIFI_SSID_MAX=32u, HAL_WIFI_PASS_MAX=64u, hal_wifi_err_t (OK=0/ERR_INIT=1/ERR_CONNECT=2/ERR_NULL=3/ERR_SSID_TOO_LONG=4/ERR_NOT_CONNECTED=5/ERR_PASS_TOO_LONG=6), hal_wifi_state_t (IDLE/AP_MODE/STA_CONNECTING/STA_CONNECTED/STA_DISCONNECTED), hal_wifi_init/start_ap/connect_sta/get_state/disconnect/deinit. SSID buffer-overflow guard: strlen(ssid) >= HAL_WIFI_SSID_MAX returns ERR_SSID_TOO_LONG. Password buffer-overflow guard: strlen(password) >= HAL_WIFI_PASS_MAX returns ERR_PASS_TOO_LONG. connect_sta guard order: NULL(ssid) -> NULL(pass) -> ssid-length -> pass-length -> init. hal_wifi_connect_sta() sets state to STA_CONNECTING (asynchronous; use mock_wifi_simulate_connected()/simulate_link_lost() in tests). HTTPD DoS mitigation: max_open_sockets=4, recv_wait_timeout=3 (spec-challenger requirement). Target stubs in fq_hal/src/ are ESP-IDF-free. Mock headers added: mock_hal_ble.h (mock_ble_reset/simulate_connect/disconnect/inject_rx/get_last_sent/get_send_count), mock_hal_wifi.h (mock_wifi_reset/get_last_ssid/get_last_password/simulate_connected/simulate_link_lost). 4 test files: test_p14_hal_ble_bounds.c, test_p14_hal_ble_feature.c (disconnect no-op from ADVERTISING/IDLE), test_p14_hal_wifi_bounds.c (ERR_PASS_TOO_LONG + null-before-init), test_p14_hal_wifi_feature.c (STA state transition sequence). All 63 ctest tests pass. ADV-P14-01 ADVISORY Rule 8: hal_ble and hal_wifi exist at HAL layer only; connectivity/ble_service.c wiring to event bus deferred — blocked on NimBLE hardware bring-up. NimBLE REQUIRES (bt), WiFi REQUIRES (esp_wifi esp_http_server nvs_flash) deferred to hardware phase.
+
+**v2.12 amendment (Phase 12 HAL Part 1 — E-Paper + Flash):** hal_epaper.h added to fq_hal/include/: HAL_EPAPER_FB_SIZE=5000u (200*200/8), hal_epaper_err_t enum (OK/ERR_INIT/ERR_BUSY_TIMEOUT/ERR_SPI/ERR_NULL), hal_epaper_init/flush/sleep/deinit. flush guard order: NULL check -> size check -> init check. No ESP-IDF types in public API — host-compilable. hal_flash.h added: HAL_FLASH_SAVE_MAX_SIZE=512u, hal_flash_err_t (OK/ERR_MOUNT/ERR_NOT_FOUND/ERR_WRITE/ERR_READ/ERR_NULL/ERR_SIZE), hal_flash_init/read_save/write_save/deinit. write_save uses atomic temp-file+rename pattern on target to guard mid-write power loss. Target stubs in fq_hal/src/ are ESP-IDF-free (no spi_master.h or esp_vfs_littlefs.h included) — real driver implementation deferred to hardware bring-up. Host mocks (test/host/mock_hal_epaper.c, mock_hal_flash.c) simulate behaviour in RAM: epaper mock captures last flushed buffer + flush_count; flash mock persists data across deinit/reinit cycles. add_hal_test() CMake helper added to test/host/CMakeLists.txt — links mock instead of real HAL, includes only fq_hal/include (no game/ or presentation/ paths, boundary preserved). ADV-P12-01 ADVISORY Rule 8: hal_epaper and hal_flash exist at HAL layer only; screen_mgr.c (presentation) wiring deferred — blocked on hardware bring-up.
 
 **v2.11 amendment (Phase 11 application event loop):** event_bus.h/c added to main/: fq_event_bus_t (portable ring buffer, 16 slots, uint8_t head/tail/count/overflow_count), fq_event_id_t enum (13 IDs, FQ_EVT_NONE through FQ_EVT_COUNT=13), fq_event_t (id + uint32_t data). fq_event_bus_init (single memset zero, NULL-safe), fq_event_bus_post (saturating overflow_count at 0xFF), fq_event_bus_pop (NULL out-param guard: does NOT consume event), fq_event_bus_pending (const, NULL-safe). app_fsm.h/c added to main/: fq_app_state_t enum (11 states, FQ_STATE_BOOT through FQ_STATE_COUNT=11), fq_app_ctx_t (state, embedded bus, tick_count, non-owning player/inventory ptrs, fq_combat_ctx_t combat, combat_active). fq_app_init: memset ctx, wire ptrs, init bus, auto-transition BOOT→TITLE. fq_app_dispatch: outer switch on state, inner switch on event id; unknown events silently ignored; GAME_ERR_NULL_PTR on NULL ctx or evt. PRNG isolation contract: only FQ_STATE_BATTLE case block may access ctx->combat.rng (combat_active guard). app_main.c updated with static player/inventory/app allocs and main loop skeleton comment. ADV-P11-01 ADVISORY Rule 8: event bus and FSM wired in main/; presentation render dispatch and HAL input wiring deferred to HAL integration phase.
 **v2.10 amendment (Phase 10 connectivity data protocol):** combat_hash.h/c added to game/: fq_generate_combat_hash(ctx, round) serializes round(1)+f1.hp(2)+f2.hp(2)+f1.hp_max(2)+f2.hp_max(2)+rng.state(4)=13 bytes LE into a stack buffer and returns fq_crc32() of it. NULL ctx or round outside [1,12] returns 0. No struct casting — field-by-field byte writes (N7: padding not hashed, N8: CRC not fed back). protocol.h/c added to connectivity/: wire-format DTOs fq_packet_invite_t (14 bytes), fq_packet_team_sync_t (36 bytes), fq_packet_round_hash_t (14 bytes) with fq_packet_serialize/fq_packet_parse. Parse validates magic before CRC (fast-fail on spoof); round 0/>12 rejected post-CRC for ROUND_HASH type; stateless (N11). fq_protocol_derive_seed: XOR nonces, force 1 if result is 0 (N1 zero-guard). sync.h/c added to connectivity/: fq_sync_verify_round — pure equality comparisons, round checked before hash. connectivity/ uses PRIV_REQUIRES game for crc32.h; public include boundary preserved. ADV-P10-01 DEFERRED: move crc32 to shared utils/ to remove PRIV_REQUIRES. Rule 8 advisory: combat_hash is wired in game/ only; presentation wiring blocked on BLE HAL integration (next phase).
@@ -96,7 +98,7 @@ fiestaquest/
   partitions.csv
 
   components/
-    hal/
+    fq_hal/
       include/
         hal_gpio.h, hal_spi.h, hal_i2c.h, hal_epaper.h,
         hal_ble.h, hal_wifi.h, hal_httpd.h, hal_flash.h,
@@ -122,7 +124,7 @@ fiestaquest/
       include/
         view_models.h             // all screen view model structs
         renderer.h                // framebuffer ops, draw primitives
-        framebuffer.h             // 200x200 1-bit framebuffer type
+        fq_framebuffer.h             // 200x200 1-bit framebuffer type
         sprite_mgr.h
         ui_widgets.h
         screens/
@@ -154,50 +156,35 @@ fiestaquest/
   test/
     host/
       CMakeLists.txt              // links game/ + presentation/ (minus screen_mgr)
-      test_prng.c
-      test_crc32.c
-      test_combat.c
-      test_combat_determinism.c
-      test_combat_stepper.c
-      test_item_engine.c
-      test_modifier_engine.c
-      test_progression.c
-      test_training.c
-      test_training_scoring.c
-      test_mini_game_scoring.c
-      test_state_machine.c
-      test_save_format.c
-      test_view_models.c
-      fixtures/
-        test_fixtures.h           // make_test_bruiser(), etc.
-        test_fixtures.c
-      mocks/
-        mock_storage.h, mock_input.h, mock_clock.h
-        mock_storage.c, mock_input.c, mock_clock.c
+      // Bound tests (Rule 22 Phase A) and feature tests (Rule 22 Phase B) for
+      // all phases 2-14 plus F-02 character creation.
+      // Key files: test_character_bounds.c, test_character.c (F-02 remediation)
+      // Mock HAL: mock_hal_epaper.c, mock_hal_flash.c, mock_hal_gpio.c,
+      //           mock_hal_audio.c, mock_hal_sleep.c, mock_hal_ble.c,
+      //           mock_hal_wifi.c (one per fq_hal/ module)
+      check_boundary.sh           // CTest-visible compile-fail boundary script
+      test_assert.h               // typed assertion macros (no Unity dependency)
 
     visual/                       // VISUAL TEST HARNESS (see Section 7)
       CMakeLists.txt              // links game/ + presentation/ (minus screen_mgr)
       render_all_screens.c        // renders every screen to framebuffer
-      framebuffer_to_png.h        // uses stb_image_write
-      framebuffer_to_png.c
-      scenarios/
-        scenario_fresh_character.c
-        scenario_mid_game.c
-        scenario_dead_character.c
-        scenario_combat_round.c
-        scenario_training_session.c
-        scenario_inventory_full.c
-        scenario_onboarding.c
-        scenario_rebirth.c
-      output/                     // generated PNGs land here
+      vendors/                    // stb_image_write (single-file PNG encoder)
+      output/                     // generated PNGs land here (gitignored)
       golden/                     // approved reference PNGs for regression
+        // blank.png, fb_test.png, scene_home.png, scene_combat.png,
+        // scene_inventory.png, scene_stats.png, scene_training.png,
+        // scene_dialogue.png
       diff_screens.py             // pixel-diff output/ vs golden/, flag regressions
-      review_screens.py           // optional: send PNGs to LLM API for review
 
-    target/
-      test_hal_epaper.c, test_hal_i2c.c, test_hal_ble.c,
-      test_storage_integration.c, test_input_integration.c,
-      test_power_integration.c
+    // Note: test/target/ (integration tests for device HAL) is deferred to
+    // hardware bring-up phase. scenarios/ and framebuffer_to_png.h were removed
+    // — screen scenarios are driven from render_all_screens.c directly.
+
+  tests/                          // Python renderer suite (host visual QA)
+    renderer.py                   // Python framebuffer renderer
+    test_render.py                // pytest: generates 10 gameplay screenshots
+    test_sprites.py               // pytest: sprite rendering tests
+    test_animate.py               // pytest: animation frame tests
 
   assets/
     sprites/, audio/, items.json, modifiers.json,
@@ -488,7 +475,7 @@ Hardware-coupled. Manages real-time input, display, and timing for each mini-gam
 #define FIESTAQUEST_MINI_GAME_RUNNER_H
 
 #include "mini_games.h"
-#include "framebuffer.h"
+#include "fq_framebuffer.h"
 
 typedef void (*fq_mg_done_cb_t)(fq_mg_result_t result, void *user_data);
 
@@ -661,7 +648,7 @@ typedef struct {
     bool     ble_advertising;
     uint16_t wins;
     uint16_t losses;
-} fq_view_home_t;
+} fq_vm_home_t;
 
 // COMBAT screen (per-round update)
 typedef struct {
@@ -683,7 +670,7 @@ typedef struct {
     int8_t   overtime_damage;
     bool     finished;
     uint8_t  winner;                // 0, 1, or 2
-} fq_view_combat_t;
+} fq_vm_combat_t;
 
 // TRAINING screen
 typedef struct {
@@ -704,7 +691,7 @@ typedef struct {
     bool     item_equipped[32];
     uint8_t  item_count;
     uint8_t  scroll_offset;
-} fq_view_inventory_t;
+} fq_vm_inventory_t;
 
 // STATS screen
 typedef struct {
@@ -756,10 +743,10 @@ typedef struct {
 
 ```c
 // presentation/include/screens/screen_home.h
-#include "framebuffer.h"
+#include "fq_framebuffer.h"
 #include "view_models.h"
 
-void screen_home_render(fq_fb_t *fb, const fq_view_home_t *view);
+void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *view);
 ```
 
 Every screen renderer takes a framebuffer pointer and a read-only view model. Pure function of its inputs. Host-compilable.
@@ -825,7 +812,7 @@ void fq_fb_fill_rect(fq_fb_t *fb, int16_t x, int16_t y, int16_t w, int16_t h, ui
 
 ```c
 // test/visual/framebuffer_to_png.h
-#include "framebuffer.h"
+#include "fq_framebuffer.h"
 
 // Write framebuffer to a 200x200 grayscale PNG.
 // White pixels = 255, black pixels = 0. Scaled up 3x for readability (600x600 output).
@@ -839,7 +826,7 @@ Implementation uses `stb_image_write.h` (single-header, public domain). Scales 3
 ```c
 // test/visual/scenarios/scenario_fresh_character.c
 
-#include "framebuffer.h"
+#include "fq_framebuffer.h"
 #include "view_models.h"
 #include "screens/screen_home.h"
 #include "screens/screen_stats.h"
@@ -849,7 +836,7 @@ void render_fresh_character_screens(const char *output_dir) {
     fq_fb_t fb;
 
     // HOME screen: fresh Bruiser, level 1
-    fq_view_home_t home = {
+    fq_vm_home_t home = {
         .name = "Iron Bones",
         .level = 1,
         .class_id = 0,  // Bruiser
@@ -858,7 +845,7 @@ void render_fresh_character_screens(const char *output_dir) {
         .wins = 0, .losses = 0,
     };
     fq_fb_clear(&fb);
-    screen_home_render(&fb, &home);
+    fq_render_home(&fb, &home);
     fq_fb_write_png(&fb, "output/home_fresh.png");
 
     // STATS screen: fresh Bruiser
@@ -1318,7 +1305,7 @@ CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 ### 16.3 Hardware Pin Map
 
 ```c
-// hal/include/hal_pins.h
+// fq_hal/include/hal_pins.h
 // NOTE: ALL PINS MUST BE VERIFIED AGAINST WAVESHARE SCHEMATIC BEFORE PHASE 2.
 
 #define FQ_PIN_BTN_BOOT     GPIO_NUM_0
