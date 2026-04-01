@@ -42,7 +42,7 @@ COMPILER="${CC:-cc}"
 TMP_OBJ="$(mktemp /tmp/boundary_check_XXXXXX.o)"
 
 # shellcheck disable=SC2086
-${COMPILER} -std=c11 -c ${INCLUDE_FLAGS} "${SOURCE_FILE}" -o "${TMP_OBJ}" \
+${COMPILER} -std=c11 -Wall -Werror -Wimplicit-function-declaration -c ${INCLUDE_FLAGS} "${SOURCE_FILE}" -o "${TMP_OBJ}" \
     >/dev/null 2>&1
 COMPILE_EXIT=$?
 

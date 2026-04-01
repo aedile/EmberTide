@@ -85,7 +85,7 @@ macro(assert_compile_fails label source_file)
         _${label}_compiled
         "${BOUNDARY_TMP}/${label}"
         "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}"
-        CMAKE_FLAGS "-DCMAKE_C_STANDARD=11"
+        CMAKE_FLAGS "-DCMAKE_C_STANDARD=11" "-DCMAKE_C_FLAGS=-Wall -Werror -Wimplicit-function-declaration"
     )
     if(_${label}_compiled)
         message(FATAL_ERROR
@@ -101,6 +101,12 @@ assert_compile_fails(E1_game_no_hal      "bound_e1_game_includes_hal.c")
 assert_compile_fails(N1a_pres_no_hal     "bound_n1a_presentation_includes_hal.c")
 assert_compile_fails(N1b_game_no_pres    "bound_n1b_game_includes_presentation.c")
 assert_compile_fails(N1c_conn_no_game    "bound_n1c_connectivity_includes_game.c")
+
+# DET-NT-5: Float ban boundary test.
+# bound_float_ban.c calls sin() without including <math.h>. Under -Wall -Werror
+# the implicit function declaration is a hard error. The configure-time check
+# proves the boundary holds even when compiled without game include dirs.
+assert_compile_fails(N2_float_ban        "bound_float_ban.c")
 
 # ---------------------------------------------------------------------------
 # Layer 2: CTest-visible boundary tests via check_boundary.sh
@@ -142,6 +148,15 @@ add_test(
 set_tests_properties(boundary_N1c_conn_no_game
     PROPERTIES LABELS "boundary")
 
+# DET-NT-5 (Layer 2): CTest-visible float ban boundary check.
+add_test(
+    NAME boundary_N2_float_ban
+    COMMAND "${BOUNDARY_SCRIPT}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/bound_float_ban.c"
+)
+set_tests_properties(boundary_N2_float_ban
+    PROPERTIES LABELS "boundary")
+
 # ---------------------------------------------------------------------------
 # E2: CTest failure escalation
 #
@@ -166,6 +181,24 @@ add_executable(test_partitions "${CMAKE_CURRENT_SOURCE_DIR}/test_partitions.c")
 target_compile_definitions(test_partitions PRIVATE
     PARTITIONS_CSV_PATH="${PROJECT_ROOT}/partitions.csv")
 add_test(NAME test_partitions COMMAND test_partitions)
+
+# ---------------------------------------------------------------------------
+# Phase-2 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any implementation to prove the boundary constraints.
+# ---------------------------------------------------------------------------
+add_host_test(test_prng_bounds       "${CMAKE_CURRENT_SOURCE_DIR}/test_prng_bounds.c")
+add_host_test(test_crc32_bounds      "${CMAKE_CURRENT_SOURCE_DIR}/test_crc32_bounds.c")
+add_host_test(test_progression_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_progression_bounds.c")
+add_host_test(test_determinism_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_determinism_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-2 Feature tests (Rule 22 Phase B — FEATURE RED)
+# Written before implementation to define the happy-path contract.
+# ---------------------------------------------------------------------------
+add_host_test(test_prng              "${CMAKE_CURRENT_SOURCE_DIR}/test_prng.c")
+add_host_test(test_crc32             "${CMAKE_CURRENT_SOURCE_DIR}/test_crc32.c")
+add_host_test(test_progression       "${CMAKE_CURRENT_SOURCE_DIR}/test_progression.c")
+add_host_test(test_combat_determinism "${CMAKE_CURRENT_SOURCE_DIR}/test_combat_determinism.c")
 
 # ---------------------------------------------------------------------------
 # Feature tests (happy-path)

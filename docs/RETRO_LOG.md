@@ -84,3 +84,44 @@ Updated by the PM agent after each phase review cycle.
 None. All Phase 1 advisory items resolved inline per PM directive.
 
 ---
+
+## Phase 2 — Foundational Math (PRNG, CRC32, Effective Stat Curve)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-2-foundational-math`
+
+### Review Findings Addressed (Phase 2 Review)
+
+#### Blockers (3 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| B1 | Game CMakeLists.txt missing SRCS | Added `prng.c`, `crc32.c`, `progression.c` to `components/game/CMakeLists.txt` SRCS list |
+| B2 | Missing modulo bias distribution test | Added `test_range_distribution_no_catastrophic_bias` to `test_prng_bounds.c`: seeds=1, 100,000 calls to `fq_prng_range(0,10)`, asserts each of 11 buckets in [8090,10090] |
+| B3 | Float ban missing -Wall -Werror in check_boundary.sh | Added `-Wall -Werror -Wimplicit-function-declaration` to compile line in `check_boundary.sh`; updated `assert_compile_fails` CMake macro to pass same flags via `-DCMAKE_C_FLAGS`; fixed self-contradictory comment in `bound_float_ban.c` |
+
+#### Findings (2 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| F1 | fq_prng_range signature deviation from arch doc | Updated `docs/fiestaquest-architecture.md` header and impl snippets to `uint32_t` parameters/return; added v2.1 amendment note at top of doc |
+| F2 | Stat curve table first-row values differ from arch doc | Updated arch doc first row from approximate values to match verified `progression.c` implementation: `0, 3, 5, 6, 7, 7, 8, 9, 9, 10, 10, 10, 11, 11, 11, 12,` |
+
+#### Advisories (6 addressed)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 | Zero-seed test should pin exact values | `test_zero_seed_not_deadlocked`: replaced loose `!= 0` assertions with `EQUAL_UINT32(1u, rng.state)` and `EQUAL_UINT32(0x00042021u, v)` |
+| A2 | raw=1 test should assert exact value | `test_pin_raw_1_nonzero`: replaced `TEST_ASSERT_TRUE(result != 0u)` with `TEST_ASSERT_EQUAL_UINT8(3u, result)` |
+| A3 | min==max PRNG state non-advancement — document | Added BLE stream sync warning doc comment to `fq_prng_range` in `components/game/include/prng.h` |
+| A4 | CRC32 NULL vs empty same return — document | Added NULL vs empty disambiguation note to `fq_crc32` doc comment in `components/game/include/crc32.h` |
+| A5 | Float ban comment fix | Covered by B3 resolution above |
+| A6 | Balance advisory — stat curve granularity | See open advisory ADVISORY-BAL-001 below |
+
+### Open Advisories
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve compresses 68% of raw domain into 5 effective values. Three values (1, 2, 4) unreachable. Class advantages yield ~1 combat point through integer truncation. Recommend 10K-fight Monte Carlo validation when combat formulas integrate (Phase 5+). | Phase 7 |
+
+---
