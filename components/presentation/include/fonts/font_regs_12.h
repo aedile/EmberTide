@@ -16,6 +16,11 @@
  * Bit packing: MSB-first, 2 bytes per row (padded to glyph_max_w=11).
  * Polarity: white opaque pixel → SET (maps to black on e-paper).
  */
+/*
+ * WARNING: This header contains static const arrays. Include it in exactly
+ * ONE translation unit per link target to avoid RODATA duplication.
+ * Multiple includes will compile without error but silently double flash usage.
+ */
 #ifndef FONT_REGS_12_H
 #define FONT_REGS_12_H
 

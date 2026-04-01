@@ -14,6 +14,11 @@
  *
  * Each entry in sprite_tile_dungeon_TABLE is a fq_sprite_t pointing to its bitmap.
  */
+/*
+ * WARNING: This header contains static const arrays. Include it in exactly
+ * ONE translation unit per link target to avoid RODATA duplication.
+ * Multiple includes will compile without error but silently double flash usage.
+ */
 #ifndef SPRITE_TILES_DUNGEON_H
 #define SPRITE_TILES_DUNGEON_H
 
