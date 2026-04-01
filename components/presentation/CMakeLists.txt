@@ -4,10 +4,13 @@ idf_component_register(
         "src/fq_framebuffer.c"
         "src/fq_sprite.c"
         "src/fq_text.c"
+        "src/screens/screen_home.c"
+        "src/screens/screen_inventory.c"
+        "src/screens/screen_stats.c"
     INCLUDE_DIRS
         "include"
     # presentation/ does NOT depend on game/ — view model construction happens
-    # in main/ (view_model_builder.c), never inside this component.
+    # in main/ (vm_builder.c), never inside this component.
     # Architecture rule: presentation/ must not import game/ headers directly.
     # Enforced by boundary test N1b (bound_n1b_game_includes_presentation.c).
     #

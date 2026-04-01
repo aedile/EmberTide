@@ -27,12 +27,14 @@ set(GAME_INCLUDE   "${PROJECT_ROOT}/components/game/include")
 set(GAME_SRC_DIR   "${PROJECT_ROOT}/components/game/src")
 set(PRES_INCLUDE   "${PROJECT_ROOT}/components/presentation/include")
 set(PRES_SRC_DIR   "${PROJECT_ROOT}/components/presentation/src")
+set(MAIN_SRC_DIR   "${PROJECT_ROOT}/main")
 
 # Collect sources. screen_mgr.c is device-only (calls hal_epaper) —
 # excluded here to keep the visual harness host-compilable.
-file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
-file(GLOB PRES_SOURCES "${PRES_SRC_DIR}/*.c")
-list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\\.c$")
+file(GLOB GAME_SOURCES        "${GAME_SRC_DIR}/*.c")
+file(GLOB PRES_SOURCES        "${PRES_SRC_DIR}/*.c")
+file(GLOB PRES_SCREEN_SOURCES "${PRES_SRC_DIR}/screens/*.c")
+list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\.c$")
 
 # ---------------------------------------------------------------------------
 # render_all_screens
@@ -46,14 +48,17 @@ list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\\.c$")
 # ---------------------------------------------------------------------------
 add_executable(render_all_screens
     "${CMAKE_CURRENT_SOURCE_DIR}/render_all_screens.c"
+    "${MAIN_SRC_DIR}/vm_builder.c"
     ${GAME_SOURCES}
     ${PRES_SOURCES}
+    ${PRES_SCREEN_SOURCES}
 )
 
 target_include_directories(render_all_screens PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"   # resolves vendors/stb_image_write.h
     "${GAME_INCLUDE}"
     "${PRES_INCLUDE}"
+    "${MAIN_SRC_DIR}"               # resolves vm_builder.h
 )
 
 target_compile_options(render_all_screens PRIVATE

@@ -28,6 +28,11 @@
 #include "vendors/stb_image_write.h"
 
 #include "fq_framebuffer.h"
+#include "screens/screen_home.h"
+#include "screens/screen_inventory.h"
+#include "screens/screen_stats.h"
+#include "vm_builder.h"
+#include "types.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -216,6 +221,88 @@ int main(void)
         return EXIT_FAILURE;
     }
     printf("render_all_screens: stbi_write_png correctly returned 0 for NULL filepath\n");
+
+    /* -----------------------------------------------------------------------
+     * Screen 3: scene_home.png — home screen with Ember, level 7.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_character_t ch;
+        fq_vm_home_t   vm_home;
+        memset(&ch,      0, sizeof(ch));
+        memset(&vm_home, 0, sizeof(vm_home));
+
+        strncpy(ch.name, "Ember", sizeof(ch.name) - 1u);
+        ch.level  = 7u;
+        ch.wins   = 3u;
+        ch.losses = 1u;
+        ch.hp_max = 100u;
+
+        fq_vm_build_home(&vm_home, &ch);
+        fq_render_home(&framebuffer, &vm_home);
+
+        printf("render_all_screens: writing output/scene_home.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_home.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_home.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 4: scene_inventory.png — inventory with 5 items, cursor at 2.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_inventory_t    inv;
+        fq_vm_inventory_t vm_inv;
+        memset(&inv,    0, sizeof(inv));
+        memset(&vm_inv, 0, sizeof(vm_inv));
+
+        inv.count    = 5u;
+        inv.items[0] = 1u;   /* Iron Fist */
+        inv.items[1] = 3u;   /* Tough Hide */
+        inv.items[2] = 4u;   /* Lucky Coin */
+        inv.items[3] = 104u; /* Vampire Fang */
+        inv.items[4] = 105u; /* Haymaker */
+
+        fq_vm_build_inventory(&vm_inv, &inv);
+        vm_inv.cursor_index = 2u;  /* cursor on Lucky Coin */
+
+        fq_render_inventory(&framebuffer, &vm_inv);
+
+        printf("render_all_screens: writing output/scene_inventory.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_inventory.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_inventory.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 5: scene_stats.png — stats screen for Tide, level 12, rebirth 2.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_character_t ch;
+        fq_vm_stats_t  vm_stats;
+        memset(&ch,       0, sizeof(ch));
+        memset(&vm_stats, 0, sizeof(vm_stats));
+
+        strncpy(ch.name, "Tide", sizeof(ch.name) - 1u);
+        ch.level         = 12u;
+        ch.strength      = 80u;
+        ch.speed         = 60u;
+        ch.precision     = 45u;
+        ch.intelligence  = 55u;
+        ch.hp_max        = 350u;
+        ch.xp            = 1100u;
+        ch.rebirth_count = 2u;
+
+        fq_vm_build_stats(&vm_stats, &ch);
+        fq_render_stats(&framebuffer, &vm_stats);
+
+        printf("render_all_screens: writing output/scene_stats.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_stats.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_stats.png written successfully\n");
+    }
 
     printf("render_all_screens: ALL SCREENS OK\n");
     return EXIT_SUCCESS;
