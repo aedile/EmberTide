@@ -22,9 +22,22 @@
  *   then attacker fighter items (slots 0..N-1). (NTR-C1, NTR-C2)
  *
  * Effect application:
- *   DAMAGE_ADD: accumulated into fighter->damage_bonus (int8_t signed).
- *   DAMAGE_MULT: sets fighter->damage_mult_pct to max(current, value).
+ *   DAMAGE_ADD: accumulated into fighter->damage_bonus (int8_t signed),
+ *               saturated to [-128, 127] (A1 fix).
+ *   DAMAGE_MULT: Haymaker stores delta=100; full_mult = 100 + delta = 200.
+ *                Sets fighter->damage_mult_pct to max(current, full_mult) (B2 fix).
  *   HEAL: adds to HP, clamped to hp_max.
+ *   DODGE_BONUS: accumulated into fighter->dodge_bonus (uint8_t),
+ *                saturated to [0, 255] (A2 fix).
+ *
+ * Review fixes applied:
+ *   B2: Haymaker effect.value stores delta (100), not raw percentage (200).
+ *       apply_effect reconstructs: full_mult = 100u + (uint8_t)effect->value.
+ *       Avoids (int8_t)200u overflow that wraps to -56.
+ *   A1: DAMAGE_ADD accumulation uses int16_t intermediate with saturation clamp.
+ *   A2: DODGE_BONUS accumulation uses uint16_t intermediate with saturation clamp.
+ *   A3: Item table lookup loop uses uint16_t counter (not uint8_t).
+ *   A4: FQ_MAX_ITEM_TRIGGERS renamed to FQ_MAX_ITEM_RECURSION_DEPTH in item_engine.h.
  *
  * Constitution Priority 0: No floats, no time.h, no external entropy.
  */
@@ -40,6 +53,9 @@
  *
  * Entries must be sorted by ascending ID for binary search readability,
  * but fq_item_lookup uses a linear scan for simplicity (table is small).
+ *
+ * B2 fix: Haymaker effect.value = 100 (delta from 100, not raw percentage).
+ *   full_mult = 100 + 100 = 200%. Previously (int8_t)200u wrapped to -56.
  * ---------------------------------------------------------------------------*/
 static const fq_item_def_t s_item_table[] = {
     /* 001: Iron Fist — Common, PASSIVE, +1 DAMAGE_ADD SELF */
@@ -86,13 +102,18 @@ static const fq_item_def_t s_item_table[] = {
         .name        = "Vampire Fang",
         .flavor_text = "Drink deep."
     },
-    /* 105: Haymaker — Uncommon, ON_CRIT, DAMAGE_MULT→200 SELF */
+    /* 105: Haymaker — Uncommon, ON_CRIT, DAMAGE_MULT→200 SELF
+     *
+     * B2 fix: value=100 is the DELTA from 100, not the raw percentage.
+     * apply_effect reconstructs: full_mult = 100 + 100 = 200.
+     * Previously (int8_t)200u wrapped to -56 due to int8_t overflow.
+     */
     {
         .id          = 105u,
         .rarity      = (uint8_t)FQ_RARITY_UNCOMMON,
         .trigger     = (uint8_t)FQ_TRIGGER_ON_CRIT,
         .condition   = { (uint8_t)FQ_COND_NONE, 0u },
-        .effect      = { (uint8_t)FQ_EFFECT_DAMAGE_MULT, (int8_t)200u, (uint8_t)FQ_TARGET_SELF },
+        .effect      = { (uint8_t)FQ_EFFECT_DAMAGE_MULT, (int8_t)100, (uint8_t)FQ_TARGET_SELF },
         ._pad        = 0u,
         .name        = "Haymaker",
         .flavor_text = "No gloves. No mercy."
@@ -135,6 +156,9 @@ static const fq_item_def_t s_item_table[] = {
 /** Number of items in the static table. */
 #define ITEM_TABLE_COUNT  (sizeof(s_item_table) / sizeof(s_item_table[0]))
 
+/* A3 fix: assert that the table never exceeds uint16_t loop counter range. */
+_Static_assert(ITEM_TABLE_COUNT <= 65535u, "Item table exceeds uint16_t loop counter range");
+
 /* ---------------------------------------------------------------------------
  * fq_item_lookup
  * ---------------------------------------------------------------------------*/
@@ -145,7 +169,8 @@ const fq_item_def_t *fq_item_lookup(uint16_t item_id)
         return NULL;
     }
 
-    for (uint8_t i = 0u; i < (uint8_t)ITEM_TABLE_COUNT; i++) {
+    /* A3 fix: use uint16_t loop counter to avoid wrapping if table grows. */
+    for (uint16_t i = 0u; i < (uint16_t)ITEM_TABLE_COUNT; i++) {
         if (s_item_table[i].id == item_id) {
             return &s_item_table[i];
         }
@@ -232,18 +257,30 @@ static void apply_effect(const fq_effect_t       *effect,
                          fq_combat_ctx_t          *ctx)
 {
     switch ((fq_effect_type_t)effect->type) {
-        case FQ_EFFECT_DAMAGE_ADD:
-            /* Accumulate signed damage bonus on the owner (attacker or defender). */
-            owner->damage_bonus = (int8_t)((int16_t)owner->damage_bonus
-                                           + (int16_t)effect->value);
+        case FQ_EFFECT_DAMAGE_ADD: {
+            /* A1 fix: Accumulate signed damage bonus using int16_t intermediate
+             * with saturation clamp to [-128, 127] to prevent int8_t overflow. */
+            int16_t sum = (int16_t)owner->damage_bonus + (int16_t)effect->value;
+            if (sum > 127)  { sum = 127; }
+            if (sum < -128) { sum = -128; }
+            owner->damage_bonus = (int8_t)sum;
             break;
+        }
 
-        case FQ_EFFECT_DAMAGE_MULT:
-            /* Set damage multiplier — take the higher value (Haymaker: 200 > 150). */
-            if ((uint8_t)effect->value > owner->damage_mult_pct) {
-                owner->damage_mult_pct = (uint8_t)effect->value;
+        case FQ_EFFECT_DAMAGE_MULT: {
+            /* B2 fix: effect->value stores the delta from 100 (not raw percentage).
+             * Reconstruct full multiplier: full_mult = 100 + (uint8_t)effect->value.
+             * Take the higher value (Haymaker: 200 > 150 default crit).
+             *
+             * Previously (int8_t)200u was stored, which wraps to -56. The delta
+             * encoding avoids overflow: value=100 fits in int8_t, and
+             * 100 + 100 = 200 fits in uint8_t for the final multiplier. */
+            uint8_t full_mult = (uint8_t)(100u + (uint8_t)effect->value);
+            if (full_mult > owner->damage_mult_pct) {
+                owner->damage_mult_pct = full_mult;
             }
             break;
+        }
 
         case FQ_EFFECT_HEAL: {
             /* Apply heal to target, clamped to hp_max. */
@@ -254,10 +291,15 @@ static void apply_effect(const fq_effect_t       *effect,
             break;
         }
 
-        case FQ_EFFECT_DODGE_BONUS:
-            owner->dodge_bonus = (uint8_t)((uint16_t)owner->dodge_bonus
-                                           + (uint16_t)(uint8_t)effect->value);
+        case FQ_EFFECT_DODGE_BONUS: {
+            /* A2 fix: Accumulate dodge bonus using uint16_t intermediate
+             * with saturation clamp to [0, 255] to prevent uint8_t overflow. */
+            uint16_t sum = (uint16_t)owner->dodge_bonus
+                         + (uint16_t)(uint8_t)effect->value;
+            if (sum > 255u) { sum = 255u; }
+            owner->dodge_bonus = (uint8_t)sum;
             break;
+        }
 
         case FQ_EFFECT_REROLL:
             /* Handled by caller (Chaos Orb special logic requires PRNG). */
@@ -269,6 +311,7 @@ static void apply_effect(const fq_effect_t       *effect,
     }
 
     (void)opponent; /* Suppress unused warning if no opponent path taken. */
+    (void)ctx;      /* Suppress unused warning — ctx reserved for future effects. */
 }
 
 /**
@@ -302,7 +345,11 @@ static void apply_item(const fq_item_def_t  *def,
     if (def->id == 4u) {
         uint32_t roll = fq_prng_range(&ctx->rng, 1u, 100u);
         if (roll <= 10u) {
-            owner->damage_bonus = (int8_t)((int16_t)owner->damage_bonus + 2);
+            /* A1 fix: saturated accumulation via int16_t. */
+            int16_t sum = (int16_t)owner->damage_bonus + 2;
+            if (sum > 127)  { sum = 127; }
+            if (sum < -128) { sum = -128; }
+            owner->damage_bonus = (int8_t)sum;
         }
         return;
     }
@@ -407,8 +454,9 @@ void fq_item_eval_trigger(fq_combat_ctx_t *ctx,
                           fq_trigger_t     trigger,
                           uint8_t          attacking_fighter)
 {
-    /* Recursion guard (FQ_MAX_ITEM_TRIGGERS = 1). */
-    if (ctx->item_recursion_depth >= (uint8_t)FQ_MAX_ITEM_TRIGGERS) {
+    /* A4 fix: constant renamed from FQ_MAX_ITEM_TRIGGERS to
+     * FQ_MAX_ITEM_RECURSION_DEPTH for semantic clarity. */
+    if (ctx->item_recursion_depth >= (uint8_t)FQ_MAX_ITEM_RECURSION_DEPTH) {
         return;
     }
     ctx->item_recursion_depth++;

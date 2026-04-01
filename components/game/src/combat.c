@@ -28,6 +28,12 @@
  *     Minimum damage floor of 1 enforced after multiplier (NTR-B3).
  *   - Time Loop snapshot fields initialized to 0 in fq_combat_init.
  *
+ * Phase 5 review fixes:
+ *   - B1: Chaos Orb stat swaps are per-round only. Base stats of both fighters
+ *         are saved before ON_ROUND_START triggers and restored after ON_ROUND_END
+ *         triggers on all exit paths (including KO and round-limit). This ensures
+ *         Chaos Orb swaps never persist across rounds.
+ *
  * Constitution Priority 0: No floats, no time.h, no external entropy.
  * All random decisions use fq_prng_t exclusively.
  */
@@ -243,6 +249,12 @@ static void consume_lucky_star(fq_prng_t *rng)
  * Item PRNG calls at ON_ROUND_START fire BEFORE step 2 (NTR-A4).
  * NTR-A2: No-item fight produces same PRNG state as Phase 4 baseline
  *         (item triggers with no items make no PRNG calls).
+ *
+ * B1 fix: Chaos Orb stat swaps are per-round only.
+ * Base stats (strength, speed, precision, intelligence) for both fighters are
+ * saved immediately before ON_ROUND_START triggers fire, and restored after
+ * ON_ROUND_END triggers complete on ALL exit paths (KO, round limit, normal).
+ * This is done via the RESTORE_BASE_STATS macro applied before current_round++.
  * ---------------------------------------------------------------------------*/
 fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
 {
@@ -267,6 +279,18 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
     /* Re-apply PASSIVE items (Iron Fist etc.) each round.
      * PASSIVE is the only trigger that re-fires every round via this path. */
     fq_item_eval_trigger(ctx, FQ_TRIGGER_PASSIVE, ctx->first_attacker);
+
+    /* --- B1 fix: Save original base stats before item triggers can modify them.
+     *
+     * Chaos Orb (ON_ROUND_START) swaps base stats between fighters. These swaps
+     * must NOT persist across rounds. We save both fighters' stats here and
+     * restore them on ALL exit paths (KO, round limit, normal) via the goto done
+     * label, which executes before current_round++.
+     * ----------------------------------------------------------------------- */
+    uint8_t f1_str = ctx->f1.strength, f1_spd = ctx->f1.speed;
+    uint8_t f1_prc = ctx->f1.precision, f1_int = ctx->f1.intelligence;
+    uint8_t f2_str = ctx->f2.strength, f2_spd = ctx->f2.speed;
+    uint8_t f2_prc = ctx->f2.precision, f2_int = ctx->f2.intelligence;
 
     /* --- Phase 5: ON_ROUND_START triggers (Lucky Coin, Chaos Orb) ---
      * These fire BEFORE attacks (NTR-A4). PRNG consumed even if no items. */
@@ -560,6 +584,22 @@ done:
     result.f2_hp    = ctx->f2.hp;
     result.finished = ctx->finished;
     result.winner   = ctx->winner;
+
+    /* B1 fix: Restore original base stats after all item triggers for this round.
+     * Chaos Orb swaps base stats during ON_ROUND_START. These swaps must not
+     * persist into the next round (or be visible in ctx after the step returns).
+     * Restore is placed AFTER done: so it applies on ALL exit paths (KO, OT,
+     * round limit, normal), and BEFORE current_round++ so the round counter
+     * advances correctly after restore. */
+    ctx->f1.strength     = f1_str;
+    ctx->f1.speed        = f1_spd;
+    ctx->f1.precision    = f1_prc;
+    ctx->f1.intelligence = f1_int;
+    ctx->f2.strength     = f2_str;
+    ctx->f2.speed        = f2_spd;
+    ctx->f2.precision    = f2_prc;
+    ctx->f2.intelligence = f2_int;
+
     ctx->current_round++;
 
     return result;

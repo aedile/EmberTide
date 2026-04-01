@@ -25,6 +25,12 @@
  * BOUND-05: damage_mult_pct initialized to 100 per round.
  * BOUND-06: dodge_bonus initialized to 0 per round.
  * BOUND-07: Struct size compile-time checks.
+ *
+ * Review finding fixes (phase-5 review):
+ * B1-TEST: Chaos Orb per-round stat restore — stats restored after round where
+ *          Chaos Orb fires (base stats must be back to original values).
+ * B3-TEST: Recursion guard behavioral test — inner trigger blocked when depth=1.
+ * B4:      TEST_ASSERT_NULL replaces TEST_ASSERT_TRUE(x == NULL) throughout.
  */
 
 #include <stdint.h>
@@ -100,15 +106,17 @@ static void test_no_item_fight_prng_baseline(void)
 /* ---------------------------------------------------------------------------
  * NTR-F2: Invalid item ID lookup returns NULL.
  * fq_item_lookup with an unknown ID must return NULL, never a garbage pointer.
+ *
+ * B4 fix: use TEST_ASSERT_NULL instead of TEST_ASSERT_TRUE(x == NULL).
  * ---------------------------------------------------------------------------*/
 static void test_invalid_item_id_returns_null(void)
 {
     const fq_item_def_t *def = fq_item_lookup(9999u);
-    TEST_ASSERT_TRUE(def == NULL);
+    TEST_ASSERT_NULL(def);
 
     /* ID 0 is FQ_ITEM_NONE — also returns NULL. */
     const fq_item_def_t *def_none = fq_item_lookup(FQ_ITEM_NONE);
-    TEST_ASSERT_TRUE(def_none == NULL);
+    TEST_ASSERT_NULL(def_none);
 }
 
 /* ---------------------------------------------------------------------------
@@ -186,6 +194,52 @@ static void test_recursion_depth_initialized(void)
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 1u);
 
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.item_recursion_depth);
+}
+
+/* ---------------------------------------------------------------------------
+ * B3-TEST: Recursion guard behavioral test (review finding B3).
+ *
+ * When item_recursion_depth is already at the guard threshold (>= 1),
+ * fq_item_eval_trigger must return immediately without processing any items.
+ *
+ * Strategy:
+ *   1. Set ctx.item_recursion_depth = 1 to simulate being inside a trigger.
+ *   2. Give F1 Iron Fist (PASSIVE +1 damage) in slot 0.
+ *   3. Call fq_item_eval_trigger() for PASSIVE trigger.
+ *   4. Assert damage_bonus is still 0 (the guard prevented any processing).
+ *   5. Reset depth to 0 to verify the guard is not sticky.
+ * ---------------------------------------------------------------------------*/
+static void test_recursion_guard_blocks_reentry(void)
+{
+    fq_character_t c1 = make_char(100, 50, 50, 50, 50);
+    fq_character_t c2 = make_char(100, 50, 50, 50, 50);
+    fq_combat_ctx_t ctx;
+    fq_combat_init(&ctx, &c1, &c2, 1u);
+
+    /* Set up F1 with Iron Fist — would apply +1 damage_bonus on PASSIVE. */
+    ctx.f1.equipped_items[0] = 1u;   /* Iron Fist */
+    ctx.f1.equipped_count    = 1u;
+    ctx.f1.damage_bonus      = 0;
+    ctx.f1.damage_mult_pct   = 100u;
+
+    /* Simulate already inside a trigger evaluation (depth = 1). */
+    ctx.item_recursion_depth = 1u;
+
+    /* Call the trigger — recursion guard must fire and block all items. */
+    fq_item_eval_trigger(&ctx, FQ_TRIGGER_PASSIVE, 1u);
+
+    /* damage_bonus must still be 0 — Iron Fist was NOT applied. */
+    TEST_ASSERT_EQUAL_INT(0, (int)ctx.f1.damage_bonus);
+
+    /* Verify guard threshold: depth is still 1 (not incremented further). */
+    TEST_ASSERT_EQUAL_UINT8(1u, ctx.item_recursion_depth);
+
+    /* Reset depth and verify the guard is not sticky — Iron Fist now fires. */
+    ctx.item_recursion_depth = 0u;
+    fq_item_eval_trigger(&ctx, FQ_TRIGGER_PASSIVE, 1u);
+    TEST_ASSERT_EQUAL_INT(1, (int)ctx.f1.damage_bonus);
+    /* Depth must be restored to 0 after normal trigger evaluation. */
     TEST_ASSERT_EQUAL_UINT8(0u, ctx.item_recursion_depth);
 }
 
@@ -447,6 +501,73 @@ static void test_damage_bonus_signed_arithmetic(void)
 }
 
 /* ---------------------------------------------------------------------------
+ * B1-TEST: Chaos Orb stat swap is per-round only.
+ *
+ * Review finding B1: Chaos Orb swaps base stats permanently; they must be
+ * restored at end of round.
+ *
+ * Strategy: run a full combat step with F1 equipped with Chaos Orb.
+ * After the step, verify F1 and F2's base stats are identical to what they
+ * were before the round (the swap was transient).
+ *
+ * We capture the original stats after fq_combat_init, run one step, then
+ * verify the stats are restored to the pre-round values.
+ * ---------------------------------------------------------------------------*/
+static void test_chaos_orb_stat_swap_is_per_round(void)
+{
+    fq_character_t c1 = make_char(100, 20, 30, 40, 50);
+    fq_character_t c2 = make_char(100, 15, 25, 35, 45);
+    fq_combat_ctx_t ctx;
+    fq_combat_init(&ctx, &c1, &c2, 1u);
+
+    /* F1 equips Chaos Orb — will swap a random stat each round start. */
+    ctx.f1.equipped_items[0] = 204u;  /* Chaos Orb */
+    ctx.f1.equipped_count    = 1u;
+
+    /* Capture original base stats after init. */
+    uint8_t f1_str_orig = ctx.f1.strength;
+    uint8_t f1_spd_orig = ctx.f1.speed;
+    uint8_t f1_prc_orig = ctx.f1.precision;
+    uint8_t f1_int_orig = ctx.f1.intelligence;
+    uint8_t f2_str_orig = ctx.f2.strength;
+    uint8_t f2_spd_orig = ctx.f2.speed;
+    uint8_t f2_prc_orig = ctx.f2.precision;
+    uint8_t f2_int_orig = ctx.f2.intelligence;
+
+    /* Run one combat step — Chaos Orb fires at ON_ROUND_START. */
+    fq_combat_step(&ctx);
+
+    /* After the round, base stats must be restored to pre-round values
+     * (Chaos Orb effects are per-round only, B1 fix). */
+    TEST_ASSERT_EQUAL_UINT8(f1_str_orig, ctx.f1.strength);
+    TEST_ASSERT_EQUAL_UINT8(f1_spd_orig, ctx.f1.speed);
+    TEST_ASSERT_EQUAL_UINT8(f1_prc_orig, ctx.f1.precision);
+    TEST_ASSERT_EQUAL_UINT8(f1_int_orig, ctx.f1.intelligence);
+    TEST_ASSERT_EQUAL_UINT8(f2_str_orig, ctx.f2.strength);
+    TEST_ASSERT_EQUAL_UINT8(f2_spd_orig, ctx.f2.speed);
+    TEST_ASSERT_EQUAL_UINT8(f2_prc_orig, ctx.f2.precision);
+    TEST_ASSERT_EQUAL_UINT8(f2_int_orig, ctx.f2.intelligence);
+}
+
+/* ---------------------------------------------------------------------------
+ * B2-TEST: Haymaker effect.value encodes a delta of 100 (not raw 200).
+ *
+ * Review finding B2: (int8_t)200u wraps to -56 due to int8_t overflow.
+ * Fix: store 100 (meaning 100 + 100 = 200%) in the item table.
+ *
+ * Assert that fq_item_lookup(105)->effect.value == 100 (not -56).
+ * ---------------------------------------------------------------------------*/
+static void test_haymaker_effect_value_no_overflow(void)
+{
+    const fq_item_def_t *haymaker = fq_item_lookup(105u);
+    TEST_ASSERT_NOT_NULL(haymaker);
+
+    /* B2 fix: value stores the delta (100), not the raw percentage (200).
+     * (int8_t)200u = -56 due to overflow — this must NOT be stored. */
+    TEST_ASSERT_EQUAL_INT(100, (int)haymaker->effect.value);
+}
+
+/* ---------------------------------------------------------------------------
  * main
  * ---------------------------------------------------------------------------*/
 int main(void)
@@ -456,6 +577,7 @@ int main(void)
     test_equipped_count_boundary();
     test_empty_slot_skipped();
     test_recursion_depth_initialized();
+    test_recursion_guard_blocks_reentry();
     test_time_loop_snapshot_initialized_zero();
     test_heal_clamped_to_hp_max();
     test_hp_below_threshold_no_overflow();
@@ -465,5 +587,7 @@ int main(void)
     test_per_round_state_initial_values();
     test_time_loop_once_per_fight_flag();
     test_damage_bonus_signed_arithmetic();
+    test_chaos_orb_stat_swap_is_per_round();
+    test_haymaker_effect_value_no_overflow();
     return 0;
 }

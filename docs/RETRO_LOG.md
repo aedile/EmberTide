@@ -227,3 +227,60 @@ Phase 4 delivered the deterministic combat engine stepper (`fq_combat_init` / `f
 | ADV-P4-01 | ADVISORY | `consume_lucky_star` stubs both d20 rolls. Phase 5 must check perk ownership and apply bonus attack (`raw == 1` triggers). | Phase 5 |
 
 ---
+
+## Phase 5 — Item Engine (Review Findings)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-5-item-engine`
+
+### Review Findings Addressed (Phase 5 Review)
+
+#### Blockers (4 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| B5-01 (B1) | Chaos Orb stat swaps are permanent — must be per-round | In `combat.c` `fq_combat_step`: save both fighters' base stats (strength, speed, precision, intelligence) immediately before ON_ROUND_START triggers fire. Restore them after the `done:` label on all exit paths (KO, overtime, round limit, normal) before `current_round++`. New test `test_chaos_orb_stat_swap_is_per_round` in `test_item_bounds.c` verifies stats are restored after a round where Chaos Orb fires. |
+| B5-02 (B2) | Haymaker `(int8_t)200u` overflow wraps to -56 | Changed Haymaker item table entry to `effect.value = (int8_t)100` (delta encoding). Updated `apply_effect` DAMAGE_MULT case to reconstruct `full_mult = 100u + (uint8_t)effect->value = 200`. Updated header doc comment. New test `test_haymaker_effect_value_no_overflow` asserts `fq_item_lookup(105)->effect.value == 100`. |
+| B5-03 (B3) | Recursion guard behavioral test missing | Added `test_recursion_guard_blocks_reentry` to `test_item_bounds.c`. Test manually sets `ctx.item_recursion_depth = 1`, calls `fq_item_eval_trigger()` with Iron Fist equipped, and asserts `damage_bonus` remains 0 (items blocked). Also verifies depth is not incremented further (stays at 1) and that resetting to 0 restores normal behavior. |
+| B5-04 (B4) | `TEST_ASSERT_NULL` macro missing | Added `TEST_ASSERT_NULL(ptr)` macro to `test/host/test_assert.h`. Replaced all `TEST_ASSERT_TRUE(x == NULL)` calls in `test_item_bounds.c` with `TEST_ASSERT_NULL(x)`. |
+
+#### Advisories (6 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A5-01 (A1) | No saturation clamp for `damage_bonus` accumulation | Added int16_t intermediate with saturation to [-128, 127] in `apply_effect` DAMAGE_ADD case and Lucky Coin special path. |
+| A5-02 (A2) | No saturation clamp for `dodge_bonus` | Added uint16_t intermediate with saturation to [0, 255] in `apply_effect` DODGE_BONUS case. |
+| A5-03 (A3) | Item table loop counter `uint8_t` — wraps if table grows past 255 | Changed `fq_item_lookup` loop from `uint8_t i` to `uint16_t i`. Added `_Static_assert(ITEM_TABLE_COUNT <= 65535u, ...)` as a compile-time guard. |
+| A5-04 (A4) | `FQ_MAX_ITEM_TRIGGERS` name semantically unclear | Renamed to `FQ_MAX_ITEM_RECURSION_DEPTH` in `item_engine.h` and all usages in `item_engine.c`. Doc comment updated. |
+| A5-05 (A5) | Iron Fist test seed guard — miss produces vacuous pass | Added `TEST_ASSERT_TRUE(base_res.f1_hit)` in `test_full_combat_iron_fist_increases_damage` after first round to catch seed-dependent silent pass-through. Seed 42 verified to produce an F1 hit for symmetric str=50 fighters. |
+| A5-06 (A6) | RETRO_LOG entries for Phase 5 | This section. |
+
+### Key Design Notes
+
+- **B5-01 Chaos Orb restore placement:** The restore is placed after `done:` but before `current_round++`. This means it executes on KO, overtime, and round-limit exits as well as the normal path. The saved values are stack-local `uint8_t` variables — zero stack overhead beyond what the round-step frame already uses.
+
+- **B5-02 Haymaker delta encoding:** The DAMAGE_MULT effect now uses a delta-from-100 convention. `value=0` means no change from default (100%). `value=100` means 200%. This convention is enforced in `apply_effect` and documented in `item_engine.h`. Any future item using DAMAGE_MULT must store the delta, not the raw percentage.
+
+- **A5-06 Vampire Fang in 1v1 (DEFERRED):** Vampire Fang heals +5 HP on kill, but in a 1v1 fight the fight ends when the kill occurs — the heal is applied but irrelevant because there are no more rounds. This is noted as intended behavior. Full value of Vampire Fang is realized in multi-fight mode (Phase 6+). Logged as advisory ADVISORY-BAL-P5-01.
+
+- **A5-06 Time Loop restores both fighters (DOCUMENTED):** Time Loop restores HP for both fighters to their round-3 snapshot values. This is intentional: the "reset" is disruptive to the fight leader (who likely had more HP at round 3 than round 6 is favorable compared to their opponent). This is documented as a design choice, not a bug.
+
+- **A5-06 Duplicate item guard (DEFERRED):** No guard prevents a fighter from equipping two Chaos Orbs (which would consume two PRNG calls per round start). Deferred to Phase 6 inventory system, which will enforce item uniqueness constraints. Logged as advisory ADVISORY-ARCH-P5-01.
+
+### Quality Gate Results
+
+- `ctest --output-on-failure`: **24/24 tests passed**
+- `test_item_bounds`: PASS (17 tests, includes new B3/B1/B2 bound tests)
+- `test_item_engine`: PASS (16 tests, includes A5 hit assertion)
+- `test_item_time_loop`: PASS
+- All prior phases unaffected (tests 1–21 all PASS)
+
+### Open Advisories
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) is dead in 1v1 combat — fight ends on kill, heal fires but has no combat value. Full utility deferred to multi-fight mode (Phase 6+). | Phase 7 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard (e.g., two Chaos Orbs) not enforced at item engine level. Deferred to Phase 6 inventory system, which will enforce per-item-ID uniqueness in equipped slots. | Phase 6 |
+| ADVISORY-BAL-001 | ADVISORY | (From Phase 2) Effective stat curve granularity — recommend 10K-fight Monte Carlo validation. | Phase 7 |
+
+---

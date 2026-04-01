@@ -15,6 +15,9 @@
  *
  * For Lucky Coin and Chaos Orb (PRNG consumers), tests verify PRNG is
  * consumed unconditionally (NTR-A1: PRNG call even when check fails).
+ *
+ * Review finding A5: test_full_combat_iron_fist_increases_damage now asserts
+ * TEST_ASSERT_TRUE(hit) to catch seed-dependent silent pass-through (A5 fix).
  */
 
 #include <stdint.h>
@@ -295,6 +298,10 @@ static void test_vampire_fang_heal_capped_at_max(void)
  *
  * F1 equips Haymaker. After ON_CRIT fires, F1's damage_mult_pct must be
  * set to 200 (representing x2 damage multiplier).
+ *
+ * B2 fix: Haymaker stores effect.value=100 (delta), apply_effect reconstructs
+ * full_mult = 100 + 100 = 200 and assigns to damage_mult_pct when it exceeds
+ * the current value. Starting from 150 (default crit), 200 > 150, so 200 wins.
  * ---------------------------------------------------------------------------*/
 static void test_haymaker_crit_multiplier_x2(void)
 {
@@ -503,6 +510,10 @@ static void test_item_lookup_known_ids(void)
  *
  * We run two parallel fights: one with Iron Fist, one without.
  * With Iron Fist, F2 HP after round 1 should be lower by 1 (if F1 hit).
+ *
+ * A5 fix: add TEST_ASSERT_TRUE(base_res.f1_hit) to catch seed-dependent
+ * silent pass-through where F1 never hits and the test would vacuously pass.
+ * The seed 42 was verified to produce an F1 hit for symmetric str=50 fighters.
  * ---------------------------------------------------------------------------*/
 static void test_full_combat_iron_fist_increases_damage(void)
 {
@@ -512,6 +523,11 @@ static void test_full_combat_iron_fist_increases_damage(void)
     fq_combat_ctx_t ctx_base;
     fq_combat_init(&ctx_base, &c1_base, &c2_base, 42u);
     fq_round_result_t base_res = fq_combat_step(&ctx_base);
+
+    /* A5 fix: assert that F1 actually hit in round 1 with this seed.
+     * If the seed produces a miss, the test would vacuously pass without
+     * verifying the Iron Fist bonus. A miss here means the seed is bad. */
+    TEST_ASSERT_TRUE(base_res.f1_hit);
 
     /* Iron Fist fight: F1 has Iron Fist. */
     fq_character_t c1_item = make_char(100, 50, 50, 50, 50);
@@ -523,15 +539,10 @@ static void test_full_combat_iron_fist_increases_damage(void)
 
     fq_round_result_t item_res = fq_combat_step(&ctx_item);
 
-    /* If F1 hit F2 in baseline, then with Iron Fist F1 must deal 1 more damage. */
-    if (base_res.f1_hit) {
-        TEST_ASSERT_EQUAL_INT((int)base_res.f1_damage_dealt + 1,
-                              (int)item_res.f1_damage_dealt);
-    } else {
-        /* F1 missed — no damage difference; both should be 0. */
-        TEST_ASSERT_EQUAL_INT(0, (int)base_res.f1_damage_dealt);
-        TEST_ASSERT_EQUAL_INT(0, (int)item_res.f1_damage_dealt);
-    }
+    /* F1 hit F2 in baseline (asserted above), so with Iron Fist F1 must
+     * deal exactly 1 more damage. */
+    TEST_ASSERT_EQUAL_INT((int)base_res.f1_damage_dealt + 1,
+                          (int)item_res.f1_damage_dealt);
 }
 
 /* ---------------------------------------------------------------------------

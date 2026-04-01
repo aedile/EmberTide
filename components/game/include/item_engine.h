@@ -9,8 +9,8 @@
  *   - All math is integer-only. No floating point.
  *   - PRNG calls are ALWAYS consumed when an item uses them, even if the
  *     probabilistic check fails. This is mandatory for BLE sync (NTR-A1).
- *   - Recursion depth is capped at FQ_MAX_ITEM_TRIGGERS per trigger boundary
- *     (prevents ON_HEAL → HEAL → ON_HEAL infinite chains).
+ *   - Recursion depth is capped at FQ_MAX_ITEM_RECURSION_DEPTH per trigger
+ *     boundary (prevents ON_HEAL → HEAL → ON_HEAL infinite chains).
  *
  * Trigger ordering (PM-approved spec decision):
  *   Defender items resolve before attacker items, in slot order (0→equipped_count-1).
@@ -19,6 +19,12 @@
  *   DAMAGE_ADD applied first, then DAMAGE_MULT.
  *   Final: (base + sum(DAMAGE_ADD)) * damage_mult_pct / 100
  *   Minimum damage: 1 (floor enforced in combat.c integration).
+ *
+ * Haymaker encoding (B2 fix):
+ *   FQ_EFFECT_DAMAGE_MULT stores the delta from 100, not the raw percentage.
+ *   Haymaker effect.value = 100 means 100 + 100 = 200% (x2 damage).
+ *   apply_effect reconstructs: full_mult = 100 + (uint8_t)effect->value.
+ *   This avoids int8_t overflow that (int8_t)200u causes.
  *
  * Item database lookup:
  *   Items are resolved by ID via a static item definition table. The table is
@@ -39,15 +45,17 @@
  * ---------------------------------------------------------------------------*/
 
 /** Empty slot sentinel — item ID 0 is reserved as "no item". */
-#define FQ_ITEM_NONE          0u
+#define FQ_ITEM_NONE                   0u
 
 /**
  * Maximum recursion depth per trigger boundary.
  * Prevents ON_HEAL→HEAL→ON_HEAL infinite chains.
  * After fq_item_eval_trigger is entered, item_recursion_depth is checked and
- * incremented. If already >= FQ_MAX_ITEM_TRIGGERS, returns immediately.
+ * incremented. If already >= FQ_MAX_ITEM_RECURSION_DEPTH, returns immediately.
+ *
+ * Renamed from FQ_MAX_ITEM_TRIGGERS (A4 review fix: semantically clearer name).
  */
-#define FQ_MAX_ITEM_TRIGGERS  1u
+#define FQ_MAX_ITEM_RECURSION_DEPTH    1u
 
 /* ---------------------------------------------------------------------------
  * Public API
@@ -86,7 +94,7 @@ const fq_item_def_t *fq_item_lookup(uint16_t item_id);
  * Items with ID == FQ_ITEM_NONE (0) are skipped (NTR-F2).
  * Slots beyond equipped_count are not evaluated (NTR-F3).
  *
- * Recursion guard: if ctx->item_recursion_depth >= FQ_MAX_ITEM_TRIGGERS,
+ * Recursion guard: if ctx->item_recursion_depth >= FQ_MAX_ITEM_RECURSION_DEPTH,
  * returns immediately without evaluating any items.
  *
  * @param ctx                Initialized combat context. Must not be NULL.
