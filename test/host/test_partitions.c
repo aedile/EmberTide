@@ -123,21 +123,31 @@ int main(void)
                (unsigned long long)end);
     }
 
-    /* --- Validation 2: no overlapping partitions --- */
+    /* --- Validation 2: no overlapping partitions ---
+     *
+     * B3: Use uint64_t for a_end and b_end to prevent uint32_t wrap-around.
+     * A partition with offset=0xFFF000 and size=0x002000 would produce
+     * a_end=0x1001000 in 64-bit arithmetic, correctly detected as out-of-range.
+     * In 32-bit arithmetic the same computation wraps to 0x001000, falsely
+     * passing the overlap check. The flash-boundary check (Validation 1 above)
+     * already uses uint64_t; this block must match for consistent safety.
+     */
     for (uint32_t i = 0; i < count; i++) {
         for (uint32_t j = i + 1; j < count; j++) {
-            uint32_t a_start = parts[i].offset;
-            uint32_t a_end   = parts[i].offset + parts[i].size;
-            uint32_t b_start = parts[j].offset;
-            uint32_t b_end   = parts[j].offset + parts[j].size;
+            uint64_t a_start = (uint64_t)parts[i].offset;
+            uint64_t a_end   = (uint64_t)parts[i].offset + (uint64_t)parts[i].size;
+            uint64_t b_start = (uint64_t)parts[j].offset;
+            uint64_t b_end   = (uint64_t)parts[j].offset + (uint64_t)parts[j].size;
 
             int overlaps = (a_start < b_end) && (b_start < a_end);
             if (overlaps) {
                 fprintf(stderr,
-                        "test_partitions: FAIL partition '%s' [0x%X..0x%X) overlaps "
-                        "'%s' [0x%X..0x%X)\n",
-                        parts[i].name, a_start, a_end,
-                        parts[j].name, b_start, b_end);
+                        "test_partitions: FAIL partition '%s' [0x%llX..0x%llX) overlaps "
+                        "'%s' [0x%llX..0x%llX)\n",
+                        parts[i].name,
+                        (unsigned long long)a_start, (unsigned long long)a_end,
+                        parts[j].name,
+                        (unsigned long long)b_start, (unsigned long long)b_end);
                 return 1;
             }
         }

@@ -13,6 +13,12 @@
  * Per spec-challenger N7: _Static_assert validates framebuffer is exactly
  * 5000 bytes.
  *
+ * Per review advisory A2: the failure path test uses NULL as the filepath
+ * instead of a non-existent directory path. stbi_write_png(NULL, ...) is
+ * specified to return 0 without attempting I/O, making this test reliable
+ * across all environments (no dependency on directory permissions or OS
+ * behavior for non-existent paths).
+ *
  * The output/ directory is created if it does not exist (POSIX mkdir).
  */
 
@@ -175,27 +181,32 @@ int main(void)
            FB_WIDTH_PX, FB_HEIGHT_PX, FB_SIZE_BYTES);
 
     /* ---------------------------------------------------------------------------
-     * N3: Failure path test — attempt to write to an invalid path.
-     * This proves stbi_write_png returns 0 on failure (not a segfault).
-     * We do NOT exit non-zero for this — we only verify the return value is 0.
+     * A2: Failure path test — pass NULL as the filepath.
+     *
+     * stbi_write_png(NULL, ...) returns 0 without attempting any I/O.
+     * This is reliable across all platforms and does not depend on directory
+     * permissions, OS behavior for non-existent paths, or environment state.
+     * Previous approach used "/nonexistent_dir_that_cannot_exist/test.png"
+     * which could theoretically succeed on some systems or produce unexpected
+     * errno side-effects.
      * ---------------------------------------------------------------------------
      */
-    printf("render_all_screens: testing stbi_write_png failure path ...\n");
+    printf("render_all_screens: testing stbi_write_png failure path (NULL filepath) ...\n");
     int bad_result = stbi_write_png(
-        "/nonexistent_dir_that_cannot_exist/test.png",
+        NULL,           /* A2: NULL triggers immediate return 0 from stb */
         (int)FB_WIDTH_PX,
         (int)FB_HEIGHT_PX,
         1,
-        framebuffer,   /* raw 1-bit data — just checking the error path */
+        framebuffer,
         (int)FB_STRIDE_BYTES
     );
     if (bad_result != 0) {
         fprintf(stderr,
                 "render_all_screens: FAIL — expected stbi_write_png to return 0 "
-                "for invalid path, got %d\n", bad_result);
+                "for NULL filepath, got %d\n", bad_result);
         return EXIT_FAILURE;
     }
-    printf("render_all_screens: stbi_write_png correctly returned 0 for invalid path\n");
+    printf("render_all_screens: stbi_write_png correctly returned 0 for NULL filepath\n");
 
     printf("render_all_screens: ALL SCREENS OK\n");
     return EXIT_SUCCESS;

@@ -46,7 +46,9 @@ file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
 # ---------------------------------------------------------------------------
 function(add_host_test target source)
     add_executable(${target} ${source})
-    target_include_directories(${target} PRIVATE "${GAME_INCLUDE}")
+    target_include_directories(${target} PRIVATE
+        "${GAME_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
     if(GAME_SOURCES)
         target_sources(${target} PRIVATE ${GAME_SOURCES})
     endif()
@@ -54,7 +56,7 @@ function(add_host_test target source)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# Boundary violation checks (E1, N1a, N1b, N1c)
+# Boundary violation checks (E1, N1a, N1b, N1c) — TWO-LAYER DEFENSE
 #
 # Architecture rules enforced here:
 #   E1  : game/      MUST NOT include hal_*.h
@@ -62,11 +64,20 @@ endfunction()
 #   N1b : game/      MUST NOT include presentation headers
 #   N1c : connectivity/ MUST NOT include game/ headers
 #
-# Each check uses try_compile() at CMake configure time with NO include paths
-# for the forbidden header. A compile failure (expected) means the boundary
-# holds. A compile success triggers a FATAL_ERROR and stops the build.
+# Layer 1 — CMake configure time (defense-in-depth):
+#   try_compile() is called at configure time with NO forbidden include path.
+#   A compile success triggers FATAL_ERROR, stopping the build immediately.
+#   This prevents a broken boundary from ever producing a build artifact.
+#
+# Layer 2 — CTest runtime (B1: makes boundary checks visible in ctest output):
+#   check_boundary.sh is invoked as a CTest test. It compiles the boundary
+#   file with no forbidden include dirs and exits 0 if compilation FAILS
+#   (boundary holds) or exits 1 if compilation SUCCEEDS (boundary broken).
+#   This makes boundary status visible in every `ctest --output-on-failure`
+#   run — not hidden in CMake configure output.
 # ---------------------------------------------------------------------------
 set(BOUNDARY_TMP "${CMAKE_BINARY_DIR}/boundary_checks")
+set(BOUNDARY_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/check_boundary.sh")
 
 macro(assert_compile_fails label source_file)
     message(STATUS "Checking boundary: ${label}")
@@ -90,6 +101,46 @@ assert_compile_fails(E1_game_no_hal      "bound_e1_game_includes_hal.c")
 assert_compile_fails(N1a_pres_no_hal     "bound_n1a_presentation_includes_hal.c")
 assert_compile_fails(N1b_game_no_pres    "bound_n1b_game_includes_presentation.c")
 assert_compile_fails(N1c_conn_no_game    "bound_n1c_connectivity_includes_game.c")
+
+# ---------------------------------------------------------------------------
+# Layer 2: CTest-visible boundary tests via check_boundary.sh
+#
+# Each add_test() call invokes check_boundary.sh with the source file path.
+# No include dirs are passed — this mirrors the try_compile() above and
+# ensures the script tests the same condition that the configure-time check
+# enforces. Shell script exits 0 (PASS) when compilation fails as required.
+# ---------------------------------------------------------------------------
+add_test(
+    NAME boundary_E1_game_no_hal
+    COMMAND "${BOUNDARY_SCRIPT}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/bound_e1_game_includes_hal.c"
+)
+set_tests_properties(boundary_E1_game_no_hal
+    PROPERTIES LABELS "boundary")
+
+add_test(
+    NAME boundary_N1a_pres_no_hal
+    COMMAND "${BOUNDARY_SCRIPT}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/bound_n1a_presentation_includes_hal.c"
+)
+set_tests_properties(boundary_N1a_pres_no_hal
+    PROPERTIES LABELS "boundary")
+
+add_test(
+    NAME boundary_N1b_game_no_pres
+    COMMAND "${BOUNDARY_SCRIPT}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/bound_n1b_game_includes_presentation.c"
+)
+set_tests_properties(boundary_N1b_game_no_pres
+    PROPERTIES LABELS "boundary")
+
+add_test(
+    NAME boundary_N1c_conn_no_game
+    COMMAND "${BOUNDARY_SCRIPT}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/bound_n1c_connectivity_includes_game.c"
+)
+set_tests_properties(boundary_N1c_conn_no_game
+    PROPERTIES LABELS "boundary")
 
 # ---------------------------------------------------------------------------
 # E2: CTest failure escalation

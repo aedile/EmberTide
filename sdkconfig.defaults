@@ -28,6 +28,13 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_BOOT_INIT=y
+
+# A5 WARNING: CONFIG_SPIRAM_USE_MALLOC=y routes the default heap allocator
+# through PSRAM. DMA-capable buffers (e.g. SPI TX/RX, I2S, USB) MUST NOT
+# use the default allocator — they will land in PSRAM which is not DMA-
+# accessible on this chip. Always allocate DMA buffers with:
+#   heap_caps_malloc(size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+# Failure to do so causes silent data corruption on DMA transfers.
 CONFIG_SPIRAM_USE_MALLOC=y
 
 # ---------------------------------------------------------------------------
