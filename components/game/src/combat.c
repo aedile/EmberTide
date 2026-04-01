@@ -142,36 +142,10 @@ static void copy_fighter(fq_combat_fighter_t *f, const fq_character_t *c)
 /**
  * reset_per_round_item_state() — Reset per-round item accumulators.
  *
- * Called at the start of each round (before ON_ROUND_START triggers fire).
- * This ensures DAMAGE_ADD and DAMAGE_MULT bonuses from the previous round
- * do not carry over.
- *
- * Note: PASSIVE bonuses are applied once during init, NOT here.
- * The damage_bonus from PASSIVE items is re-applied each round start
- * by running PASSIVE triggers again is NOT the design — instead,
- * PASSIVE items use a separate accumulator in future phases.
- *
- * For Phase 5: damage_bonus resets each round; PASSIVE items were one-shot
- * at init and added a permanent stat adjustment (Iron Fist effectively adds
- * to strength for the fight, not a per-round accumulator).
- *
- * CORRECTION per spec: Iron Fist is PASSIVE +1 damage_bonus, applied each
- * round at ON_ROUND_START (re-evaluated). damage_bonus resets to 0 here,
- * then PASSIVE trigger re-fires at ON_ROUND_START loop. But the spec says
- * PASSIVE is "one-time stat modifiers" applied during init.
- *
- * PM decision: PASSIVE trigger fires ONCE at init. The damage_bonus it sets
- * persists for the fight (it's a flat stat bonus). We do NOT reset it per
- * round. Only per-round items (Lucky Coin, Tough Hide, etc.) modify
- * damage_bonus temporarily. Reset only non-PASSIVE accumulators.
- *
- * Implementation: reset damage_bonus to the fighter's passive_damage_base
- * (the sum of all PASSIVE DAMAGE_ADD items, computed once at init).
- * For simplicity in Phase 5: fighters store passive_damage_base = 0 and
- * we apply PASSIVE items through a separate init-time call.
- *
- * FINAL DECISION: Reset damage_bonus to 0 each round AND re-apply PASSIVE
- * items via a PASSIVE trigger eval at round start. This is the cleanest model.
+ * Called at the start of each round before ON_ROUND_START triggers fire.
+ * Ensures DAMAGE_ADD and DAMAGE_MULT bonuses from the previous round do not
+ * carry over. PASSIVE items are re-applied immediately after this reset via
+ * FQ_TRIGGER_PASSIVE eval in fq_combat_step (so Iron Fist +1 is always active).
  */
 static void reset_per_round_item_state(fq_combat_fighter_t *f)
 {
