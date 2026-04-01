@@ -241,3 +241,19 @@ add_host_test(test_item_bounds     "${CMAKE_CURRENT_SOURCE_DIR}/test_item_bounds
 # ---------------------------------------------------------------------------
 add_host_test(test_item_engine     "${CMAKE_CURRENT_SOURCE_DIR}/test_item_engine.c")
 add_host_test(test_item_time_loop  "${CMAKE_CURRENT_SOURCE_DIR}/test_item_time_loop.c")
+
+# ---------------------------------------------------------------------------
+# Phase-6 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any phase-6 implementation. These fail until training.h,
+# progression.h (new functions), and legacy.h/legacy.c are implemented.
+# ---------------------------------------------------------------------------
+add_host_test(test_training_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_training_bounds.c")
+add_host_test(test_level_up_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_level_up_bounds.c")
+add_host_test(test_legacy_bounds   "${CMAKE_CURRENT_SOURCE_DIR}/test_legacy_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-6 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_host_test(test_training        "${CMAKE_CURRENT_SOURCE_DIR}/test_training.c")
+add_host_test(test_level_up        "${CMAKE_CURRENT_SOURCE_DIR}/test_level_up.c")
+add_host_test(test_legacy          "${CMAKE_CURRENT_SOURCE_DIR}/test_legacy.c")
