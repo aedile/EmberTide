@@ -1,6 +1,5 @@
 idf_component_register(
     SRCS
-        "src/renderer.c"
         "src/fq_framebuffer.c"
         "src/fq_sprite.c"
         "src/fq_text.c"
@@ -19,5 +18,8 @@ idf_component_register(
     #
     # screen_mgr.c (device-only, calls hal_epaper SPI) is excluded from this
     # SRCS list until implementation; it will live in a separate device-only
-    # build target that may add REQUIRES hal as needed.
+    # build target that may add REQUIRES fq_hal as needed.
+    #
+    # D-01: renderer.c and renderer.h were empty placeholders with no
+    # declarations or implementation. Removed in fix/comprehensive-audit-remediation.
 )

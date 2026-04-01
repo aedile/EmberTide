@@ -1,6 +1,5 @@
 idf_component_register(
     SRCS
-        "src/wifi_service.c"
         "src/protocol.c"
         "src/sync.c"
     INCLUDE_DIRS
@@ -17,6 +16,10 @@ idf_component_register(
     #
     # Future option: move crc32 to a standalone utils/ component to eliminate this
     # dependency entirely. Track as ADV-P10-01 (DEFERRED).
+    #
+    # D-03: wifi_service.c and wifi_service.h were empty placeholders. The real
+    # WiFi HAL implementation lives in components/fq_hal/src/hal_wifi.c.
+    # Removed in fix/comprehensive-audit-remediation.
     PRIV_REQUIRES
         game
 )
