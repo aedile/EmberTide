@@ -305,9 +305,9 @@ hal_epaper_err_t hal_epaper_init(void)
 {
     esp_err_t ret;
 
-    /* Power on the e-paper rail. */
+    /* Power on the e-paper rail (active-low power enable: LOW = ON). */
     gpio_set_direction(EPD_PWR_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level(EPD_PWR_PIN, 1);
+    gpio_set_level(EPD_PWR_PIN, 0);
 
     /* Configure DC, CS, RST as outputs; BUSY as input. */
     gpio_config_t io_conf = {};
@@ -502,6 +502,6 @@ void hal_epaper_deinit(void)
     spi_bus_remove_device(s_spi);
     spi_bus_free(SPI2_HOST);
 
-    /* Power off the e-paper rail. */
-    gpio_set_level(EPD_PWR_PIN, 0);
+    /* Power off the e-paper rail (active-low power enable: HIGH = OFF). */
+    gpio_set_level(EPD_PWR_PIN, 1);
 }
