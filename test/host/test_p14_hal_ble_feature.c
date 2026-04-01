@@ -14,35 +14,22 @@
  *   - second connect after re-advertise → CONNECTED
  *   - get_last_sent returns exact bytes passed to hal_ble_send()
  *   - mock_ble_reset() wipes all state
- *   - deinit after active connection is safe
+ *   - deinit after active connection is safe (state returns to IDLE)
+ *   - disconnect() from ADVERTISING → stays ADVERTISING (no-op)
+ *   - disconnect() from IDLE → stays IDLE (no-op)
  */
 
+#include "mock_hal_ble.h"
 #include "hal_ble.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-/* Forward-declare mock accessors (defined in mock_hal_ble.c). */
-void     mock_ble_reset(void);
-void     mock_ble_simulate_connect(void);
-void     mock_ble_simulate_disconnect(void);
-void     mock_ble_inject_rx(const uint8_t *data, uint16_t len);
-uint16_t mock_ble_get_last_sent(uint8_t *buf, uint16_t buf_len);
 
 #define ASSERT_EQ(label, expected, actual)                              \
     do {                                                                \
         if ((int)(expected) != (int)(actual)) {                         \
             printf("FAIL [%s]: expected %d got %d\n",                  \
                    (label), (int)(expected), (int)(actual));            \
-            return 1;                                                   \
-        }                                                               \
-        printf("PASS [%s]\n", (label));                                 \
-    } while (0)
-
-#define ASSERT_TRUE(label, cond)                                        \
-    do {                                                                \
-        if (!(cond)) {                                                  \
-            printf("FAIL [%s]: condition was false\n", (label));        \
             return 1;                                                   \
         }                                                               \
         printf("PASS [%s]\n", (label));                                 \
@@ -178,14 +165,38 @@ int main(void)
               (int)hal_ble_get_state());
 
     /* ------------------------------------------------------------------ */
-    /* 11. deinit after active connection is safe.                         */
+    /* 11. deinit after active connection is safe; state returns to IDLE.  */
     /* ------------------------------------------------------------------ */
     hal_ble_init(test_rx_cb);
     hal_ble_start_advertising();
     mock_ble_simulate_connect();
     hal_ble_deinit();
-    ASSERT_TRUE("deinit_mid_connection_safe", 1);
     ASSERT_EQ("state_after_deinit_is_idle",
+              (int)HAL_BLE_STATE_IDLE,
+              (int)hal_ble_get_state());
+
+    /* ------------------------------------------------------------------ */
+    /* 12. disconnect() from ADVERTISING state is a no-op (stays           */
+    /*     ADVERTISING). Only CONNECTED transitions to DISCONNECTED.       */
+    /* ------------------------------------------------------------------ */
+    mock_ble_reset();
+    hal_ble_init(test_rx_cb);
+    hal_ble_start_advertising();
+    ASSERT_EQ("disconnect_from_advertising_ok",
+              (int)HAL_BLE_OK,
+              (int)hal_ble_disconnect());
+    ASSERT_EQ("state_after_disconnect_from_adv_stays_advertising",
+              (int)HAL_BLE_STATE_ADVERTISING,
+              (int)hal_ble_get_state());
+
+    /* ------------------------------------------------------------------ */
+    /* 13. disconnect() from IDLE state is a no-op (stays IDLE).           */
+    /* ------------------------------------------------------------------ */
+    mock_ble_reset();
+    ASSERT_EQ("disconnect_from_idle_ok",
+              (int)HAL_BLE_OK,
+              (int)hal_ble_disconnect());
+    ASSERT_EQ("state_after_disconnect_from_idle_stays_idle",
               (int)HAL_BLE_STATE_IDLE,
               (int)hal_ble_get_state());
 

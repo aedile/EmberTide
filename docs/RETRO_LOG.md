@@ -666,3 +666,50 @@ This value is frozen in `KNOWN_HASH_PINNED` inside `test_p10_combat_sync.c`. Any
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 14 |
 | ADV-P10-01 | DEFERRED | `crc32.h` in `game/` used by `connectivity/` — move to `utils/` pending ADR. | Phase 14 |
 | ADV-P12-01 | ADVISORY | Rule 8: `hal_epaper` and `hal_flash` exist at HAL layer only; `screen_mgr.c` (presentation) wiring deferred — blocked on hardware bring-up. | Phase 14 |
+
+---
+
+## Phase 14 — HAL BLE + WiFi (Review Findings)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-14-ble-wifi`
+
+### Review Findings Addressed (Phase 14 Review)
+
+#### Blockers (4 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| B1 | `ASSERT_TRUE` used for exact-value assertions in `test_p14_hal_ble_bounds.c` — two tests accepted any non-MTU-exceeded code and any truthy value, masking regressions | Replaced `ASSERT_TRUE("send_exactly_256_not_mtu_error", ...)` with `ASSERT_EQ("send_256_ok", (int)HAL_BLE_OK, (int)rc)`. Replaced `ASSERT_TRUE("double_deinit_safe", 1)` with `ASSERT_EQ("state_after_double_deinit", (int)HAL_BLE_STATE_IDLE, (int)hal_ble_get_state())`. Deleted `ASSERT_TRUE("deinit_mid_connection_safe", 1)` from `test_p14_hal_ble_feature.c` — the `state_after_deinit_is_idle` assertion on the next line already provides full coverage. |
+| B2 | No password-too-long guard — a 64-character password silently truncated in `wifi_config_t.sta.password[64]` causing a buffer overrun on the target | Added `HAL_WIFI_ERR_PASS_TOO_LONG = 6` to `hal_wifi_err_t` enum in `hal_wifi.h`. Added `strlen(password) >= HAL_WIFI_PASS_MAX` guard in `mock_hal_wifi.c` and `hal_wifi.c` (guard order: ssid-null → pass-null → ssid-length → pass-length → init). Added test `connect_sta_pass_64_chars_rejected` to `test_p14_hal_wifi_bounds.c`. |
+| B3 | `mock_hal_wifi.c` set state to `STA_CONNECTED` immediately in `hal_wifi_connect_sta()` — the real driver is asynchronous (IP event arrives later). Tests asserting `STA_CONNECTED` directly after `connect_sta()` would pass on the mock but misrepresent hardware behaviour | Changed `connect_sta()` to set `STA_CONNECTING`. Added `mock_wifi_simulate_connected()` (sets `STA_CONNECTED`) and `mock_wifi_simulate_link_lost()` (sets `STA_DISCONNECTED`). Updated `test_p14_hal_wifi_feature.c` test 5 to assert `STA_CONNECTING` after `connect_sta()`, then call `simulate_connected()` and assert `STA_CONNECTED`, then `simulate_link_lost()` and assert `STA_DISCONNECTED`. |
+| B4 | No mock header files — all four test files used forward declarations instead of a shared header, so mock API changes required edits in four places and type mismatches were undetected | Created `test/host/mock_hal_ble.h` and `test/host/mock_hal_wifi.h` with full function declarations. Updated `mock_hal_ble.c` and `mock_hal_wifi.c` to `#include` their respective headers. Replaced all forward declarations in the four test files with the appropriate `#include`. |
+
+#### Advisories (4 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 | No tests for `disconnect()` from non-CONNECTED states — regression possible if the `if (CONNECTED)` guard is accidentally removed | Added two tests to `test_p14_hal_ble_feature.c`: `disconnect_from_advertising_stays_advertising` and `disconnect_from_idle_stays_idle`. |
+| A2 | No test for `disconnect()` from IDLE WiFi state | Added test `disconnect_from_idle_ok` to `test_p14_hal_wifi_feature.c`: `mock_wifi_reset()` → `disconnect()` → asserts `HAL_WIFI_OK` and state remains `IDLE`. |
+| A3 | NULL SSID to `start_ap()` before init was not tested — the NULL guard must fire before the init guard for the error code to be predictable regardless of driver init state | Added test `null_ssid_before_init` to `test_p14_hal_wifi_bounds.c`: `mock_wifi_reset()` → `hal_wifi_start_ap(NULL)` → asserts `HAL_WIFI_ERR_NULL`. The guard order in `mock_hal_wifi.c` was already correct (NULL before init), confirming the AC. |
+| A4 | No Phase 14 section in `docs/RETRO_LOG.md` | This section. |
+
+### Architecture Document Change
+
+`hal_wifi.h` enum extended: `HAL_WIFI_ERR_PASS_TOO_LONG = 6` added after `HAL_WIFI_ERR_NOT_CONNECTED = 5`. Architecture doc v2.14 amendment updated to document the new error code and the corrected `connect_sta()` guard order.
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (Gate #1 post-review): **63/63 tests passed** — 0 failures, 0 warnings, `-Wall -Werror` clean.
+- No presentation layer changes — visual regression suite not required.
+
+### Open Advisories (carried forward)
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 15 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 15 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 15 |
+| ADV-P10-01 | DEFERRED | `crc32.h` in `game/` used by `connectivity/` — move to `utils/` pending ADR. | Phase 15 |
+| ADV-P12-01 | ADVISORY | Rule 8: `hal_epaper` and `hal_flash` exist at HAL layer only; `screen_mgr.c` (presentation) wiring deferred — blocked on hardware bring-up. | Phase 15 |
+| ADV-P14-01 | ADVISORY | Rule 8: `hal_ble` and `hal_wifi` exist at HAL layer only; `connectivity/ble_service.c` wiring to event bus deferred — blocked on NimBLE hardware bring-up. | Phase 15 |

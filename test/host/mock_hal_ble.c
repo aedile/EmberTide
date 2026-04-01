@@ -11,6 +11,8 @@
  *   - mock_ble_get_last_sent(buf, buf_len) — copies the last data passed to
  *     hal_ble_send() into buf (up to buf_len bytes). Returns the number of
  *     bytes that were sent in the last call (not the clamped copy size).
+ *   - mock_ble_get_send_count() — returns the total count of successful sends
+ *     since the last mock_ble_reset() or hal_ble_init().
  *   - mock_ble_reset() — clears all state to power-on defaults.
  *
  * Guard order for hal_ble_send():  NULL -> MTU -> init -> connected -> capture.
@@ -21,6 +23,7 @@
  * events directly through the mock_ accessor functions.
  */
 
+#include "mock_hal_ble.h"
 #include "hal_ble.h"
 #include <string.h>
 
@@ -35,6 +38,7 @@ static hal_ble_state_t       s_state;
 /* Capture buffer for the last successful hal_ble_send() call. */
 static uint8_t  s_last_sent_buf[HAL_BLE_MAX_MTU];
 static uint16_t s_last_sent_len;
+static uint32_t s_send_count;
 
 /* -------------------------------------------------------------------------
  * Public hal_ble API — mock implementations.
@@ -46,10 +50,11 @@ hal_ble_err_t hal_ble_init(hal_ble_rx_callback_t rx_cb)
     if (!rx_cb) {
         return HAL_BLE_ERR_NULL;
     }
-    s_rx_callback  = rx_cb;
-    s_initialized  = 1u;
-    s_state        = HAL_BLE_STATE_IDLE;
+    s_rx_callback   = rx_cb;
+    s_initialized   = 1u;
+    s_state         = HAL_BLE_STATE_IDLE;
     s_last_sent_len = 0u;
+    s_send_count    = 0u;
     return HAL_BLE_OK;
 }
 
@@ -83,6 +88,7 @@ hal_ble_err_t hal_ble_send(const uint8_t *data, uint16_t len)
     /* Capture the payload for test inspection. */
     memcpy(s_last_sent_buf, data, len);
     s_last_sent_len = len;
+    s_send_count++;
     return HAL_BLE_OK;
 }
 
@@ -108,7 +114,7 @@ void hal_ble_deinit(void)
 }
 
 /* -------------------------------------------------------------------------
- * Test accessor functions — host-only, not declared in hal_ble.h.
+ * Test accessor functions — host-only, declared in mock_hal_ble.h.
  * -------------------------------------------------------------------------
  */
 
@@ -189,9 +195,22 @@ uint16_t mock_ble_get_last_sent(uint8_t *buf, uint16_t buf_len)
 }
 
 /**
+ * mock_ble_get_send_count — Return the total number of successful sends.
+ *
+ * Counts every hal_ble_send() call that passed all guards and captured data
+ * since the last mock_ble_reset() or hal_ble_init().
+ *
+ * @return  Total successful send count.
+ */
+uint32_t mock_ble_get_send_count(void)
+{
+    return s_send_count;
+}
+
+/**
  * mock_ble_reset — Reset all mock state to power-on defaults.
  *
- * Clears callback, initialized flag, state, send capture buffer.
+ * Clears callback, initialized flag, state, send capture buffer, and send count.
  * Call at the start of each test main() for a clean slate.
  */
 void mock_ble_reset(void)
@@ -200,5 +219,6 @@ void mock_ble_reset(void)
     s_initialized   = 0u;
     s_state         = HAL_BLE_STATE_IDLE;
     s_last_sent_len = 0u;
+    s_send_count    = 0u;
     memset(s_last_sent_buf, 0, sizeof(s_last_sent_buf));
 }

@@ -5,17 +5,27 @@
  * Simulates WiFi behaviour entirely in RAM:
  *   - Tracks initialisation state and current hal_wifi_state_t.
  *   - Validates SSID/password inputs identically to the real driver.
- *   - Captures the last SSID passed to start_ap() or connect_sta().
- *   - mock_wifi_reset() clears all state to power-on defaults.
- *   - mock_wifi_get_last_ssid() returns the last captured SSID string.
+ *   - Captures the last SSID and password passed to start_ap() or connect_sta().
+ *   - mock_wifi_reset()              — clears all state to power-on defaults.
+ *   - mock_wifi_get_last_ssid()      — returns the last captured SSID string.
+ *   - mock_wifi_get_last_password()  — returns the last captured password string.
+ *   - mock_wifi_simulate_connected() — sets state to STA_CONNECTED.
+ *   - mock_wifi_simulate_link_lost() — sets state to STA_DISCONNECTED.
  *
- * Guard order for hal_wifi_start_ap():   NULL -> length -> init -> start AP.
- * Guard order for hal_wifi_connect_sta(): NULL(ssid) -> NULL(pass) -> length -> init.
+ * Guard order for hal_wifi_start_ap():    NULL -> length -> init -> start AP.
+ * Guard order for hal_wifi_connect_sta(): NULL(ssid) -> NULL(pass) ->
+ *                                         ssid length -> pass length -> init.
  *
- * Design note: HTTPD socket limits, recv_wait_timeout, and NVS flash writes
+ * Design note: hal_wifi_connect_sta() sets state to STA_CONNECTING on success,
+ * mirroring the real driver where the IP event arrives asynchronously.
+ * Tests use mock_wifi_simulate_connected() to advance to STA_CONNECTED and
+ * mock_wifi_simulate_link_lost() to advance to STA_DISCONNECTED.
+ *
+ * HTTPD socket limits, recv_wait_timeout, and NVS flash writes
  * present in the real target driver are NOT simulated here.
  */
 
+#include "mock_hal_wifi.h"
 #include "hal_wifi.h"
 #include <string.h>
 
@@ -26,8 +36,9 @@
 static uint8_t          s_initialized;
 static hal_wifi_state_t s_state;
 
-/* Capture buffer for the last SSID passed to start_ap or connect_sta. */
+/* Capture buffers for the last SSID and password. */
 static char s_last_ssid[HAL_WIFI_SSID_MAX];
+static char s_last_password[HAL_WIFI_PASS_MAX];
 
 /* -------------------------------------------------------------------------
  * Public hal_wifi API — mock implementations.
@@ -43,7 +54,7 @@ hal_wifi_err_t hal_wifi_init(void)
 
 hal_wifi_err_t hal_wifi_start_ap(const char *ssid)
 {
-    /* Guard 1: NULL SSID. */
+    /* Guard 1: NULL SSID — checked before init so NULL is always rejected. */
     if (!ssid) {
         return HAL_WIFI_ERR_NULL;
     }
@@ -78,14 +89,22 @@ hal_wifi_err_t hal_wifi_connect_sta(const char *ssid, const char *password)
     if (strlen(ssid) >= (size_t)HAL_WIFI_SSID_MAX) {
         return HAL_WIFI_ERR_SSID_TOO_LONG;
     }
-    /* Guard 4: driver must be initialised. */
+    /* Guard 4: password length. */
+    if (strlen(password) >= (size_t)HAL_WIFI_PASS_MAX) {
+        return HAL_WIFI_ERR_PASS_TOO_LONG;
+    }
+    /* Guard 5: driver must be initialised. */
     if (!s_initialized) {
         return HAL_WIFI_ERR_INIT;
     }
-    /* Capture SSID and update state. */
+    /* Capture SSID and password, then enter STA_CONNECTING state. The IP
+     * event that advances the state to STA_CONNECTED arrives asynchronously
+     * on the real target; tests use mock_wifi_simulate_connected() here. */
     strncpy(s_last_ssid, ssid, HAL_WIFI_SSID_MAX - 1u);
     s_last_ssid[HAL_WIFI_SSID_MAX - 1u] = '\0';
-    s_state = HAL_WIFI_STATE_STA_CONNECTED;
+    strncpy(s_last_password, password, HAL_WIFI_PASS_MAX - 1u);
+    s_last_password[HAL_WIFI_PASS_MAX - 1u] = '\0';
+    s_state = HAL_WIFI_STATE_STA_CONNECTING;
     return HAL_WIFI_OK;
 }
 
@@ -107,7 +126,7 @@ void hal_wifi_deinit(void)
 }
 
 /* -------------------------------------------------------------------------
- * Test accessor functions — host-only, not declared in hal_wifi.h.
+ * Test accessor functions — host-only, declared in mock_hal_wifi.h.
  * -------------------------------------------------------------------------
  */
 
@@ -128,14 +147,60 @@ const char *mock_wifi_get_last_ssid(void)
 }
 
 /**
+ * mock_wifi_get_last_password — Return a pointer to the last captured password.
+ *
+ * Returns the password passed to the most recent hal_wifi_connect_sta() call
+ * that reached the capture stage (i.e. passed all guards).
+ * Returns an empty string ("") if no such call has occurred since reset.
+ *
+ * @return  Pointer to the null-terminated password string. Never NULL.
+ */
+const char *mock_wifi_get_last_password(void)
+{
+    return s_last_password;
+}
+
+/**
+ * mock_wifi_simulate_connected — Inject the IP-obtained event.
+ *
+ * Sets state to HAL_WIFI_STATE_STA_CONNECTED, mirroring the target behaviour
+ * where the ESP-IDF WIFI_EVENT_STA_GOT_IP handler fires after DHCP.
+ * No-op if the driver has not been initialised.
+ */
+void mock_wifi_simulate_connected(void)
+{
+    if (!s_initialized) {
+        return;
+    }
+    s_state = HAL_WIFI_STATE_STA_CONNECTED;
+}
+
+/**
+ * mock_wifi_simulate_link_lost — Inject a link-loss event.
+ *
+ * Sets state to HAL_WIFI_STATE_STA_DISCONNECTED, mirroring the target
+ * behaviour where WIFI_EVENT_STA_DISCONNECTED fires after AP reboot or
+ * signal loss.
+ * No-op if the driver has not been initialised.
+ */
+void mock_wifi_simulate_link_lost(void)
+{
+    if (!s_initialized) {
+        return;
+    }
+    s_state = HAL_WIFI_STATE_STA_DISCONNECTED;
+}
+
+/**
  * mock_wifi_reset — Reset all mock state to power-on defaults.
  *
- * Clears initialized flag, state, and captured SSID.
+ * Clears initialized flag, state, captured SSID, and captured password.
  * Call at the start of each test main() for a clean slate.
  */
 void mock_wifi_reset(void)
 {
     s_initialized = 0u;
     s_state       = HAL_WIFI_STATE_IDLE;
-    memset(s_last_ssid, 0, sizeof(s_last_ssid));
+    memset(s_last_ssid,     0, sizeof(s_last_ssid));
+    memset(s_last_password, 0, sizeof(s_last_password));
 }

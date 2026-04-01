@@ -7,42 +7,27 @@
  *   - send() before init()                      → HAL_BLE_ERR_INIT
  *   - send() with NULL data pointer             → HAL_BLE_ERR_NULL
  *   - send() with len > HAL_BLE_MAX_MTU         → HAL_BLE_ERR_MTU_EXCEEDED
- *   - send() exactly at HAL_BLE_MAX_MTU (256)   → HAL_BLE_ERR_MTU_EXCEEDED (>256 only)
+ *   - send() exactly at HAL_BLE_MAX_MTU (256)   → HAL_BLE_OK (not rejected)
  *   - send() when not connected                 → HAL_BLE_ERR_NOT_CONNECTED
  *   - inject_rx() with NULL data                → safe (no crash, no callback fire)
  *   - HAL_BLE_MAX_MTU constant value locked to 256
  *   - enum value contracts locked
- *   - double deinit is safe
+ *   - double deinit leaves state as IDLE
  *   - get_state() before init returns IDLE
  *   - start_advertising() before init           → HAL_BLE_ERR_INIT
  */
 
+#include "mock_hal_ble.h"
 #include "hal_ble.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-/* Forward-declare mock accessors (defined in mock_hal_ble.c). */
-void     mock_ble_reset(void);
-void     mock_ble_simulate_connect(void);
-void     mock_ble_simulate_disconnect(void);
-void     mock_ble_inject_rx(const uint8_t *data, uint16_t len);
-uint16_t mock_ble_get_last_sent(uint8_t *buf, uint16_t buf_len);
 
 #define ASSERT_EQ(label, expected, actual)                              \
     do {                                                                \
         if ((int)(expected) != (int)(actual)) {                         \
             printf("FAIL [%s]: expected %d got %d\n",                  \
                    (label), (int)(expected), (int)(actual));            \
-            return 1;                                                   \
-        }                                                               \
-        printf("PASS [%s]\n", (label));                                 \
-    } while (0)
-
-#define ASSERT_TRUE(label, cond)                                        \
-    do {                                                                \
-        if (!(cond)) {                                                  \
-            printf("FAIL [%s]: condition was false\n", (label));        \
             return 1;                                                   \
         }                                                               \
         printf("PASS [%s]\n", (label));                                 \
@@ -156,13 +141,12 @@ int main(void)
 
     /* ------------------------------------------------------------------
      * MTU boundary: len == HAL_BLE_MAX_MTU (256) must be accepted when
-     * connected (not rejected). This proves the check is strictly >, not >=.
-     * We just assert the error is NOT HAL_BLE_ERR_MTU_EXCEEDED.
+     * connected. The check is strictly >, so 256 == HAL_BLE_MAX_MTU must
+     * return HAL_BLE_OK (not HAL_BLE_ERR_MTU_EXCEEDED).
      * ------------------------------------------------------------------ */
     {
         hal_ble_err_t rc = hal_ble_send(big_buf, 256u);
-        ASSERT_TRUE("send_exactly_256_not_mtu_error",
-                    rc != HAL_BLE_ERR_MTU_EXCEEDED);
+        ASSERT_EQ("send_256_ok", (int)HAL_BLE_OK, (int)rc);
     }
 
     /* ------------------------------------------------------------------
@@ -176,13 +160,15 @@ int main(void)
     ASSERT_EQ("inject_null_data_no_callback", 0u, (uint32_t)g_rx_fire_count);
 
     /* ------------------------------------------------------------------
-     * Double deinit is safe — no crash, no undefined behaviour.
+     * Double deinit is safe — state returns to IDLE after both calls.
      * ------------------------------------------------------------------ */
     mock_ble_reset();
     hal_ble_init(dummy_rx_cb);
     hal_ble_deinit();
     hal_ble_deinit(); /* must not crash */
-    ASSERT_TRUE("double_deinit_safe", 1);
+    ASSERT_EQ("state_after_double_deinit",
+              (int)HAL_BLE_STATE_IDLE,
+              (int)hal_ble_get_state());
 
     /* ------------------------------------------------------------------
      * State after deinit is IDLE.

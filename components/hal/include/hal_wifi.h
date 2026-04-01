@@ -17,6 +17,11 @@
  *   return HAL_WIFI_ERR_SSID_TOO_LONG without touching ESP-IDF WiFi drivers,
  *   which crash if initialised with an ssid > 32 characters.
  *
+ * Password buffer-overflow guard:
+ *   hal_wifi_connect_sta() MUST check that password fits within HAL_WIFI_PASS_MAX
+ *   bytes (including NUL terminator). Longer strings return
+ *   HAL_WIFI_ERR_PASS_TOO_LONG without touching the ESP-IDF WiFi drivers.
+ *
  * HTTPD DoS mitigation (spec-challenger requirement):
  *   The target httpd_config_t MUST set max_open_sockets=4 and
  *   recv_wait_timeout=3 to prevent socket starvation from rapid refreshes.
@@ -39,12 +44,13 @@
  * -------------------------------------------------------------------------
  */
 typedef enum {
-    HAL_WIFI_OK               = 0, /**< Operation completed successfully. */
-    HAL_WIFI_ERR_INIT         = 1, /**< Driver not initialised. */
-    HAL_WIFI_ERR_CONNECT      = 2, /**< WiFi connection attempt failed. */
-    HAL_WIFI_ERR_NULL         = 3, /**< Caller passed a NULL pointer. */
+    HAL_WIFI_OK                = 0, /**< Operation completed successfully. */
+    HAL_WIFI_ERR_INIT          = 1, /**< Driver not initialised. */
+    HAL_WIFI_ERR_CONNECT       = 2, /**< WiFi connection attempt failed. */
+    HAL_WIFI_ERR_NULL          = 3, /**< Caller passed a NULL pointer. */
     HAL_WIFI_ERR_SSID_TOO_LONG = 4, /**< SSID length exceeds HAL_WIFI_SSID_MAX. */
-    HAL_WIFI_ERR_NOT_CONNECTED = 5  /**< Not connected; operation not available. */
+    HAL_WIFI_ERR_NOT_CONNECTED = 5, /**< Not connected; operation not available. */
+    HAL_WIFI_ERR_PASS_TOO_LONG = 6  /**< Password length exceeds HAL_WIFI_PASS_MAX. */
 } hal_wifi_err_t;
 
 /* -------------------------------------------------------------------------
@@ -52,11 +58,11 @@ typedef enum {
  * -------------------------------------------------------------------------
  */
 typedef enum {
-    HAL_WIFI_STATE_IDLE            = 0, /**< Driver not started. */
-    HAL_WIFI_STATE_AP_MODE         = 1, /**< SoftAP mode active (captive portal). */
-    HAL_WIFI_STATE_STA_CONNECTING  = 2, /**< Station mode; associating. */
-    HAL_WIFI_STATE_STA_CONNECTED   = 3, /**< Station mode; IP obtained. */
-    HAL_WIFI_STATE_STA_DISCONNECTED = 4 /**< Station mode; link lost. */
+    HAL_WIFI_STATE_IDLE             = 0, /**< Driver not started. */
+    HAL_WIFI_STATE_AP_MODE          = 1, /**< SoftAP mode active (captive portal). */
+    HAL_WIFI_STATE_STA_CONNECTING   = 2, /**< Station mode; associating. */
+    HAL_WIFI_STATE_STA_CONNECTED    = 3, /**< Station mode; IP obtained. */
+    HAL_WIFI_STATE_STA_DISCONNECTED = 4  /**< Station mode; link lost. */
 } hal_wifi_state_t;
 
 /**
@@ -90,13 +96,14 @@ hal_wifi_err_t hal_wifi_start_ap(const char *ssid);
 /**
  * hal_wifi_connect_sta — Connect to an existing access point (station mode).
  *
- * Guard order: NULL check (ssid) -> NULL check (password) -> length check -> init check.
+ * Guard order: NULL(ssid) -> NULL(pass) -> ssid length -> pass length -> init.
  *
  * @param ssid      Target network name. Must not be NULL.
  * @param password  Pre-shared key. Must not be NULL (pass "" for open networks).
  * @return HAL_WIFI_OK                on success.
  *         HAL_WIFI_ERR_NULL          if ssid or password is NULL.
  *         HAL_WIFI_ERR_SSID_TOO_LONG if strlen(ssid) >= HAL_WIFI_SSID_MAX.
+ *         HAL_WIFI_ERR_PASS_TOO_LONG if strlen(password) >= HAL_WIFI_PASS_MAX.
  *         HAL_WIFI_ERR_INIT          if hal_wifi_init() was not called.
  *         HAL_WIFI_ERR_CONNECT       if association fails (target only).
  */

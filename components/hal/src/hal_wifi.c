@@ -15,12 +15,15 @@
  *     esp_wifi_connect().
  *   - SSID is validated before any ESP-IDF call to prevent driver crash
  *     from >32-char SSID (spec-challenger buffer-overflow requirement).
+ *   - Password is validated to prevent buffer overrun in the ESP-IDF
+ *     wifi_config_t.sta.password field (64 bytes including NUL).
  *
  * Stub policy: all functions compile cleanly without ESP-IDF headers so that
  * `idf.py build` succeeds as a cross-compilation smoke-test.
  *
  * Guard order for start_ap():     NULL -> length -> init -> start.
- * Guard order for connect_sta():  NULL(ssid) -> NULL(pass) -> length -> init.
+ * Guard order for connect_sta():  NULL(ssid) -> NULL(pass) -> ssid length ->
+ *                                 pass length -> init.
  */
 
 #include "hal_wifi.h"
@@ -80,6 +83,9 @@ hal_wifi_err_t hal_wifi_connect_sta(const char *ssid, const char *password)
     }
     if (strlen(ssid) >= (size_t)HAL_WIFI_SSID_MAX) {
         return HAL_WIFI_ERR_SSID_TOO_LONG;
+    }
+    if (strlen(password) >= (size_t)HAL_WIFI_PASS_MAX) {
+        return HAL_WIFI_ERR_PASS_TOO_LONG;
     }
     if (!s_initialized) {
         return HAL_WIFI_ERR_INIT;

@@ -7,23 +7,23 @@
  *   - start_ap() with valid short SSID → state becomes AP_MODE
  *   - get_last_ssid captures the SSID passed to start_ap()
  *   - disconnect() from AP_MODE → state returns to IDLE
- *   - connect_sta() with valid SSID + password → state becomes STA_CONNECTED
+ *   - connect_sta() with valid SSID + password → state becomes STA_CONNECTING
+ *   - mock_wifi_simulate_connected() advances state to STA_CONNECTED
+ *   - mock_wifi_simulate_link_lost() advances state to STA_DISCONNECTED
  *   - get_last_ssid captures the SSID passed to connect_sta()
- *   - disconnect() from STA_CONNECTED → state becomes IDLE
+ *   - disconnect() from STA_DISCONNECTED → state becomes IDLE
  *   - mock_wifi_reset() wipes all state
  *   - deinit after AP mode is safe
  *   - empty-string password is allowed (open network)
  *   - SSID of exactly HAL_WIFI_SSID_MAX - 1 chars (31) is accepted
+ *   - disconnect() from IDLE is a no-op (returns OK, stays IDLE)
  */
 
+#include "mock_hal_wifi.h"
 #include "hal_wifi.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-/* Forward-declare mock accessors (defined in mock_hal_wifi.c). */
-void        mock_wifi_reset(void);
-const char *mock_wifi_get_last_ssid(void);
 
 #define ASSERT_EQ(label, expected, actual)                              \
     do {                                                                \
@@ -92,15 +92,33 @@ int main(void)
               (int)hal_wifi_get_state());
 
     /* ------------------------------------------------------------------ */
-    /* 5. connect_sta() with valid credentials → state becomes STA_CONNECTED.*/
+    /* 5. connect_sta() with valid credentials → state becomes             */
+    /*    STA_CONNECTING immediately (asynchronous IP event not yet fired).*/
     /* ------------------------------------------------------------------ */
     mock_wifi_reset();
     hal_wifi_init();
     ASSERT_EQ("connect_sta_ok",
               (int)HAL_WIFI_OK,
               (int)hal_wifi_connect_sta("HomeNetwork", "password123"));
-    ASSERT_EQ("state_after_connect_sta_is_connected",
+    ASSERT_EQ("state_after_connect_sta_is_connecting",
+              (int)HAL_WIFI_STATE_STA_CONNECTING,
+              (int)hal_wifi_get_state());
+
+    /* ------------------------------------------------------------------ */
+    /* 5b. simulate_connected() fires the IP-obtained event → STA_CONNECTED.*/
+    /* ------------------------------------------------------------------ */
+    mock_wifi_simulate_connected();
+    ASSERT_EQ("state_after_simulate_connected_is_sta_connected",
               (int)HAL_WIFI_STATE_STA_CONNECTED,
+              (int)hal_wifi_get_state());
+
+    /* ------------------------------------------------------------------ */
+    /* 5c. simulate_link_lost() fires the disconnect event →              */
+    /*     STA_DISCONNECTED.                                               */
+    /* ------------------------------------------------------------------ */
+    mock_wifi_simulate_link_lost();
+    ASSERT_EQ("state_after_simulate_link_lost_is_sta_disconnected",
+              (int)HAL_WIFI_STATE_STA_DISCONNECTED,
               (int)hal_wifi_get_state());
 
     /* ------------------------------------------------------------------ */
@@ -113,7 +131,7 @@ int main(void)
               strcmp(captured, "HomeNetwork"));
 
     /* ------------------------------------------------------------------ */
-    /* 7. disconnect() from STA → state returns to IDLE.                  */
+    /* 7. disconnect() from STA_DISCONNECTED → state returns to IDLE.     */
     /* ------------------------------------------------------------------ */
     ASSERT_EQ("disconnect_from_sta_ok",
               (int)HAL_WIFI_OK,
@@ -160,6 +178,17 @@ int main(void)
     hal_wifi_deinit();
     ASSERT_TRUE("deinit_mid_ap_safe", 1);
     ASSERT_EQ("state_after_deinit_is_idle",
+              (int)HAL_WIFI_STATE_IDLE,
+              (int)hal_wifi_get_state());
+
+    /* ------------------------------------------------------------------ */
+    /* 12. disconnect() from IDLE is a no-op — returns OK, stays IDLE.    */
+    /* ------------------------------------------------------------------ */
+    mock_wifi_reset();
+    ASSERT_EQ("disconnect_from_idle_ok",
+              (int)HAL_WIFI_OK,
+              (int)hal_wifi_disconnect());
+    ASSERT_EQ("state_after_disconnect_idle_stays_idle",
               (int)HAL_WIFI_STATE_IDLE,
               (int)hal_wifi_get_state());
 
