@@ -90,7 +90,15 @@ static void test_bruiser_level_1_to_3(void)
 }
 
 /* XP=UINT32_MAX at level 1: pump level-ups until level 99 (overflow robustness).
- * This is the N8 spec-challenger case from the backlog. */
+ * This is the N8 spec-challenger case from the backlog.
+ *
+ * Bruiser starts at STR=3, gains +2 per level.
+ * From level 1 to level 99 = 98 level-ups.
+ * Final STR = 3 + (98 * 2) = 3 + 196 = 199.
+ * 199 < 255 so saturation does not trigger for this class/range.
+ * The key invariant is that STR == 199 (not 0 from wrap, not 255 from
+ * spurious saturation). The saturation case is proved by
+ * test_stat_saturates_at_255_not_wrap in test_level_up_bounds.c. */
 static void test_bruiser_max_xp_reaches_level_99_not_overflow(void)
 {
     fq_character_t ch;
@@ -122,8 +130,8 @@ static void test_bruiser_max_xp_reaches_level_99_not_overflow(void)
     game_err_t final_err = fq_level_up(&ch);
     TEST_ASSERT_EQUAL_INT(GAME_ERR_INVALID, (int)final_err);
 
-    /* STR must be 255 (saturated), not 0. */
-    TEST_ASSERT_EQUAL_UINT8(255u, ch.strength);
+    /* STR must be exactly 199 (3 + 98*2), not 0 (wrap) and not > 255. */
+    TEST_ASSERT_EQUAL_UINT8(199u, ch.strength);
 }
 
 /* Warden level-up: +1 STR, +1 SPD, +0 PRC, +1 INT. */
