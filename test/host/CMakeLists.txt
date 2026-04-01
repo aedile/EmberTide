@@ -599,3 +599,16 @@ add_hal_test(test_p14_hal_ble_feature
 add_hal_test(test_p14_hal_wifi_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p14_hal_wifi_feature.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_wifi.c")
+
+# ---------------------------------------------------------------------------
+# F-02 Remediation: fq_character_create
+#
+# character.c lives in game/ — use add_host_test() which links all GAME_SOURCES
+# (the file(GLOB) at the top of this file picks up character.c automatically).
+# ---------------------------------------------------------------------------
+
+# Bound tests (Rule 22 Phase A — BOUND RED)
+add_host_test(test_character_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_character_bounds.c")
+
+# Feature tests (Rule 22 Phase B — FEATURE RED)
+add_host_test(test_character "${CMAKE_CURRENT_SOURCE_DIR}/test_character.c")
