@@ -1,5 +1,5 @@
 /**
- * combat.c — FiestaQuest Phase-4 Combat Engine implementation.
+ * combat.c — FiestaQuest Phase-4/5 Combat Engine implementation.
  *
  * See combat.h for full API contract, PRNG call ordering, and
  * Constitution compliance notes.
@@ -20,11 +20,26 @@
  *   - Lucky Star: always consumes 2 PRNG calls (d20); bonus damage deferred to Phase 5.
  *   - Conditional PRNG calls only advance PRNG when the branch is taken.
  *
+ * Phase 5 additions:
+ *   - fq_item_eval_trigger() integrated at lifecycle trigger points.
+ *   - Per-round item state reset at ON_ROUND_START (damage_bonus, damage_mult_pct,
+ *     dodge_bonus). PASSIVE items evaluated once during fq_combat_init.
+ *   - Damage formula: final = (base + damage_bonus) * damage_mult_pct / 100.
+ *     Minimum damage floor of 1 enforced after multiplier (NTR-B3).
+ *   - Time Loop snapshot fields initialized to 0 in fq_combat_init.
+ *
+ * Phase 5 review fixes:
+ *   - B1: Chaos Orb stat swaps are per-round only. Base stats of both fighters
+ *         are saved before ON_ROUND_START triggers and restored after ON_ROUND_END
+ *         triggers on all exit paths (including KO and round-limit). This ensures
+ *         Chaos Orb swaps never persist across rounds.
+ *
  * Constitution Priority 0: No floats, no time.h, no external entropy.
  * All random decisions use fq_prng_t exclusively.
  */
 
 #include "combat.h"
+#include "item_engine.h"
 #include "progression.h"
 #include <string.h>
 #include <limits.h>
@@ -58,8 +73,20 @@ static int16_t clamp_hp(int32_t v)
     return (int16_t)v;
 }
 
-/** Clamp a damage value to [0, INT8_MAX]. Defense-in-depth against overflow. */
-static int8_t clamp_damage(int32_t dmg)
+/** Clamp a damage value to [1, INT8_MAX]. Enforces minimum damage floor of 1
+ *  per NTR-B3 (Tough Hide cannot reduce damage below 1). Zero is only returned
+ *  when dmg_before_floor is 0 and no hit occurred — this function is only
+ *  called on hits, so the floor is always active.
+ *  Use clamp_damage_miss() for misses. */
+static int8_t clamp_damage_hit(int32_t dmg)
+{
+    if (dmg < 1)                 return 1;  /* NTR-B3: minimum floor of 1 */
+    if (dmg > (int32_t)INT8_MAX) return (int8_t)INT8_MAX;
+    return (int8_t)dmg;
+}
+
+/** Clamp a damage value to [0, INT8_MAX] for misses (no floor). */
+static int8_t clamp_damage_miss(int32_t dmg)
 {
     if (dmg < 0)                 return 0;
     if (dmg > (int32_t)INT8_MAX) return (int8_t)INT8_MAX;
@@ -84,6 +111,10 @@ static uint8_t hp_winner(const fq_combat_fighter_t *f1, const fq_combat_fighter_
 /**
  * copy_fighter() — Populate fq_combat_fighter_t from fq_character_t.
  *
+ * Phase 5: copies equipped item IDs and count.
+ * Initializes per-round item state: damage_bonus=0, damage_mult_pct=100,
+ * dodge_bonus=0.
+ *
  * HP is clamped to INT16_MAX (N5 defense-in-depth: hp_max is uint16_t).
  * reroll_charges = fq_effective_stat(intelligence) / 4.
  */
@@ -101,6 +132,32 @@ static void copy_fighter(fq_combat_fighter_t *f, const fq_character_t *c)
     f->intelligence   = c->intelligence;
     f->class_id       = c->class_id;
     f->reroll_charges = fq_effective_stat(c->intelligence) / 4u;
+
+    /* Phase 5: copy equipped item IDs. */
+    f->equipped_count = c->equipped_count;
+    for (uint8_t i = 0u; i < 5u; i++) {
+        f->equipped_items[i] = c->equipped[i];
+    }
+
+    /* Phase 5: initialize per-round item state. */
+    f->damage_bonus   = 0;
+    f->damage_mult_pct = 100u;
+    f->dodge_bonus    = 0u;
+}
+
+/**
+ * reset_per_round_item_state() — Reset per-round item accumulators.
+ *
+ * Called at the start of each round before ON_ROUND_START triggers fire.
+ * Ensures DAMAGE_ADD and DAMAGE_MULT bonuses from the previous round do not
+ * carry over. PASSIVE items are re-applied immediately after this reset via
+ * FQ_TRIGGER_PASSIVE eval in fq_combat_step (so Iron Fist +1 is always active).
+ */
+static void reset_per_round_item_state(fq_combat_fighter_t *f)
+{
+    f->damage_bonus   = 0;
+    f->damage_mult_pct = 100u;
+    f->dodge_bonus    = 0u;
 }
 
 /* ---------------------------------------------------------------------------
@@ -116,7 +173,9 @@ game_err_t fq_combat_init(fq_combat_ctx_t      *ctx,
         return GAME_ERR_NULL_PTR;
     }
 
-    /* Zero context for a deterministic initial state. */
+    /* Zero context for a deterministic initial state.
+     * This also initializes round_3_f1_hp=0, round_3_f2_hp=0,
+     * time_loop_used=0, item_recursion_depth=0 (NTR-D1). */
     memset(ctx, 0, sizeof(*ctx));
 
     copy_fighter(&ctx->f1, c1);
@@ -152,6 +211,11 @@ game_err_t fq_combat_init(fq_combat_ctx_t      *ctx,
     ctx->first_attacker = (init1 > init2) ? 1u : 2u;
     ctx->current_round  = 1u;
 
+    /* Phase 5: Apply PASSIVE item triggers once at init.
+     * Uses first_attacker as the attacking_fighter parameter (arbitrary for
+     * PASSIVE — both fighters' items are evaluated). */
+    fq_item_eval_trigger(ctx, FQ_TRIGGER_PASSIVE, ctx->first_attacker);
+
     return GAME_OK;
 }
 
@@ -160,9 +224,6 @@ game_err_t fq_combat_init(fq_combat_ctx_t      *ctx,
  *
  * Always consumes exactly 2 calls (A1 fix: d20, not d100). Both BLE peers'
  * PRNG streams stay synchronized regardless of perk ownership.
- *
- * ADVISORY ADV-P4-01: Phase 5 item engine must hook here to check perk
- * ownership and apply bonus attack when ls_roll == 1 (5% of d20).
  * ---------------------------------------------------------------------------*/
 static void consume_lucky_star(fq_prng_t *rng)
 {
@@ -173,16 +234,27 @@ static void consume_lucky_star(fq_prng_t *rng)
 /* ---------------------------------------------------------------------------
  * fq_combat_step
  *
- * PRNG order per round:
- *   1. Attacker 1 d6 attack roll
- *   2. [Conditional] Attacker 1 self-reroll d6  (if raw_roll<=2 and charges>0)
- *   3. Dodge roll for attack 1 d100
- *   4. Attacker 2 d6 attack roll
- *   5. [Conditional] Attacker 2 self-reroll d6  (if raw_roll<=2 and charges>0)
- *   6. [Conditional] Defensive reroll d6         (if atk2_raw>=5 and atk1 charges>0)
- *   7. Dodge roll for attack 2 d100
- *   8. Lucky Star F1 d20
- *   9. Lucky Star F2 d20
+ * PRNG order per round (Phase 4 base, unchanged):
+ *   1. [ON_ROUND_START item triggers — Lucky Coin d100, Chaos Orb d4]
+ *   2. Attacker 1 d6 attack roll
+ *   3. [Conditional] Attacker 1 self-reroll d6  (if raw_roll<=2 and charges>0)
+ *   4. Dodge roll for attack 1 d100
+ *   5. Attacker 2 d6 attack roll
+ *   6. [Conditional] Attacker 2 self-reroll d6  (if raw_roll<=2 and charges>0)
+ *   7. [Conditional] Defensive reroll d6         (if atk2_raw>=5 and atk1 charges>0)
+ *   8. Dodge roll for attack 2 d100
+ *   9. Lucky Star F1 d20
+ *  10. Lucky Star F2 d20
+ *
+ * Item PRNG calls at ON_ROUND_START fire BEFORE step 2 (NTR-A4).
+ * NTR-A2: No-item fight produces same PRNG state as Phase 4 baseline
+ *         (item triggers with no items make no PRNG calls).
+ *
+ * B1 fix: Chaos Orb stat swaps are per-round only.
+ * Base stats (strength, speed, precision, intelligence) for both fighters are
+ * saved immediately before ON_ROUND_START triggers fire, and restored after
+ * ON_ROUND_END triggers complete on ALL exit paths (KO, round limit, normal).
+ * This is done via the RESTORE_BASE_STATS macro applied before current_round++.
  * ---------------------------------------------------------------------------*/
 fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
 {
@@ -201,6 +273,29 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
 
     result.round = ctx->current_round;
 
+    /* --- Phase 5: Reset per-round item state and re-apply PASSIVE bonuses --- */
+    reset_per_round_item_state(&ctx->f1);
+    reset_per_round_item_state(&ctx->f2);
+    /* Re-apply PASSIVE items (Iron Fist etc.) each round.
+     * PASSIVE is the only trigger that re-fires every round via this path. */
+    fq_item_eval_trigger(ctx, FQ_TRIGGER_PASSIVE, ctx->first_attacker);
+
+    /* --- B1 fix: Save original base stats before item triggers can modify them.
+     *
+     * Chaos Orb (ON_ROUND_START) swaps base stats between fighters. These swaps
+     * must NOT persist across rounds. We save both fighters' stats here and
+     * restore them on ALL exit paths (KO, round limit, normal) via the goto done
+     * label, which executes before current_round++.
+     * ----------------------------------------------------------------------- */
+    uint8_t f1_str = ctx->f1.strength, f1_spd = ctx->f1.speed;
+    uint8_t f1_prc = ctx->f1.precision, f1_int = ctx->f1.intelligence;
+    uint8_t f2_str = ctx->f2.strength, f2_spd = ctx->f2.speed;
+    uint8_t f2_prc = ctx->f2.precision, f2_int = ctx->f2.intelligence;
+
+    /* --- Phase 5: ON_ROUND_START triggers (Lucky Coin, Chaos Orb) ---
+     * These fire BEFORE attacks (NTR-A4). PRNG consumed even if no items. */
+    fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_ROUND_START, ctx->first_attacker);
+
     /* Pointer aliases: first/second are initiative-ordered, f1/f2 are fixed. */
     fq_combat_fighter_t *first  = (ctx->first_attacker == 1u) ? &ctx->f1 : &ctx->f2;
     fq_combat_fighter_t *second = (ctx->first_attacker == 1u) ? &ctx->f2 : &ctx->f1;
@@ -209,6 +304,9 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
      * Attack 1: first → second
      * ------------------------------------------------------------------ */
     {
+        /* Phase 5: ON_DEFEND triggers for the defender (second), before attack. */
+        fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_DEFEND, ctx->first_attacker);
+
         /* Step 1: d6 attack roll. */
         uint32_t raw1 = fq_prng_range(&ctx->rng, 1u, 6u);
 
@@ -228,7 +326,17 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
                         - (int32_t)fq_effective_stat(first->precision) / 2;
         if (dc1 < 5)  dc1 = 5;
         if (dc1 > 40) dc1 = 40; /* B3 fix */
+
+        /* Phase 5: Apply dodge_bonus from items (e.g., future dodge items). */
+        dc1 = dc1 + (int32_t)second->dodge_bonus;
+        if (dc1 > 40) dc1 = 40; /* Re-clamp after bonus */
+
         int      hit1   = ((int32_t)dodge1 > dc1);
+
+        /* Phase 5: ON_DODGE trigger for defender if dodge succeeded. */
+        if (!hit1) {
+            fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_DODGE, ctx->first_attacker);
+        }
 
         /* B2: Precision tier and adjusted roll. */
         int     eff_prec1 = fq_effective_stat(first->precision);
@@ -243,11 +351,41 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
 
         int32_t damage1 = 0;
         if (hit1) {
-            damage1 = (int32_t)adj1
-                    + (int32_t)fq_effective_stat(first->strength) / 2;
+            /* Phase 5: ON_ATTACK trigger for attacker. */
+            fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_ATTACK, ctx->first_attacker);
+
+            /* Phase 5: ON_CRIT trigger if crit fires. */
             if (crit1) {
-                damage1 = damage1 * 3 / 2; /* integer 50% bonus */
+                fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_CRIT, ctx->first_attacker);
             }
+
+            /* Phase 5 damage formula:
+             * base = adj1 + eff_strength/2
+             * with_add = base + first->damage_bonus
+             * Phase 4 crit was: damage * 3/2
+             * Phase 5 crit is controlled by damage_mult_pct:
+             *   - Default crit: damage_mult_pct = 150 (applied by combat, not items)
+             *   - Haymaker: damage_mult_pct = 200 (set by ON_CRIT item trigger)
+             *   - No crit: damage_mult_pct = 100 (reset at round start)
+             */
+            int32_t base1 = (int32_t)adj1
+                          + (int32_t)fq_effective_stat(first->strength) / 2;
+
+            /* Apply DAMAGE_ADD from items. */
+            int32_t with_add1 = base1 + (int32_t)first->damage_bonus;
+
+            /* Apply crit multiplier (Phase 5: item-controlled). */
+            int32_t mult1 = crit1
+                ? (int32_t)first->damage_mult_pct  /* item may have set 200 */
+                : 100;
+            if (crit1 && first->damage_mult_pct == 100u) {
+                mult1 = 150; /* Default crit multiplier when no Haymaker. */
+            }
+            damage1 = with_add1 * mult1 / 100;
+
+            /* NTR-B3: Minimum damage floor of 1 on hits. */
+            if (damage1 < 1) { damage1 = 1; }
+
             second->hp = clamp_hp((int32_t)second->hp - damage1);
         }
 
@@ -256,17 +394,25 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
             result.f1_hit          = (uint8_t)hit1;
             result.f1_crit         = (uint8_t)crit1;
             result.f1_rerolled     = rr1;
-            result.f1_damage_dealt = clamp_damage(damage1);
+            result.f1_damage_dealt = hit1 ? clamp_damage_hit(damage1)
+                                          : clamp_damage_miss(0);
         } else {
             result.f2_hit          = (uint8_t)hit1;
             result.f2_crit         = (uint8_t)crit1;
             result.f2_rerolled     = rr1;
-            result.f2_damage_dealt = clamp_damage(damage1);
+            result.f2_damage_dealt = hit1 ? clamp_damage_hit(damage1)
+                                          : clamp_damage_miss(0);
         }
     }
 
     /* N6: KO check after attack 1 — no counter-attack. */
     if (second->hp <= 0) {
+        /* Phase 5: ON_KILL trigger for the attacker. */
+        fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_KILL, ctx->first_attacker);
+        /* Phase 5: ON_DEATH trigger for the KO'd fighter. */
+        fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_DEATH,
+                             (ctx->first_attacker == 1u) ? 2u : 1u);
+
         ctx->finished = 1u;
         ctx->winner   = ctx->first_attacker;
         consume_lucky_star(&ctx->rng); /* PRNG sync invariant — always consumed */
@@ -277,6 +423,11 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
      * Attack 2: second → first
      * ------------------------------------------------------------------ */
     {
+        /* Phase 5: ON_DEFEND triggers for the defender (first), before attack 2.
+         * attacking_fighter for attack 2 is the opposite of first_attacker. */
+        uint8_t atk2 = (ctx->first_attacker == 1u) ? 2u : 1u;
+        fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_DEFEND, atk2);
+
         /* Step 4: d6 attack roll. */
         uint32_t raw2 = fq_prng_range(&ctx->rng, 1u, 6u);
 
@@ -307,7 +458,17 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
                         - (int32_t)fq_effective_stat(second->precision) / 2;
         if (dc2 < 5)  dc2 = 5;
         if (dc2 > 40) dc2 = 40; /* B3 fix */
+
+        /* Phase 5: Apply dodge_bonus. */
+        dc2 = dc2 + (int32_t)first->dodge_bonus;
+        if (dc2 > 40) dc2 = 40;
+
         int      hit2   = ((int32_t)dodge2 > dc2);
+
+        /* Phase 5: ON_DODGE trigger for defender (first) if dodge succeeded. */
+        if (!hit2) {
+            fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_DODGE, atk2);
+        }
 
         /* B2: Precision tier and adjusted roll. */
         int     eff_prec2 = fq_effective_stat(second->precision);
@@ -321,11 +482,32 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
 
         int32_t damage2 = 0;
         if (hit2) {
-            damage2 = (int32_t)adj2
-                    + (int32_t)fq_effective_stat(second->strength) / 2;
+            /* Phase 5: ON_ATTACK trigger for attacker 2. */
+            fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_ATTACK, atk2);
+
+            /* Phase 5: ON_CRIT trigger for attacker 2 if crit fires. */
             if (crit2) {
-                damage2 = damage2 * 3 / 2;
+                fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_CRIT, atk2);
             }
+
+            int32_t base2 = (int32_t)adj2
+                          + (int32_t)fq_effective_stat(second->strength) / 2;
+
+            /* Apply DAMAGE_ADD from items. */
+            int32_t with_add2 = base2 + (int32_t)second->damage_bonus;
+
+            /* Apply crit multiplier. */
+            int32_t mult2 = crit2
+                ? (int32_t)second->damage_mult_pct
+                : 100;
+            if (crit2 && second->damage_mult_pct == 100u) {
+                mult2 = 150;
+            }
+            damage2 = with_add2 * mult2 / 100;
+
+            /* NTR-B3: minimum floor. */
+            if (damage2 < 1) { damage2 = 1; }
+
             first->hp = clamp_hp((int32_t)first->hp - damage2);
         }
 
@@ -334,14 +516,16 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
             result.f2_hit          = (uint8_t)hit2;
             result.f2_crit         = (uint8_t)crit2;
             result.f2_rerolled     = rr2;
-            result.f2_damage_dealt = clamp_damage(damage2);
+            result.f2_damage_dealt = hit2 ? clamp_damage_hit(damage2)
+                                          : clamp_damage_miss(0);
             /* def_rr1: F1 (first) used a defensive reroll — merge with f1_rerolled. */
             result.f1_rerolled    |= def_rr1;
         } else {
             result.f1_hit          = (uint8_t)hit2;
             result.f1_crit         = (uint8_t)crit2;
             result.f1_rerolled     = rr2;
-            result.f1_damage_dealt = clamp_damage(damage2);
+            result.f1_damage_dealt = hit2 ? clamp_damage_hit(damage2)
+                                          : clamp_damage_miss(0);
             /* def_rr1: F2 (first) used a defensive reroll — merge with f2_rerolled. */
             result.f2_rerolled    |= def_rr1;
         }
@@ -349,6 +533,11 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
 
     /* KO check after attack 2. */
     if (first->hp <= 0) {
+        uint8_t atk2 = (ctx->first_attacker == 1u) ? 2u : 1u;
+        /* Phase 5: ON_KILL for attacker 2, ON_DEATH for the KO'd fighter (first). */
+        fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_KILL, atk2);
+        fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_DEATH, ctx->first_attacker);
+
         ctx->finished = 1u;
         ctx->winner   = (ctx->first_attacker == 1u) ? 2u : 1u;
         consume_lucky_star(&ctx->rng); /* PRNG sync invariant */
@@ -380,6 +569,9 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
         }
     }
 
+    /* --- Phase 5: ON_ROUND_END triggers (Bandage, Time Loop) -------------- */
+    fq_item_eval_trigger(ctx, FQ_TRIGGER_ON_ROUND_END, ctx->first_attacker);
+
     /* --- Round limit (N17): winner by HP percentage ----------------------- */
     if (ctx->current_round >= FQ_MAX_ROUNDS) {
         ctx->finished = 1u;
@@ -392,6 +584,22 @@ done:
     result.f2_hp    = ctx->f2.hp;
     result.finished = ctx->finished;
     result.winner   = ctx->winner;
+
+    /* B1 fix: Restore original base stats after all item triggers for this round.
+     * Chaos Orb swaps base stats during ON_ROUND_START. These swaps must not
+     * persist into the next round (or be visible in ctx after the step returns).
+     * Restore is placed AFTER done: so it applies on ALL exit paths (KO, OT,
+     * round limit, normal), and BEFORE current_round++ so the round counter
+     * advances correctly after restore. */
+    ctx->f1.strength     = f1_str;
+    ctx->f1.speed        = f1_spd;
+    ctx->f1.precision    = f1_prc;
+    ctx->f1.intelligence = f1_int;
+    ctx->f2.strength     = f2_str;
+    ctx->f2.speed        = f2_spd;
+    ctx->f2.precision    = f2_prc;
+    ctx->f2.intelligence = f2_int;
+
     ctx->current_round++;
 
     return result;

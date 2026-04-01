@@ -8,6 +8,7 @@
  * Usage:
  *   TEST_ASSERT_EQUAL_UINT32(300u, result);
  *   TEST_ASSERT_NOT_NULL(ptr);
+ *   TEST_ASSERT_NULL(ptr);
  *
  * Design: macros capture __FILE__ and __LINE__ at the call site so failure
  * messages identify the exact test source location.
@@ -102,6 +103,20 @@
             exit(1);                                               \
         }                                                          \
         _TA_PASS(#ptr " != NULL");                                 \
+    } while (0)
+
+/* ---------------------------------------------------------------------------
+ * TEST_ASSERT_NULL(ptr)
+ * ---------------------------------------------------------------------------*/
+#define TEST_ASSERT_NULL(ptr)                                      \
+    do {                                                            \
+        if ((ptr) != NULL) {                                        \
+            fprintf(stderr,                                         \
+                "[FAIL] %s:%d  expected NULL, got %p\n",           \
+                __FILE__, __LINE__, (const void *)(ptr));          \
+            exit(1);                                               \
+        }                                                          \
+        _TA_PASS(#ptr " == NULL");                                 \
     } while (0)
 
 /* ---------------------------------------------------------------------------

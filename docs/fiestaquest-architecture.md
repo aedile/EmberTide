@@ -6,6 +6,8 @@
 
 **v2.2 amendment:** fq_save_result_t renamed to fq_save_err_t; FQ_SAVE_ERR_NULL_PTR added as new variant. Architecture doc updated to match implementation.
 
+**v2.4 amendment (Phase 5 item engine):** fq_combat_fighter_t expanded from 10→24 bytes (equipped_items[5], equipped_count, damage_bonus, damage_mult_pct, dodge_bonus). fq_combat_ctx_t expanded from 28→64 bytes (round_3_f1_hp, round_3_f2_hp, time_loop_used, item_recursion_depth). item_engine.c implemented with 8 representative items, trigger router with role-specific dispatch (ON_DEFEND/ON_DODGE→defender only; ON_ATTACK/ON_CRIT/ON_KILL/ON_DEATH→attacker only; PASSIVE/ON_ROUND_START/ON_ROUND_END→both fighters, defender first per NTR-C1). Section 5.2 updated. No-item PRNG baseline preserved (NTR-A2).
+
 **v2.3 amendment (Phase 4 formula rework):** Section 5.1 updated to reflect the actual Phase 4 combat API. The aspirational v1 API (fq_combat_resolve, fq_combat_finalize, item-aware fq_combat_fighter_t) is superseded by the Phase 4 implementation. Full item-aware signature arrives in Phase 5.
 
 **v2.1 amendment:** fq_prng_range signature changed from int to uint32_t — avoids signed/unsigned conversion hazards in modulo arithmetic.
@@ -363,7 +365,27 @@ void test_stepper_hp_accessible_between_rounds(void) {
 
 ### 5.2 Item Engine (game/item_engine.h)
 
-(Unchanged from v1 except: iteration covers slots 0-4, `fq_combat_state_t` is now part of `fq_combat_ctx_t`.)
+**v2.4 update:** Fully implemented in Phase 5. Public API:
+
+```c
+#define FQ_ITEM_NONE          0u   /* empty slot sentinel */
+#define FQ_MAX_ITEM_TRIGGERS  1u   /* recursion depth cap */
+
+const fq_item_def_t *fq_item_lookup(uint16_t item_id);
+void fq_item_eval_trigger(fq_combat_ctx_t *ctx, fq_trigger_t trigger,
+                          uint8_t attacking_fighter);
+```
+
+Trigger routing (PM-approved, NTR-C1):
+- ON_DEFEND, ON_DODGE → defender fighter items only
+- ON_ATTACK, ON_CRIT, ON_KILL, ON_DEATH → attacker fighter items only
+- PASSIVE, ON_ROUND_START, ON_ROUND_END → both fighters, defender first
+
+PRNG discipline: Lucky Coin (d100) and Chaos Orb (d4) always consume PRNG
+even when probabilistic check fails (NTR-A1). No-item fights are PRNG-invariant
+against Phase 4 baseline (NTR-A2).
+
+Phase 5 item table (8 representative items): 001, 003, 004, 104, 105, 109, 204, 207.
 
 ### 5.3 Mini-Game Scoring (game/mini_games.h)
 

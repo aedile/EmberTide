@@ -229,3 +229,15 @@ add_host_test(test_combat_bounds  "${CMAKE_CURRENT_SOURCE_DIR}/test_combat_bound
 # Phase-4 Feature tests (Rule 22 Phase B — FEATURE RED)
 # ---------------------------------------------------------------------------
 add_host_test(test_combat_engine  "${CMAKE_CURRENT_SOURCE_DIR}/test_combat_engine.c")
+
+# ---------------------------------------------------------------------------
+# Phase-5 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any phase-5 item engine implementation.
+# ---------------------------------------------------------------------------
+add_host_test(test_item_bounds     "${CMAKE_CURRENT_SOURCE_DIR}/test_item_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-5 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_host_test(test_item_engine     "${CMAKE_CURRENT_SOURCE_DIR}/test_item_engine.c")
+add_host_test(test_item_time_loop  "${CMAKE_CURRENT_SOURCE_DIR}/test_item_time_loop.c")

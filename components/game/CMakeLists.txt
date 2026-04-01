@@ -6,6 +6,7 @@ idf_component_register(
         "src/progression.c"
         "src/save_format.c"
         "src/combat.c"
+        "src/item_engine.c"
     INCLUDE_DIRS
         "include"
     # game/ MUST NOT depend on hal/, presentation/, or connectivity/.
