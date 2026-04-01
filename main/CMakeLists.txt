@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "app_main.c"
+        "vm_builder.c"
     INCLUDE_DIRS
         "."
     REQUIRES
