@@ -25,3 +25,8 @@ env/
 .idea/
 .claude/logs/
 *.swp
+
+# Phase enforcement artifacts (ephemeral — created by PM workflow hooks)
+.spec-challenge-complete
+.phase-audit-complete
+.reviewers-complete

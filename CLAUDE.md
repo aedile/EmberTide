@@ -35,6 +35,23 @@ The PM may edit directly: `docs/RETRO_LOG.md`, `CLAUDE.md`, `.claude/agents/*.md
 Present a plan, list files to create/modify, list tests to write, estimated commits.
 **Do not proceed until the user approves.**
 
+### Enforcement Artifacts (PROGRAMMATIC — enforced by `.claude/settings.json` hook)
+
+On any phase branch (`feat/phase-*`, `chore/phase-*`, `fix/phase-*`), `gh pr create` and `gh pr merge` are **blocked** unless all three artifacts exist in the repo root:
+
+1. **`.spec-challenge-complete`** — Created by the PM after the spec-challenger subagent completes. Contains the spec-challenger's finding count and timestamp.
+2. **`.phase-audit-complete`** — Created by the PM after the phase-boundary-auditor subagent completes. Contains the auditor's PASS/FAIL verdict and the list of verified acceptance criteria.
+3. **`.reviewers-complete`** — Created by the PM after ALL required reviewers complete. Contains the reviewer verdicts (QA, DevOps, Balance, Architecture, Visual as applicable) and blocker count.
+
+These files are ephemeral — they exist only during the phase branch lifecycle and are NOT committed to git (add to `.gitignore`). They are deleted when the branch is cleaned up.
+
+The PM MUST create these artifacts at the correct workflow points:
+- `.spec-challenge-complete` → after spawning and receiving spec-challenger results, BEFORE spawning software-developer
+- `.reviewers-complete` → after ALL reviewer subagents complete and ALL blockers are resolved
+- `.phase-audit-complete` → after spawning and receiving phase-boundary-auditor results, BEFORE creating the PR
+
+**If the PM attempts to create a PR or merge without these artifacts, the hook will BLOCK the operation with a Constitutional violation message.**
+
 ### PM Planning Rules
 
 **Rule 6 — Architecture Substitution Requires PM Approval.**
