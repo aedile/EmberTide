@@ -64,13 +64,13 @@ typedef enum {
  * Error codes returned by packet operations
  * ---------------------------------------------------------------------------*/
 typedef enum {
-    FQ_PKT_OK                  = 0,  /**< Operation succeeded. */
-    FQ_PKT_ERR_NULL            = 1,  /**< NULL pointer argument. */
-    FQ_PKT_ERR_MAGIC_MISMATCH  = 2,  /**< First 4 bytes != "FQ01". */
-    FQ_PKT_ERR_CRC_MISMATCH    = 3,  /**< Trailer CRC does not match computed. */
-    FQ_PKT_ERR_BUFFER_TOO_SMALL= 4,  /**< buf_size insufficient for this type. */
-    FQ_PKT_ERR_UNKNOWN_TYPE    = 5,  /**< type field not in fq_packet_type_t. */
-    FQ_PKT_ERR_INVALID_ROUND   = 6   /**< Round field out of [1,12] range. */
+    FQ_PKT_OK                   = 0,  /**< Operation succeeded. */
+    FQ_PKT_ERR_NULL             = 1,  /**< NULL pointer argument. */
+    FQ_PKT_ERR_MAGIC_MISMATCH   = 2,  /**< First 4 bytes != "FQ01". */
+    FQ_PKT_ERR_CRC_MISMATCH     = 3,  /**< Trailer CRC does not match computed. */
+    FQ_PKT_ERR_BUFFER_TOO_SMALL = 4,  /**< buf_size insufficient for this type. */
+    FQ_PKT_ERR_UNKNOWN_TYPE     = 5,  /**< type field not in fq_packet_type_t. */
+    FQ_PKT_ERR_INVALID_ROUND    = 6   /**< Round field out of [1,12] range. */
 } fq_packet_err_t;
 
 /* ---------------------------------------------------------------------------
@@ -93,34 +93,29 @@ typedef struct {
 /* ---------------------------------------------------------------------------
  * fq_packet_team_sync_t — character summary for opponent's display.
  *
- * Payload (28 bytes):
- *   name[12]        char[12]    12 bytes (fixed, NOT null-terminated in wire)
- *   class_id        uint8_t      1 byte
- *   level           uint8_t      1 byte
- *   hp_max          uint16_t LE  2 bytes
- *   equipped[5]     uint16_t[5] 10 bytes LE each
- *   equipped_count  uint8_t      1 byte
- *   (padding on struct is NOT serialized)
+ * Payload (27 bytes):
+ *   name[12]         char[12]     12 bytes (fixed; may be NUL-padded after string)
+ *   class_id         uint8_t       1 byte
+ *   level            uint8_t       1 byte
+ *   hp_max           uint16_t LE   2 bytes
+ *   equipped[5]      uint16_t[5]  10 bytes LE each (5 × 2)
+ *   equipped_count   uint8_t       1 byte
+ *   (struct padding bytes are NOT serialized — explicit field-by-field write)
  *
- * Total wire size: FQ_PACKET_OVERHEAD(9) + 28 = 37 bytes.
- *
- * Note: name is 12 chars; transmitted as exactly 12 bytes (may contain
- * nulls after the string end — this is intentional for fixed wire size).
+ * Total wire size: FQ_PACKET_OVERHEAD(9) + 27 = 36 bytes.
  * ---------------------------------------------------------------------------*/
 typedef struct {
-    char     name[12];      /**< Character name (up to 12 bytes, may be NUL-padded). */
-    uint8_t  class_id;      /**< fq_class_t value. */
-    uint8_t  level;         /**< Character level 1-99. */
-    uint16_t hp_max;        /**< Max HP for display. */
-    uint16_t equipped[5];   /**< Item IDs in equipped slots. */
-    uint8_t  equipped_count;/**< Number of active equipped items (0-5). */
+    char     name[12];       /**< Character name (up to 12 bytes, may be NUL-padded). */
+    uint8_t  class_id;       /**< fq_class_t value. */
+    uint8_t  level;          /**< Character level 1-99. */
+    uint16_t hp_max;         /**< Max HP for display. */
+    uint16_t equipped[5];    /**< Item IDs in equipped slots. */
+    uint8_t  equipped_count; /**< Number of active equipped items (0-5). */
 } fq_packet_team_sync_t;
 
-/** Exact serialized byte count for a team sync packet. */
-#define FQ_PACKET_TEAM_SYNC_PAYLOAD  (12u + 1u + 1u + 2u + 10u + 1u + 1u)  /* 28 bytes — +1 pad sentinel */
-
-/* Compute payload: name(12)+class(1)+level(1)+hp_max(2)+equipped(10)+count(1) = 27 */
-#define FQ_PACKET_TEAM_SYNC_SIZE     (FQ_PACKET_OVERHEAD + 27u)  /* 36 bytes */
+/** Exact serialized byte count for a team sync packet.
+ *  Payload: name(12)+class_id(1)+level(1)+hp_max(2)+equipped[5](10)+equipped_count(1) = 27 */
+#define FQ_PACKET_TEAM_SYNC_SIZE  (FQ_PACKET_OVERHEAD + 27u)  /* 36 bytes */
 
 /* ---------------------------------------------------------------------------
  * fq_packet_round_hash_t — anti-cheat hash exchange after each round.
@@ -132,7 +127,7 @@ typedef struct {
  * Total wire size: FQ_PACKET_OVERHEAD(9) + 5 = 14 bytes.
  * ---------------------------------------------------------------------------*/
 typedef struct {
-    uint8_t  round;        /**< Round number [1,12]. */
+    uint8_t  round;        /**< Round number [FQ_ROUND_MIN, FQ_ROUND_MAX]. */
     uint32_t combat_hash;  /**< fq_generate_combat_hash() output. */
 } fq_packet_round_hash_t;
 
@@ -162,7 +157,7 @@ size_t fq_packet_serialize(const void *packet, fq_packet_type_t type,
 /**
  * fq_packet_parse() — Deserialize a byte buffer into a packet struct.
  *
- * Validates magic, CRC32, type, and per-type field constraints.
+ * Validates magic, CRC32, type, and per-type field constraints in that order.
  * Writes the packet type to *out_type and the decoded struct into *out_packet.
  *
  * N2: A zero-length buffer (buf_size == 0) returns FQ_PKT_ERR_BUFFER_TOO_SMALL.
