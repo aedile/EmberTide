@@ -1,0 +1,109 @@
+# sdkconfig.production — FiestaQuest Production Factory Flash Overrides
+#
+# Target: ESP32-S3-ePaper-1.54 (Waveshare) / ESP32-S3-PICO-1-N8R8
+#
+# USAGE
+# -----
+# Apply on top of sdkconfig.defaults before running idf.py build:
+#
+#   cp sdkconfig.defaults sdkconfig
+#   cat sdkconfig.production >> sdkconfig
+#   idf.py build
+#
+# Or using the SDKCONFIG_DEFAULTS CMake variable (preferred for CI):
+#
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production" build
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# sdkconfig.defaults contains the development baseline (INFO logging, debug
+# assertions enabled). This file overrides only the keys that must differ in
+# a production factory flash to reduce binary size, serial overhead, and
+# power consumption. Keeping them separate preserves the development
+# experience while making production changes auditable in git.
+#
+# -------------------------------------------------------------------------
+# NEGATIVE TEST VALIDATION REQUIREMENTS (from phase-15 spec-challenger)
+# -------------------------------------------------------------------------
+#
+# N1 — OOM Under Peak Load:
+#   Under -Os, simultaneous full e-paper flush + 256-byte BLE MTU peak must
+#   leave >= 20 KB free heap. Verify via:
+#     esp_get_minimum_free_heap_size() >= 20480u
+#   logged in test_ble_combat.c (target test, Step 7).
+#
+# N2 — Cross-Architecture Divergence:
+#   One device compiled with CONFIG_COMPILER_OPTIMIZATION_SIZE=y (-Os),
+#   one with CONFIG_COMPILER_OPTIMIZATION_NONE=y (-O0). Round-1 combat hash
+#   must match. Validated by test_ble_combat.c Step 6 (NEGATIVE TEST N2).
+#   The fq_combat_fighter_t _Static_assert size pins catch padding differences
+#   at compile time; if they pass on both builds and hashes still diverge,
+#   the serializer in combat_hash.c is reading padding bytes.
+#
+# N3 — Silent Assertion Bypass:
+#   CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y maps assert() to a soft
+#   reboot via esp_restart(). Validate that TEST_ASSERT_* macros in host
+#   tests are NOT affected — they use the Unity assert path, not assert().
+#   Run: cd test/host && cmake -B build && ctest --output-on-failure
+#   Expected: 63/63 pass (host tests are entirely independent of sdkconfig).
+#
+# -------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Logging — reduce INFO overhead to ERROR only in production
+# ---------------------------------------------------------------------------
+# Overrides: CONFIG_LOG_DEFAULT_LEVEL_INFO=y (sdkconfig.defaults line 54)
+# Effect: serial log output drops to error messages only; ~3-8% binary size
+#         reduction from stripped format strings.
+CONFIG_LOG_DEFAULT_LEVEL_ERROR=y
+CONFIG_LOG_DEFAULT_LEVEL=1
+
+# ---------------------------------------------------------------------------
+# Bootloader log level — suppress boot chatter on production units
+# ---------------------------------------------------------------------------
+CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
+CONFIG_BOOTLOADER_LOG_LEVEL=1
+
+# ---------------------------------------------------------------------------
+# Compiler optimization — size-optimized release build
+# ---------------------------------------------------------------------------
+# -Os: optimize for size, prioritizing small binary over execution speed.
+# Validated by N2 (cross-architecture hash divergence check): struct layout
+# at -Os must produce identical combat hashes to -O0 builds, confirming
+# fq_generate_combat_hash() serializes fields, never raw struct casts.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# ---------------------------------------------------------------------------
+# Assertion behavior — silent soft reboot instead of hardware panic
+# ---------------------------------------------------------------------------
+# ESP-IDF maps CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT to:
+#   assert(x) -> if (!(x)) { esp_restart(); }
+# This prevents a manufacturing-floor device from locking up on an assert
+# in a recoverable transient state (e.g., BLE MTU race).
+#
+# IMPORTANT: This setting does NOT affect host-compiled Unity test assertions
+# (TEST_ASSERT_*). The host test suite uses its own assertion path and is
+# never influenced by sdkconfig. Gate 1 (63/63 host tests) remains unaffected.
+#
+# IMPORTANT: Combat determinism assertions inside game/ are pure logic guards
+# — they do not call assert(). The PRNG and CRC32 bounds are enforced by
+# the typed error enum returns documented in CONSTITUTION.md Priority 0.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=n
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+
+# ---------------------------------------------------------------------------
+# WiFi power save — enable IRAM power-save optimization
+# ---------------------------------------------------------------------------
+# Reduces active WiFi power draw during captive portal / OTA windows.
+# Disabled by default (development) to simplify debug of WiFi state changes.
+CONFIG_ESP_WIFI_SLP_IRAM_OPT=y
+
+# ---------------------------------------------------------------------------
+# BLE (NimBLE) — limit connections to 1 (FiestaQuest is a 1v1 protocol)
+# ---------------------------------------------------------------------------
+# HAL_BLE_MAX_CONNECTIONS=1 is the compile-time constant in hal_ble.h.
+# This sdkconfig entry aligns the NimBLE stack's runtime connection pool
+# with the HAL contract. Allowing more connections at the stack level
+# would waste RAM for contexts that are never opened.
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
