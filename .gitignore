@@ -1,0 +1,27 @@
+# build output
+build/
+output/
+__pycache__/
+*.pyc
+.DS_Store
+
+# ESP-IDF
+sdkconfig
+dependencies.lock
+.espressif/
+.ninja_*
+CMakeCache.txt
+CMakeFiles/
+Makefile
+
+# Env
+.env
+.venv/
+venv/
+env/
+
+# Editor
+.vscode/
+.idea/
+.claude/logs/
+*.swp
