@@ -494,7 +494,7 @@ add_app_test(test_p11_fsm_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_feat
 # ---------------------------------------------------------------------------
 # Phase-12: HAL E-Paper + Flash (host mocks)
 #
-# HAL headers live in components/hal/include/ — this path is deliberately
+# HAL headers live in components/fq_hal/include/ — this path is deliberately
 # NOT added to the game/ or presentation/ include lists (boundary preserved).
 # Mock .c files live in test/host/ and are linked directly into the test
 # executables, replacing the real target implementations.
@@ -505,7 +505,7 @@ add_app_test(test_p11_fsm_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_feat
 # the test source. Only hal/include is added — no game/ or presentation/
 # include paths, keeping HAL tests fully isolated at the bottom layer.
 # ---------------------------------------------------------------------------
-set(HAL_INCLUDE "${PROJECT_ROOT}/components/hal/include")
+set(HAL_INCLUDE "${PROJECT_ROOT}/components/fq_hal/include")
 
 function(add_hal_test target source mock_src)
     add_executable(${target} ${source} ${mock_src})
