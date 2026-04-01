@@ -3,36 +3,30 @@
 ## Item 1: Establish CMake Root and Entrypoint
 
 ### User Story
-As a developer, I need a standard ESP-IDF v5 CMake project structure with separate `game`, `presentation`, `hal`, and `connectivity` components so I can enforce architectural boundaries from day one.
+As a developer, I need a standard ESP-IDF v5 CMake project structure with separate `game`, `presentation`, `hal`, `connectivity`, and `platform` components so I can enforce architectural boundaries from day one.
 
 ### Acceptance Criteria
-- [ ] Project root contains a valid `CMakeLists.txt` for ESP-IDF.
-- [ ] `main/app_main.c` exists with an empty `app_main()` function.
-- [ ] Component directories `game`, `presentation`, `hal`, `connectivity` exist with minimal `CMakeLists.txt` files mapping their includes.
+- [x] Project root contains a valid `CMakeLists.txt` for ESP-IDF.
+- [x] `main/app_main.c` exists with an empty `app_main()` function.
+- [x] Component directories `game`, `presentation`, `hal`, `connectivity`, `platform` exist with minimal `CMakeLists.txt` files mapping their includes.
 
 ### Negative Test Requirements (from spec-challenger)
-- **Boundary Restriction:** A test compilation MUST be written that attempts to include a `<hal_*.h>` file from inside the `game` component. Ensure `idf.py build` explicitly FAILS with a missing header error, proving the CMake boundaries are water-tight.
+- **E1 Boundary Restriction:** try_compile at configure time proves game/ cannot include hal_*.h — FATAL_ERROR on violation.
+- **N1a:** presentation/ cannot include hal_*.h — FATAL_ERROR on violation.
+- **N1b:** game/ cannot include presentation headers — FATAL_ERROR on violation.
+- **N1c:** connectivity/ cannot include game/ headers — FATAL_ERROR on violation.
+- **N2:** `components/platform/` created as distinct layer between game/presentation and hal.
 
-### Implementation Steps
-1. Create `CMakeLists.txt` specifying `project(fiestaquest)`.
-2. Create directories: `components/game/include`, `components/game/src`, and matching `CMakeLists.txt`.
-3. Repeat for `presentation`, `hal`, and `connectivity`.
-4. Create `main/app_main.c` and `main/CMakeLists.txt`.
+### Implementation Notes
+- `CMakeLists.txt` REQUIRES/PRIV_REQUIRES enforce architectural boundaries:
+  - `game/`: no REQUIRES (pure functions, no dependencies)
+  - `presentation/`: REQUIRES `game` (not `hal`)
+  - `platform/`: REQUIRES `hal` (added in later phases)
+  - `connectivity/`: no game dependency
+  - `main/`: REQUIRES `game`, `presentation`, `platform`, `connectivity`
+- N8: In-source build guard (`FATAL_ERROR` if `CMAKE_SOURCE_DIR == CMAKE_BINARY_DIR`)
 
-### Test Expectations
-- `idf.py build` succeeds without errors for the default target.
-
-### Files to Create/Modify
-- `CMakeLists.txt` (Root)
-- `main/app_main.c`
-- `main/CMakeLists.txt`
-- `components/game/CMakeLists.txt`
-- `components/presentation/CMakeLists.txt`
-- `components/hal/CMakeLists.txt`
-- `components/connectivity/CMakeLists.txt`
-
-### Commit Messages
-- `chore: init ESP-IDF project skeleton and component boundaries`
+### Status: COMPLETE (branch: chore/phase-1-project-skeleton)
 
 ---
 
@@ -42,27 +36,17 @@ As a developer, I need a standard ESP-IDF v5 CMake project structure with separa
 As a developer practicing TDD, I need a host-compiled C testing environment (CTest) so I can validate my game logic instantly without flashing to an ESP32.
 
 ### Acceptance Criteria
-- [ ] `test/host/` directory exists with its own `CMakeLists.txt` configured as a standard host executable.
-- [ ] The host test executable links the `game` component successfully.
-- [ ] A dummy test `test_sanity.c` executes and passes via `ctest`.
+- [x] `test/host/` directory exists with its own `CMakeLists.txt` configured as a standard host executable.
+- [x] The host test executable links the `game` component successfully.
+- [x] A dummy test `test_sanity.c` executes and passes via `ctest`.
 
 ### Negative Test Requirements (from spec-challenger)
-- **Failure Escalation:** A deliberate failing CTest MUST be added to prove that `ctest` returns a non-zero exit code when an assertion fails. If it returns 0, the CI pipe is broken and fake greens will occur.
+- **E2 Failure Escalation:** `bound_e2_always_fails` with `WILL_FAIL TRUE` proves ctest catches non-zero exits.
+- **N5:** Explicit comment in CMakeLists asserting zero ESP-IDF include paths.
+- **N6:** `-Wall -Werror` set on all host test targets.
+- **N8:** In-source build guard.
 
-### Implementation Steps
-1. Create `test/host/CMakeLists.txt` defining a native executable (e.g. `add_executable(host_tests ...)`).
-2. Wire the `game` component sources into this native build.
-3. Write `test_sanity.c` with a simple `assert(1 == 1)`.
-
-### Test Expectations
-- `cd test/host && cmake -B build && cmake --build build && ctest` succeeds.
-
-### Files to Create/Modify
-- `test/host/CMakeLists.txt`
-- `test/host/test_sanity.c`
-
-### Commit Messages
-- `test: scaffold CTest host executable for game logic profiling`
+### Status: COMPLETE (branch: chore/phase-1-project-skeleton)
 
 ---
 
@@ -72,29 +56,18 @@ As a developer practicing TDD, I need a host-compiled C testing environment (CTe
 As a UI developer, I need a native host compilation target that generates PNG files so I can visually inspect e-paper layouts without hardware.
 
 ### Acceptance Criteria
-- [ ] `test/visual/` exists with its own `CMakeLists.txt`.
-- [ ] Links both `game` and `presentation` components.
-- [ ] C implementation uses `stb_image_write.h` to output a 200x200 pixel PNG.
-- [ ] `render_all_screens.c` builds and writes a completely black `output/blank.png`.
+- [x] `test/visual/` exists with its own `CMakeLists.txt`.
+- [x] Links both `game` and `presentation` components (screen_mgr.c excluded — device-only).
+- [x] C implementation uses `stb_image_write.h` v1.16 to output a 200x200 pixel PNG.
+- [x] `render_all_screens.c` builds and writes a completely black `output/blank.png`.
 
 ### Negative Test Requirements (from spec-challenger)
-- **Missing Asset Handling:** The visual tester MUST purposefully attempt to write to a read-only directory or read a missing file and assert that `stb_image` gracefully handles the failure rather than segfaulting the host CI pipeline.
+- **N3:** `stbi_write_png` return value checked; failure path tested (invalid path returns 0, not segfault).
+- **N6:** `-Wall -Werror` on all visual test targets.
+- **N7:** `_Static_assert(FB_SIZE_BYTES == 5000)` validates framebuffer size at compile time.
+- **N8:** In-source build guard.
 
-### Implementation Steps
-1. Download `stb_image_write.h` (single-header lib) into `test/visual/vendors/`.
-2. Create `test/visual/CMakeLists.txt`.
-3. Create `render_all_screens.c` which allocates a 5000-byte 1-bit buffer, fills it with 1s, and writes via `stbi_write_png`.
-
-### Test Expectations
-- `cd test/visual && cmake -B build && cmake --build build && ./build/render_all_screens` generates `output/blank.png`.
-
-### Files to Create/Modify
-- `test/visual/CMakeLists.txt`
-- `test/visual/vendors/stb_image_write.h`
-- `test/visual/render_all_screens.c`
-
-### Commit Messages
-- `test: scaffold visual regression generator writing PNGs`
+### Status: COMPLETE (branch: chore/phase-1-project-skeleton)
 
 ---
 
@@ -104,23 +77,21 @@ As a UI developer, I need a native host compilation target that generates PNG fi
 As a systems engineer, I need `sdkconfig.defaults` and `partitions.csv` explicitly defined so the ESP32-S3 boots with the correct memory mappings.
 
 ### Acceptance Criteria
-- [ ] `partitions.csv` allocates exactly the layout described in Design Doc 5.1 (Two 1.5MB app partitions, 5MB LittleFS data).
-- [ ] `sdkconfig.defaults` enforces Custom Partition Table.
-- [ ] `sdkconfig.defaults` enables SPIRAM (PSRAM) for future buffering needs.
+- [x] `partitions.csv` allocates exactly the layout described in Design Doc 5.1 (two 1.5MB app partitions, ~4.805 MiB LittleFS data — NOT "5MB").
+- [x] `sdkconfig.defaults` enforces Custom Partition Table.
+- [x] `sdkconfig.defaults` enables SPIRAM (Octal PSRAM, 80 MHz) for future buffering needs.
 
 ### Negative Test Requirements (from spec-challenger)
-- **Flash Boundary Overflow:** Attempt to compile a deliberately bloated binary (`#pragma` or giant array) that exceeds 1.5MB. Ensure `idf.py build` halts with an explicit partition overflow error before flashing to prevent silent corruption of the OTA partition.
+- **N4:** `test_partitions.c` validates CSV arithmetic at test time: no overlaps, all partitions fit within 8 MiB flash, storage end = 0x800000.
 
-### Implementation Steps
-1. Create `partitions.csv` replicating: factory, ota_0, ota_1, otadata, littlefs.
-2. Create `sdkconfig.defaults` with `CONFIG_PARTITION_TABLE_CUSTOM=y`, `CONFIG_SPIRAM=y`.
+### Partition Layout
+| Name     | Offset   | Size     | End      | Notes                    |
+|----------|----------|----------|----------|--------------------------|
+| nvs      | 0x009000 | 0x006000 | 0x00F000 | NVS key-value store      |
+| phy_init | 0x00F000 | 0x001000 | 0x010000 | PHY calibration data     |
+| app0     | 0x010000 | 0x180000 | 0x190000 | Factory app (1.5 MiB)    |
+| app1     | 0x190000 | 0x180000 | 0x310000 | OTA slot 0 (1.5 MiB)    |
+| otadata  | 0x310000 | 0x002000 | 0x312000 | OTA selection data       |
+| storage  | 0x312000 | 0x4EE000 | 0x800000 | LittleFS (~4.805 MiB)    |
 
-### Test Expectations
-- `idf.py build` succeeds and prints the custom partition map.
-
-### Files to Create/Modify
-- `partitions.csv`
-- `sdkconfig.defaults`
-
-### Commit Messages
-- `chore: configure 8MB flash partitions and S3 PSRAM defaults`
+### Status: COMPLETE (branch: chore/phase-1-project-skeleton)

@@ -12,7 +12,7 @@ dependencies.lock
 .ninja_*
 CMakeCache.txt
 CMakeFiles/
-Makefile
+/Makefile
 
 # Env
 .env
