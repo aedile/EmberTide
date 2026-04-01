@@ -647,3 +647,17 @@ add_hal_test(test_p16_hal_flash_feature
 add_hal_test(test_p16_hal_gpio_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_gpio_feature.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_gpio.c")
+
+# ---------------------------------------------------------------------------
+# Phase-17 Bound tests (Rule 22 Phase A — BOUND RED)
+# Covers sprite array sizing, table count/dims, font bitmap size, NULL guards,
+# off-screen blit, cursor advance, and descriptor field invariants.
+# ---------------------------------------------------------------------------
+add_pres_test(test_p17_asset_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_asset_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-17 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_pres_test(test_p17_asset_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_asset_feature.c")

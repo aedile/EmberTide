@@ -72,3 +72,38 @@ target_compile_options(render_all_screens PRIVATE
 add_test(NAME render_all_screens
          COMMAND render_all_screens
          WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# ---------------------------------------------------------------------------
+# test_asset_integration  (Phase 17)
+#
+# Blits a real sprite and renders real font text to a framebuffer, then
+# writes output/asset_integration.png.
+#
+# Does NOT depend on vm_builder or screen_*.c — pure presentation test.
+# Uses the generated sprite/font headers from
+#   components/presentation/include/sprites/
+#   components/presentation/include/fonts/
+#
+# stb_image_write.h triggers sign-conversion and unused-function warnings —
+# suppressed only for this target; all project code compiled at -Wall -Werror.
+# ---------------------------------------------------------------------------
+add_executable(test_asset_integration
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_asset_integration.c"
+    ${PRES_SOURCES}
+)
+
+target_include_directories(test_asset_integration PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"   # resolves vendors/stb_image_write.h
+    "${PRES_INCLUDE}"
+)
+
+target_compile_options(test_asset_integration PRIVATE
+    -Wall -Werror
+    -Wno-sign-conversion
+    -Wno-unused-function
+)
+
+# CTest: test_asset_integration must exit 0 and write output/asset_integration.png.
+add_test(NAME test_asset_integration
+         COMMAND test_asset_integration
+         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
