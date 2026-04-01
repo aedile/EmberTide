@@ -32,7 +32,14 @@
  *
  * Overflow guard: if hp_current > hp_max we clamp BEFORE multiplying so
  * that hp_clamped <= hp_max and hp_clamped * 100u <= UINT32_MAX for any
- * hp_max representable in uint16_t (max 65535 * 100 = 6,553,500 < 2^32).
+ * hp_max representable in uint16_t (max 65535 * 100 = 6,553,500 < 2^32,
+ * comfortably within uint32_t range).
+ *
+ * This function is safe for uint16_t-range inputs (hp_max up to 65535).
+ * For theoretical uint32_t inputs above ~42,949,672 (UINT32_MAX / 100),
+ * the multiply clamped * 100u would overflow uint32_t. That case is
+ * unreachable in production because hp_max originates from fq_character_t
+ * which declares hp_max as uint16_t.
  *
  * Guards:
  *   - hp_max == 0 → return 0 (divide-by-zero protection).

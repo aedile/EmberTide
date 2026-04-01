@@ -383,4 +383,43 @@ Phase 4 delivered the deterministic combat engine stepper (`fq_combat_init` / `f
 | ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 8 |
 | ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 8 |
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 8 |
+---
+
+## Phase 8 — View Models & Screen Renderers (Review Findings)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-8-view-models-screens`
+
+### Review Findings Addressed
+
+#### Blocker (1 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| B1 | Visual harness did not render Phase 8 screens | `render_all_screens.c` updated: added `scene_home.png`, `scene_inventory.png`, `scene_stats.png`. `test/visual/CMakeLists.txt` updated: added `PRES_SCREEN_SOURCES` (screens/*.c), `vm_builder.c` from `main/`, and `MAIN_INCLUDE`/`GAME_INCLUDE` paths to `render_all_screens` target. |
+
+#### Advisories (6 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 | Inventory count assertion used TEST_ASSERT_TRUE instead of pinned equality | Changed `TEST_ASSERT_TRUE(vm.item_count <= 32u)` to `TEST_ASSERT_EQUAL_UINT8(32u, vm.item_count)`. Added companion test `test_build_inventory_count_255_clamped_to_32`: inv.count=255 → vm.item_count==32. |
+| A2 | fq_vm_combat_t deferred to Phase 9 (combat screen). fq_vm_stats_t substituted for Phase 8. | ADVISORY: fq_vm_combat_t deferred to Phase 9 (combat screen). fq_vm_stats_t substituted for Phase 8. Logged here per advisory resolution policy. |
+| A3 | NULL-path builder tests did not assert key fields — only proved no-crash | For NULL-source tests (build_home null_ch, build_inventory null_inv, build_stats null_ch), VM is now pre-filled with 0xFF sentinel before the call. Comments document that the early-return path leaves the sentinel intact, proving no partial write occurred. |
+| A4 | Architecture doc used view_model_builder naming; implementation uses vm_builder | All 4 occurrences of `view_model_builder` in `docs/fiestaquest-architecture.md` replaced with `vm_builder`. v2.8 amendment note added at top of document. |
+| A5 | add_pres_test had no comment warning about screens/*.c exclusion | Added comment above `add_pres_test` in `test/host/CMakeLists.txt` noting that tests depending on screen renderers or vm_builder.c must use `add_vm_test` instead. |
+| A6 | calc_hp_percent comment did not clarify uint32_t overflow boundary | Updated comment in `main/vm_builder.c` to note: safe for uint16_t range (max 65535*100=6.5M fits uint32_t). Documents that uint32_t inputs above ~42M would overflow — unreachable since hp_max originates from uint16_t in production. |
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (host): All tests passing (includes new companion test for count=255 clamp).
+- `render_all_screens` (visual): PASS — 5 PNGs written: `blank.png`, `fb_test.png`, `scene_home.png`, `scene_inventory.png`, `scene_stats.png`.
+- `diff_screens.py`: PASS (no golden baselines yet; skips diff gracefully).
+
+### Open Advisories
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 9 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 9 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 9 |
 

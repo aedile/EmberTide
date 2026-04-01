@@ -68,6 +68,10 @@ endfunction()
 # sources (minus screen_mgr.c). Includes PRES_INCLUDE for fq_framebuffer.h,
 # fq_sprite.h, fq_text.h.
 # Architecture constraint: presentation/ MUST NOT include hal_*.h.
+#
+# NOTE: add_pres_test excludes screens/*.c from its source list. Tests that
+# depend on screen renderers (screen_home.c, screen_inventory.c,
+# screen_stats.c) or vm_builder.c MUST use add_vm_test instead.
 # ---------------------------------------------------------------------------
 function(add_pres_test target source)
     add_executable(${target} ${source})

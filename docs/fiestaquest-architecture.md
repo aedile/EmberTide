@@ -8,6 +8,8 @@
 
 **v2.6 amendment (Phase 7 visual render primitives):** fq_framebuffer.h/c implemented: fq_fb_t (5000-byte static 1-bit packed, MSB-first, _Static_assert enforced), fq_fb_clear/fill/set_pixel/get_pixel/draw_line (Bresenham all-octants)/draw_rect/fill_rect. fq_sprite.h/c implemented: fq_sprite_t + fq_blit_sprite (OR-blit, 4-edge clip, all 8 x-alignments, widths not multiple of 8). fq_text.h/c implemented: fq_font_t + fq_draw_text (ASCII 0x20-0x7E, int16_t cursor, stops at x>=200) + fq_text_width. Section 7.2 framebuffer type now matches implementation. Three new .c files registered in components/presentation/CMakeLists.txt.
 
+**v2.8 amendment (Phase 8 review findings):** vm_builder.h/c naming aligned — all occurrences of view_model_builder renamed to vm_builder throughout this document to match the Phase 8 implementation in main/vm_builder.h and main/vm_builder.c.
+
 **v2.7 amendment (Phase 7 review findings):** fq_framebuffer_t type name renamed to fq_fb_t throughout the document to match the implementation in fq_framebuffer.h. Function signatures in Section 7.2 updated from int parameters to int16_t parameters (x, y, w, h) to match actual API. draw_line implementation widened dx/dy to int32_t to eliminate signed overflow UB for extreme int16_t coordinate ranges (B4 fix). Section 7.2 framebuffer type and all screen render signatures now fully consistent with Phase 7 implementation.
 
 **v2.5 amendment (Phase 6 training & progression):** training.h/training.c added: pure mini-game FSM (fq_minigame_t 8 bytes, 5 states WAIT/ACTIVE/SUCCESS/FAIL/DONE), score = min(100, uint32_t(hits)*100/targets), difficulty = min(10, level/10), targets = 5 + difficulty*5. progression.h extended: fq_calc_xp_to_next (50*level^2, floor 50 at L0, sentinel 0 at L99) and fq_level_up (class-biased +3 stat/level, saturating at 255). legacy.h/legacy.c added: 32-bit 16-node tier-gated bitmask tree, fq_rebirth (50/60/75% stat retention, class base floor, rebirth_count/legacy_points saturation), fq_legacy_apply_bonuses, fq_calc_rebirth_tokens (level/10 + wins/100, saturated).
@@ -137,8 +139,8 @@ fiestaquest/
     app_main.c
     event_bus.h
     event_bus.c
-    view_model_builder.h          // game state -> view model translation
-    view_model_builder.c
+    vm_builder.h          // game state -> view model translation
+    vm_builder.c
 
   test/
     host/
@@ -630,7 +632,7 @@ fq_save_err_t fq_save_deserialize(
 
 ## 6. View Models (presentation/view_models.h)
 
-Screen renderers receive read-only view structs. They never include `game/types.h`. The application layer (view_model_builder.c) is the only module that knows both game structs and view structs.
+Screen renderers receive read-only view structs. They never include `game/types.h`. The application layer (vm_builder.c) is the only module that knows both game structs and view structs.
 
 ```c
 #ifndef FIESTAQUEST_VIEW_MODELS_H
@@ -1411,7 +1413,7 @@ CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 ### Phase 6: Integration
 
 ```
-1. app_main.c, event_bus.c, view_model_builder.c
+1. app_main.c, event_bus.c, vm_builder.c
 2. Mini-game runners (presentation layer, device-only)
 3. End-to-end: onboard -> train -> fight -> die -> rebirth
 4. Balance simulation (Python, 10K fights)
