@@ -13,6 +13,12 @@
  *   Byte index: y * FQ_FB_STRIDE + x / 8
  *   Bit  index: 7 - (x % 8)
  *
+ * Performance note:
+ *   fq_fb_fill_rect and fq_fb_draw_line use per-pixel fq_fb_set_pixel calls
+ *   which re-check bounds on every pixel. For a 200x200 display this is fast
+ *   enough (worst-case 40000 ops). A byte-span fast path can be added in a
+ *   future phase once profiling confirms it is necessary.
+ *
  * HOST-COMPILABLE — no hal_*.h, no ESP-IDF.
  */
 
@@ -23,9 +29,10 @@
 /* ── Internal helpers ─────────────────────────────────────────────────── */
 
 /**
- * pixel_in_bounds — Returns 1 if (x,y) is within [0,FQ_FB_WIDTH) × [0,FQ_FB_HEIGHT).
+ * pixel_in_bounds — Returns 1 if (x,y) is within [0,FQ_FB_WIDTH) x [0,FQ_FB_HEIGHT).
  *
- * Uses int16_t inputs; negative values fail the >= 0 check before casting.
+ * Negative values fail the >= 0 check before unsigned-cast comparison,
+ * preventing signed-overflow undefined behaviour.
  */
 static inline int pixel_in_bounds(int16_t x, int16_t y)
 {
@@ -82,13 +89,16 @@ uint8_t fq_fb_get_pixel(const fq_fb_t *fb, int16_t x, int16_t y)
 
 /* ── fq_fb_draw_line — Bresenham's line algorithm ─────────────────────── */
 /*
- * Classic integer Bresenham with support for all eight octants.
+ * Classic integer Bresenham supporting all eight octants.
  * Handles:
  *   - Vertical lines  (dx == 0)
  *   - Horizontal lines (dy == 0)
- *   - Single-point    (x0 == x1 && y0 == y1)
- *   - Reversed coords (x1 < x0 or y1 < y0)
- *   - Partially or fully out-of-bounds — per-pixel clipping via set_pixel.
+ *   - Single-point    (x0 == x1 && y0 == y1): loop body skipped, endpoint drawn
+ *   - Reversed coords (x1 < x0 or y1 < y0): sx/sy handle direction
+ *   - Partially or fully out-of-bounds: per-pixel clip via set_pixel
+ *
+ * All arithmetic stays in int16_t. Coordinates of ±32767 are safe because
+ * abs_dx and abs_dy are derived from differences, not from the raw values.
  */
 void fq_fb_draw_line(fq_fb_t *fb,
                      int16_t x0, int16_t y0,
@@ -97,47 +107,41 @@ void fq_fb_draw_line(fq_fb_t *fb,
 {
     if (fb == NULL) { return; }
 
-    /* Deltas (may be negative). */
-    int16_t dx = (int16_t)(x1 - x0);
-    int16_t dy = (int16_t)(y1 - y0);
-
-    /* Absolute values for step counting. */
+    int16_t dx     = (int16_t)(x1 - x0);
+    int16_t dy     = (int16_t)(y1 - y0);
     int16_t abs_dx = (dx < 0) ? (int16_t)(-dx) : dx;
     int16_t abs_dy = (dy < 0) ? (int16_t)(-dy) : dy;
-
-    /* Step direction. */
-    int16_t sx = (dx < 0) ? (int16_t)(-1) : (int16_t)(1);
-    int16_t sy = (dy < 0) ? (int16_t)(-1) : (int16_t)(1);
-
-    int16_t cx = x0;
-    int16_t cy = y0;
+    int16_t sx     = (dx < 0) ? (int16_t)(-1) : (int16_t)(1);
+    int16_t sy     = (dy < 0) ? (int16_t)(-1) : (int16_t)(1);
+    int16_t cx     = x0;
+    int16_t cy     = y0;
 
     if (abs_dx >= abs_dy) {
-        /* X-major (or horizontal) */
+        /* X-major (or horizontal): step one pixel in X per iteration. */
         int16_t err = (int16_t)(abs_dx / 2);
         while (cx != x1) {
             fq_fb_set_pixel(fb, cx, cy, color);
             err = (int16_t)(err - abs_dy);
             if (err < 0) {
-                cy = (int16_t)(cy + sy);
+                cy  = (int16_t)(cy  + sy);
                 err = (int16_t)(err + abs_dx);
             }
             cx = (int16_t)(cx + sx);
         }
     } else {
-        /* Y-major (or vertical) */
+        /* Y-major (or vertical): step one pixel in Y per iteration. */
         int16_t err = (int16_t)(abs_dy / 2);
         while (cy != y1) {
             fq_fb_set_pixel(fb, cx, cy, color);
             err = (int16_t)(err - abs_dx);
             if (err < 0) {
-                cx = (int16_t)(cx + sx);
+                cx  = (int16_t)(cx  + sx);
                 err = (int16_t)(err + abs_dy);
             }
             cy = (int16_t)(cy + sy);
         }
     }
-    /* Always draw the final endpoint. */
+    /* Draw the final endpoint unconditionally (loop exits before it). */
     fq_fb_set_pixel(fb, x1, y1, color);
 }
 
@@ -154,12 +158,11 @@ void fq_fb_draw_rect(fq_fb_t *fb,
     int16_t x1 = (int16_t)(x + w - 1);
     int16_t y1 = (int16_t)(y + h - 1);
 
-    /* Top and bottom horizontal lines. */
-    fq_fb_draw_line(fb, x,  y,  x1, y,  color);
-    fq_fb_draw_line(fb, x,  y1, x1, y1, color);
-    /* Left and right vertical lines. */
-    fq_fb_draw_line(fb, x,  y,  x,  y1, color);
-    fq_fb_draw_line(fb, x1, y,  x1, y1, color);
+    /* Four sides. Corners drawn by both adjacent lines (harmless for 1-bit). */
+    fq_fb_draw_line(fb, x,  y,  x1, y,  color); /* top    */
+    fq_fb_draw_line(fb, x,  y1, x1, y1, color); /* bottom */
+    fq_fb_draw_line(fb, x,  y,  x,  y1, color); /* left   */
+    fq_fb_draw_line(fb, x1, y,  x1, y1, color); /* right  */
 }
 
 /* ── fq_fb_fill_rect ──────────────────────────────────────────────────── */
