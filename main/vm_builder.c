@@ -1,8 +1,8 @@
 /**
  * vm_builder.c — FiestaQuest Application Layer: View Model Builder
  *
- * Translates fq_character_t / fq_inventory_t game state into view model
- * structs consumed by the presentation layer.
+ * Translates fq_character_t / fq_inventory_t / fq_combat_ctx_t game state
+ * into view model structs consumed by the presentation layer.
  *
  * Constitution Priority 0 compliance:
  *   - No floating point. HP percent uses integer-only formula.
@@ -12,6 +12,8 @@
  *
  * Architecture constraint: this file is the ONLY module that includes both
  * game/types.h (via vm_builder.h → types.h) and presentation/view_models.h.
+ *
+ * Phase-9: fq_vm_build_combat() added.
  */
 
 #include "vm_builder.h"
@@ -150,4 +152,48 @@ void fq_vm_build_stats(fq_vm_stats_t *vm, const fq_character_t *ch)
 
     /* Compute XP required to reach next level (frozen formula, pure function). */
     vm->xp_to_next = fq_calc_xp_to_next(ch->level);
+}
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_build_combat
+ *
+ * Builds the combat HUD view model from a live fq_combat_ctx_t snapshot and
+ * the two character records. HP values come from ctx->f1/f2 (int16_t —
+ * matches fq_vm_combat_t field types exactly, no conversion hazard).
+ *
+ * action_text is always zeroed — the caller (event loop) fills it from the
+ * latest round result after calling this function.
+ *
+ * NULL-safe: any NULL argument → immediate return without modifying vm.
+ * ---------------------------------------------------------------------------*/
+void fq_vm_build_combat(fq_vm_combat_t        *vm,
+                        const fq_combat_ctx_t *ctx,
+                        const fq_character_t  *c1,
+                        const fq_character_t  *c2)
+{
+    if (vm == NULL || ctx == NULL || c1 == NULL || c2 == NULL) {
+        return;
+    }
+
+    /* Fighter 1 (player) */
+    strncpy(vm->f1_name, c1->name, 12u);
+    vm->f1_name[12]  = '\0';
+    vm->f1_hp        = ctx->f1.hp;
+    vm->f1_hp_max    = ctx->f1.hp_max;
+    vm->f1_class_id  = c1->class_id;
+
+    /* Fighter 2 (enemy) */
+    strncpy(vm->f2_name, c2->name, 12u);
+    vm->f2_name[12]  = '\0';
+    vm->f2_hp        = ctx->f2.hp;
+    vm->f2_hp_max    = ctx->f2.hp_max;
+    vm->f2_class_id  = c2->class_id;
+
+    /* Round and outcome */
+    vm->round    = ctx->current_round;
+    vm->finished = ctx->finished;
+    vm->winner   = ctx->winner;
+
+    /* action_text cleared — caller populates from round result. */
+    vm->action_text[0] = '\0';
 }

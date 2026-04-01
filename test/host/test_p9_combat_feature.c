@@ -228,12 +228,10 @@ static void test_vm_build_combat_populates_fields(void)
     memset(&c1,  0, sizeof(c1));
     memset(&c2,  0, sizeof(c2));
 
-    strncpy(c1.name, "Ember",  12u);
-    c1.name[12] = '\0';
+    strncpy(c1.name, "Ember",  sizeof(c1.name) - 1u);
     c1.class_id = (uint8_t)FQ_CLASS_BRUISER;
 
-    strncpy(c2.name, "Shadow", 12u);
-    c2.name[12] = '\0';
+    strncpy(c2.name, "Shadow", sizeof(c2.name) - 1u);
     c2.class_id = (uint8_t)FQ_CLASS_TRICKSTER;
 
     /* Set up ctx fighters directly */

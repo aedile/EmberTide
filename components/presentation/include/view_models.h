@@ -12,6 +12,7 @@
  * HOST-COMPILABLE: this file compiles on the host for visual test harness.
  *
  * Phase-8 additions: fq_vm_home_t, fq_vm_inventory_t, fq_vm_stats_t.
+ * Phase-9 additions: fq_vm_combat_t, fq_vm_training_t.
  */
 
 #ifndef FIESTAQUEST_PRESENTATION_VIEW_MODELS_H
@@ -112,5 +113,53 @@ typedef struct {
     uint8_t  rebirth_count;/**< Total rebirth count. */
     uint8_t  _pad[3];      /**< Explicit alignment pad. */
 } fq_vm_stats_t;
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_combat_t — Combat HUD screen view model.
+ *
+ * Carries pre-computed display values for the split-screen combat view.
+ * No game/ types referenced — plain integers and strings only.
+ *
+ * Naming convention:
+ *   f1 = player fighter (bottom half of screen)
+ *   f2 = enemy fighter  (top half of screen)
+ *
+ * HP is stored as int16_t to match fq_combat_fighter_t.hp. Negative HP
+ * is valid (fighter KO'd past zero) and renders as a 0-width bar.
+ *
+ * action_text[0] == '\0' means no banner overlay.
+ * action_text is bounded at 32 bytes; use strnlen(..., 31) for safe length.
+ * ---------------------------------------------------------------------------*/
+typedef struct {
+    char    f1_name[13];      /**< Player fighter name: 12 chars + null. */
+    char    f2_name[13];      /**< Enemy fighter name: 12 chars + null. */
+    int16_t f1_hp;            /**< Player current HP (may be negative = KO). */
+    int16_t f1_hp_max;        /**< Player max HP. 0 → bar width = 0. */
+    int16_t f2_hp;            /**< Enemy current HP. */
+    int16_t f2_hp_max;        /**< Enemy max HP. 0 → bar width = 0. */
+    uint8_t round;            /**< Current round number (1-12). */
+    uint8_t f1_class_id;      /**< Player class (fq_class_t as uint8_t). */
+    uint8_t f2_class_id;      /**< Enemy class (fq_class_t as uint8_t). */
+    char    action_text[32];  /**< Banner text. Empty string = no banner. */
+    uint8_t finished;         /**< 1 = combat concluded this render. */
+    uint8_t winner;           /**< 0=none, 1=f1 won, 2=f2 won. */
+} fq_vm_combat_t;
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_training_t — Training mini-game screen view model.
+ *
+ * Carries pre-computed display values for the training screen.
+ *
+ * state:
+ *   0 = waiting (pre-game prompt)
+ *   1 = active  (mini-game running)
+ *   2 = done    (result shown)
+ * ---------------------------------------------------------------------------*/
+typedef struct {
+    char    game_name[16]; /**< Mini-game name: "Speed", "Power", "Intel". */
+    uint8_t score;         /**< Mini-game score: 0-100. */
+    uint8_t difficulty;    /**< Difficulty level 0-10. */
+    uint8_t state;         /**< 0=waiting, 1=active, 2=done. */
+} fq_vm_training_t;
 
 #endif /* FIESTAQUEST_PRESENTATION_VIEW_MODELS_H */
