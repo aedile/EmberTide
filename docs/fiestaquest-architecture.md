@@ -6,6 +6,8 @@
 
 **v2.2 amendment:** fq_save_result_t renamed to fq_save_err_t; FQ_SAVE_ERR_NULL_PTR added as new variant. Architecture doc updated to match implementation.
 
+**v2.3 amendment (Phase 4 formula rework):** Section 5.1 updated to reflect the actual Phase 4 combat API. The aspirational v1 API (fq_combat_resolve, fq_combat_finalize, item-aware fq_combat_fighter_t) is superseded by the Phase 4 implementation. Full item-aware signature arrives in Phase 5.
+
 **v2.1 amendment:** fq_prng_range signature changed from int to uint32_t — avoids signed/unsigned conversion hazards in modulo arithmetic.
 
 **v2 changelog:** Combat stepper API (replaces all-at-once resolver). Typed event bus (tagged union, no void*). Mini-game contracts (scoring + running split). Training session FSM. BLE service contract. Captive portal module. View model layer (decouples presentation from game state). Visual test harness (host-rendered PNGs for LLM review before flashing). CRC32 frozen alongside PRNG. PRNG modulo bias accepted and documented. Effective stat lookup table committed. Production error logging. PSRAM policy expanded.
@@ -281,85 +283,40 @@ Test validates every entry against the float formula within +/- 1 rounding toler
 
 Combat is a step-at-a-time state machine. The caller advances one round, does BLE sync, renders, then advances the next round. Pure functions throughout -- no I/O, no hardware, no time.
 
+**v2.3 amendment — Phase 4 actual API:** The implementation delivered in Phase 4 uses `fq_character_t *` directly (no item-aware wrapper). The aspirational item-aware `fq_combat_fighter_t` (with `equipped_items[5]`) arrives in Phase 5. The actual Phase 4 API is:
+
 ```c
-#ifndef FIESTAQUEST_COMBAT_H
-#define FIESTAQUEST_COMBAT_H
-
-#include "types.h"
-#include "prng.h"
-
-#define FQ_MAX_ROUNDS 12
-#define FQ_OVERTIME_START 9
-
-typedef struct {
-    int16_t f1_hp;
-    int16_t f2_hp;
-    int8_t  f1_damage_dealt;
-    int8_t  f2_damage_dealt;
-    bool    f1_dodged;
-    bool    f2_dodged;
-    bool    f1_crit;
-    bool    f2_crit;
-    int8_t  overtime_damage;
-    bool    f1_lucky_star;          // bonus attack triggered this round
-    bool    f2_lucky_star;
-} fq_round_result_t;
-
-typedef struct {
-    fq_round_result_t rounds[FQ_MAX_ROUNDS];
-    uint8_t           round_count;
-    uint8_t           winner;       // 1, 2, or 0 (draw)
-    uint32_t          crc32;
-} fq_combat_log_t;
-
-typedef struct {
-    fq_character_t  fighter;
-    fq_item_def_t   equipped_items[5];
-    uint8_t         equipped_count;
-    bool            has_lucky_star;
-    bool            has_ghost_walk;
-} fq_combat_fighter_t;
-
-// Opaque combat context. Stack-allocatable.
-typedef struct {
-    fq_prng_t           rng;
-    fq_combat_fighter_t fighters[2];
-    fq_combat_state_t   state;      // mutable HP, debuffs, item state
-    fq_combat_log_t     log;
-    uint8_t             current_round;
-    bool                finished;
-} fq_combat_ctx_t;
-
-// Initialize combat context. Does not advance any rounds.
-void fq_combat_init(
-    fq_combat_ctx_t *ctx,
-    const fq_combat_fighter_t *f1,   // canonical Fighter 1 (initiator)
-    const fq_combat_fighter_t *f2,   // canonical Fighter 2 (responder)
-    uint32_t prng_seed
-);
-
-// Advance one round. Returns the round result.
-// Caller is responsible for BLE sync and rendering between calls.
+game_err_t        fq_combat_init(fq_combat_ctx_t *ctx,
+                                 const fq_character_t *c1,
+                                 const fq_character_t *c2,
+                                 uint32_t seed);
 fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx);
-
-// Is the fight over?
-bool fq_combat_is_finished(const fq_combat_ctx_t *ctx);
-
-// Get current HP for both fighters (for BLE ROUND_CHECK).
-void fq_combat_get_hp(const fq_combat_ctx_t *ctx, int16_t *f1_hp, int16_t *f2_hp);
-
-// Finalize and return complete log (only valid after is_finished == true).
-fq_combat_log_t fq_combat_finalize(fq_combat_ctx_t *ctx);
-
-// Convenience: run entire fight at once (for testing / balance simulation).
-fq_combat_log_t fq_combat_resolve(
-    const fq_combat_fighter_t *f1,
-    const fq_combat_fighter_t *f2,
-    uint32_t prng_seed
-);
-
-#endif
 ```
+
+**Phase 4 combat formula contract (B1–B5 rework, 2026-03-31):**
+- **B1 Initiative:** `d6 + eff_speed/3` (not d100 + full eff_speed). Ties favor F2 (defender).
+- **B2 Precision tier:** `tier = min(eff_precision/5, 3)`. Four-tier lookup table maps raw d6 to adjusted_roll before damage: Tier 0 `[1,2,3,4,5,6]`, Tier 1 `[2,2,3,4,5,6]`, Tier 2 `[2,3,3,4,5,5]`, Tier 3 `[3,3,4,4,5,5]`.
+- **B3 Dodge clamp:** `[5, 40]` (not `[5, 75]`).
+- **B4 Crit:** `crit_threshold = 6 - (tier/2)`. Determined from original raw d6 roll. No separate PRNG call.
+- **B5 Rerolls:** Self-reroll if `own_raw_roll <= 2` (keep higher). Defensive reroll if `opponent_raw_roll >= 5` (keep lower for opponent). Both consume one charge from the fighter who rerolls.
+
+**PRNG call order per round:**
+1. First attacker d6 attack roll
+2. [Cond.] First attacker self-reroll d6 (if raw ≤ 2 and charges > 0)
+3. Dodge d100 for attack 1
+4. Second attacker d6 attack roll
+5. [Cond.] Second attacker self-reroll d6 (if raw ≤ 2 and charges > 0)
+6. [Cond.] First attacker defensive reroll d6 (if second_raw ≥ 5 and first has charges)
+7. Dodge d100 for attack 2
+8. Lucky Star F1 d20 (ALWAYS consumed)
+9. Lucky Star F2 d20 (ALWAYS consumed)
+
+**Sizes (compile-time verified):**
+- `fq_combat_fighter_t`: 10 bytes
+- `fq_combat_ctx_t`: 28 bytes
+- `fq_round_result_t`: 18 bytes
+
+**BLOCKER advisory — Phase 5:** Full item-aware signature (equipped_items[], has_lucky_star, perk checks) must be wired before BLE combat ships. Phase 4 wires the core formula with no item passives active.
 
 **Tests:**
 

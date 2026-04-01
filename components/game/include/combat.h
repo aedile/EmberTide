@@ -5,17 +5,23 @@
  * All math is integer-only. No floating point. No malloc in the fast path.
  * All state is stack-allocatable via fq_combat_ctx_t.
  *
- * PRNG call ordering per round (per Appendix A):
- *   1. Attacker 1 attack roll:       fq_prng_range(1,6)
- *   2. Dodge roll for attack 1:      fq_prng_range(1,100)
- *   3. [Conditional] Reroll:         fq_prng_range(1,6)  — only if atk<=2 and charges>0
- *   4. [Conditional] Crit check 1:   fq_prng_range(1,100) — only if hit
- *   5. Attacker 2 attack roll:       fq_prng_range(1,6)
- *   6. Dodge roll for attack 2:      fq_prng_range(1,100)
- *   7. [Conditional] Reroll:         fq_prng_range(1,6)  — only if atk<=2 and charges>0
- *   8. [Conditional] Crit check 2:   fq_prng_range(1,100) — only if hit
- *   9. Lucky Star F1:                fq_prng_range(1,100) — ALWAYS consumed
- *  10. Lucky Star F2:                fq_prng_range(1,100) — ALWAYS consumed
+ * PRNG call ordering per round (per design doc Appendix A and B4 rework):
+ *   1. Attacker 1 attack roll:             fq_prng_range(1,6)   — always
+ *   2. [Conditional] Attacker 1 self-rr:   fq_prng_range(1,6)   — if atk_roll<=2 AND charges>0
+ *   3. Dodge roll for attack 1:            fq_prng_range(1,100) — always
+ *   4. Attacker 2 attack roll:             fq_prng_range(1,6)   — always
+ *   5. [Conditional] Attacker 2 self-rr:   fq_prng_range(1,6)   — if atk_roll<=2 AND charges>0
+ *   6. [Conditional] Attacker 1 def-rr:    fq_prng_range(1,6)   — if attacker2_roll>=5 AND atk1 charges>0
+ *   7. Dodge roll for attack 2:            fq_prng_range(1,100) — always
+ *   8. Lucky Star F1:                      fq_prng_range(1,20)  — ALWAYS consumed
+ *   9. Lucky Star F2:                      fq_prng_range(1,20)  — ALWAYS consumed
+ *
+ * Crit is determined from the ORIGINAL d6 raw_roll (before precision table adjustment),
+ * NOT from a separate PRNG call (B4 fix — crit PRNG call removed entirely).
+ *
+ * Initiative (B1 fix): fq_prng_range(1,6) + eff_speed/3 (was d100 + full eff_speed).
+ *
+ * Dodge clamp (B3 fix): [5, 40] (was [5, 75]).
  *
  * Determinism guarantee: both devices must follow the same branch decisions
  * because they share the same seed. PRNG stream stays synchronized.
@@ -80,8 +86,8 @@ typedef struct {
     uint8_t  f2_hit;           /**< 1 if F2's attack landed, 0 if dodged. */
     uint8_t  f1_crit;          /**< 1 if F1 scored a critical hit. */
     uint8_t  f2_crit;          /**< 1 if F2 scored a critical hit. */
-    uint8_t  f1_rerolled;      /**< 1 if F1 used a reroll charge this round. */
-    uint8_t  f2_rerolled;      /**< 1 if F2 used a reroll charge this round. */
+    uint8_t  f1_rerolled;      /**< 1 if F1 used a reroll charge this round (self or defensive). */
+    uint8_t  f2_rerolled;      /**< 1 if F2 used a reroll charge this round (self or defensive). */
     uint8_t  f1_lucky_star;    /**< 1 if F1 Lucky Star bonus triggered (Phase 5+). */
     uint8_t  f2_lucky_star;    /**< 1 if F2 Lucky Star bonus triggered (Phase 5+). */
     uint8_t  overtime_damage;  /**< Overtime damage applied to both (0 if round <= 8). */
@@ -109,13 +115,16 @@ typedef struct {
  * N16: Compile-time size check.
  * fq_combat_fighter_t: 2+2+6 = 10 bytes (no padding gaps expected).
  * fq_combat_ctx_t: 2*10 + 4(prng) + 4*1 = 28 bytes.
- * Verified at compile time:
+ * fq_round_result_t: 2+2+1+1+12*1 = 18 bytes.
  */
 _Static_assert(sizeof(fq_combat_fighter_t) == 10u,
     "fq_combat_fighter_t must be exactly 10 bytes");
 
 _Static_assert(sizeof(fq_combat_ctx_t) == 28u,
     "fq_combat_ctx_t must be exactly 28 bytes");
+
+_Static_assert(sizeof(fq_round_result_t) == 18u,
+    "fq_round_result_t must be exactly 18 bytes");
 
 /* ---------------------------------------------------------------------------
  * Public API
@@ -124,8 +133,8 @@ _Static_assert(sizeof(fq_combat_ctx_t) == 28u,
 /**
  * fq_combat_init() — Initialize a combat context from two character pointers.
  *
- * Performs NULL guard, stat copy, HP clamp, initiative roll, and reroll
- * charge calculation. After a successful return, ctx is ready for
+ * Performs NULL guard, stat copy, HP clamp, initiative roll (B1: d6 + eff_speed/3),
+ * and reroll charge calculation. After a successful return, ctx is ready for
  * fq_combat_step() calls.
  *
  * @param ctx   Output context. Must not be NULL.
@@ -143,8 +152,15 @@ game_err_t fq_combat_init(fq_combat_ctx_t        *ctx,
  * fq_combat_step() — Execute one round of combat.
  *
  * Advances the combat state by one round: resolves both attacks (in
- * initiative order), checks for KO, applies Lucky Star PRNG calls,
+ * initiative order), checks for KO, applies Lucky Star PRNG calls (d20),
  * applies overtime damage, and checks the round limit.
+ *
+ * PRNG ordering (per Appendix A):
+ *   Attack 1: d6 → [conditional self-reroll d6] → dodge d100
+ *   Attack 2: d6 → [conditional self-reroll d6] → [conditional defensive-reroll d6] → dodge d100
+ *   Lucky Star: d20 (F1) → d20 (F2)
+ *
+ * Crit is determined from original raw d6 roll, NOT a separate PRNG call.
  *
  * If ctx->finished is already 1, returns a zeroed result with
  * finished=1 and winner set — NO-OP, PRNG state is NOT advanced.

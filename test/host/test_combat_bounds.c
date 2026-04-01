@@ -11,15 +11,22 @@
  *   N4  : All stats at 0 → no division by zero, no crash
  *   N5  : HP clamped to INT16_MAX in init (defense-in-depth)
  *   N6  : First kill wins — F2 does NOT counter-attack after KO by F1
- *   N10 : Reroll evaluation order — F1 then F2 (regardless of who attacked first)
+ *   N10 : Reroll evaluation order — self-reroll checked before defensive reroll
  *   N11 : Lucky Star PRNG calls consumed even without perk ownership
  *   N15 : Conditional reroll PRNG ordering — conditional calls only when eligible
  *   N17 : Round 12 tiebreaker uses HP percentage, not absolute HP
+ *   N_B6: current_round never exceeds FQ_MAX_ROUNDS+1 (overflow bound)
  *
  * Advisory items tested here (defense-in-depth):
  *   N13 : Uninitialized (zero-memset) context → treated as finished (no-op on step)
  *   N14 : fq_combat_step called after finished → returns zero result, no state change
  *   N16 : _Static_assert sizeof(fq_combat_ctx_t) compiled in combat.h
+ *
+ * All PRNG-pinned values derived from offline trace:
+ *   seed=12345, symmetric fighters str=50/spd=50/prec=50/int=50/hp=100.
+ *   Initiative: F1 d6=3+5=8, F2 d6=4+5=9 → first_attacker=2 (F2 goes first).
+ *   State after init: 0x652A09AF (2 d6 initiative calls).
+ *   State after round 1: 0x8CA71E78 (F2 atk d6=5, dodge=43, F1 atk d6=6, def-rr->1, dodge=69, LS*2).
  */
 
 #include <stdint.h>
@@ -105,6 +112,14 @@ static void test_n3_hp_max_zero_both(void)
 
 /* ---------------------------------------------------------------------------
  * N4: All stats at 0 — no division by zero, no crash.
+ *
+ * With seed=1, all-zero stats:
+ *   eff_spd=0 → initiative = d6 + 0/3 = d6 only.
+ *   PRNG(1) init: F1 roll=4, F2 roll=2 → first_attacker=1.
+ *   eff_prec=0 → tier=0, PRECISION_TABLE[0]={1,2,3,4,5,6}.
+ *   crit_thresh=6 (6 - 0/2 = 6).
+ *   dc = 0*2 - 0/2 = 0 → clamped to 5.
+ *   reroll_charges = eff(0)/4 = 0.
  * ---------------------------------------------------------------------------*/
 static void test_n4_all_stats_zero_no_crash(void)
 {
@@ -119,9 +134,17 @@ static void test_n4_all_stats_zero_no_crash(void)
     TEST_ASSERT_EQUAL_UINT8(0u, ctx.f2.reroll_charges);
     /* Step must not crash */
     fq_round_result_t r = fq_combat_step(&ctx);
-    (void)r;
-    /* Must not crash with all-zero stats — if it got here, it passed */
-    TEST_ASSERT_TRUE(ctx.current_round >= 2u || ctx.finished);
+    /* With all-zero stats, dodge chance = 5 (clamped minimum).
+     * Attack always hit unless dodge_roll <= 5 (5% miss chance).
+     * damage = adj_roll + 0/2 = raw_roll (tier 0, no crit since thresh=6 unless roll=6). */
+    TEST_ASSERT_TRUE(r.finished == 0u || r.finished == 1u);
+    /* HP must still be in valid range after step */
+    TEST_ASSERT_TRUE(r.f1_hp >= 0);
+    TEST_ASSERT_TRUE(r.f1_hp <= 50);
+    TEST_ASSERT_TRUE(r.f2_hp >= 0);
+    TEST_ASSERT_TRUE(r.f2_hp <= 50);
+    /* Round counter advances */
+    TEST_ASSERT_EQUAL_UINT8(2u, ctx.current_round);
 }
 
 /* ---------------------------------------------------------------------------
@@ -145,23 +168,23 @@ static void test_n5_hp_clamped_to_int16_max(void)
 /* ---------------------------------------------------------------------------
  * N6: First kill wins — F2 does NOT attack if KO'd by F1.
  *
- * Strategy: construct a scenario where F1's first attack is guaranteed to
- * KO F2 (F2 hp_max=1, F1 will always deal at least 1 damage on hit), and
- * verify F1's HP is unchanged (F2 never got to counter-attack).
- *
- * With F2 hp_max=1 and no dodge possible (very low dodge chance), F1 must
- * kill F2 in round 1. We then verify f2_hp=0 and f1 hp is unchanged.
+ * Strategy: F1 has max strength/precision (guaranteed kill on F2 with 1 HP).
+ * Initiative: F1 spd=50 (eff=16, /3=5), F2 spd=0 (eff=0, /3=0).
+ * Seed=12345: F1 d6=3+5=8 vs F2 d6=4+0=4 → F1 goes first.
+ * F1 will deal at least 1 damage, KO'ing F2. F2 never attacks.
  * ---------------------------------------------------------------------------*/
 static void test_n6_first_kill_no_counter_attack(void)
 {
     fq_combat_ctx_t ctx;
-    /* F1: high strength/precision to guarantee kill. F2: 1 HP, low speed. */
-    /* Use str=255, prec=255 for F1. F2: hp_max=1, low everything. */
+    /* F1: high strength/precision to guarantee kill. F2: 1 HP, low everything. */
     fq_character_t c1 = make_char(200, 255, 50, 255, 50);
     fq_character_t c2 = make_char(1,   0,   0,  0,   0);
 
     game_err_t err = fq_combat_init(&ctx, &c1, &c2, 12345u);
     TEST_ASSERT_EQUAL_UINT8((uint8_t)GAME_OK, (uint8_t)err);
+
+    /* With F1 eff_spd/3=5 and F2 eff_spd/3=0, F1 wins initiative with any d6 rolls */
+    TEST_ASSERT_EQUAL_UINT8(1u, ctx.first_attacker);
 
     /* Capture F1 HP before step */
     int16_t f1_hp_before = ctx.f1.hp;
@@ -225,7 +248,9 @@ static void test_n2_prng_determinism_two_contexts(void)
 /* ---------------------------------------------------------------------------
  * N2 (specific PRNG state): Verify exact PRNG state after init with seed=12345.
  *
- * From offline trace: after consuming 2 initiative rolls, state = 0x652A09AF.
+ * B1 fix: initiative uses d6, so 2 calls are fq_prng_range(1,6).
+ * The PRNG state after 2 calls is still 0x652A09AF because fq_prng_next()
+ * is called once per fq_prng_range call regardless of [min,max] bounds.
  * ---------------------------------------------------------------------------*/
 static void test_n2_prng_state_after_init_known_seed(void)
 {
@@ -234,15 +259,21 @@ static void test_n2_prng_state_after_init_known_seed(void)
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
 
-    /* After 2 initiative calls the PRNG state must be exactly 0x652A09AF */
+    /* After 2 initiative d6 calls the PRNG state must be exactly 0x652A09AF */
     TEST_ASSERT_EQUAL_UINT32(0x652A09AFu, ctx.rng.state);
 }
 
 /* ---------------------------------------------------------------------------
  * N2 (PRNG state after round 1): Verify exact state after one step.
  *
- * From offline trace: seed=12345, symmetric fighters str=50/spd=50/prec=50/
- * int=50, hp=100. After round 1: state = 0x2CF48FBE.
+ * Offline trace: seed=12345, symmetric fighters str=50/spd=50/prec=50/int=50, hp=100.
+ * Initiative: F2 goes first (F1 d6=3+5=8, F2 d6=4+5=9).
+ *
+ * Round 1 PRNG calls:
+ *   F2 atk d6=5 (no self-rr), dodge d100=43
+ *   F1 atk d6=6, F2 def-rr→1 (keeps lower), dodge d100=69
+ *   LS d20=1, LS d20=13
+ * Total: 7 calls consumed. State after round 1 = 0x8CA71E78.
  * ---------------------------------------------------------------------------*/
 static void test_n2_prng_state_after_round1_known_seed(void)
 {
@@ -251,28 +282,37 @@ static void test_n2_prng_state_after_round1_known_seed(void)
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
     fq_combat_step(&ctx);
-    TEST_ASSERT_EQUAL_UINT32(0x2CF48FBEu, ctx.rng.state);
+    TEST_ASSERT_EQUAL_UINT32(0x8CA71E78u, ctx.rng.state);
 }
 
 /* ---------------------------------------------------------------------------
- * N10: Reroll evaluation order — F1 checked before F2.
+ * N10: Reroll evaluation order and defensive reroll.
  *
- * With seed=12345 and the symmetric setup: in round 2, F1 rolls a 2 and
- * triggers a reroll. This is verified via the f1_rerolled flag.
+ * With seed=12345, first_attacker=2 (F2 goes first):
+ *
+ * Round 1: F2 d6=5 (no self-rr: 5>2). F1 d6=6 (≥5): F2 defensively rerolls
+ *          F1's attack → f2_rerolled=1, f1_rerolled=0.
+ *
+ * Round 2: F2 d6=5 (no self-rr). F1 d6=2 (≤2): F1 self-rerolls (gets 1, keeps 2)
+ *          → f1_rerolled=1. F2's defensive check: raw2 after rr=2 < 5, no def-rr
+ *          → f2_rerolled=0.
  * ---------------------------------------------------------------------------*/
-static void test_n10_reroll_order_f1_before_f2(void)
+static void test_n10_reroll_order_evaluation(void)
 {
     fq_character_t c1 = make_char(100, 50, 50, 50, 50);
     fq_character_t c2 = make_char(100, 50, 50, 50, 50);
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
 
-    /* Round 1: F1 atk=5 (no reroll), F2 atk=1 (reroll used) */
+    /* F2 is first_attacker */
+    TEST_ASSERT_EQUAL_UINT8(2u, ctx.first_attacker);
+
+    /* Round 1: F2 def-rr on F1's roll */
     fq_round_result_t r1 = fq_combat_step(&ctx);
     TEST_ASSERT_EQUAL_UINT8(0u, r1.f1_rerolled);
     TEST_ASSERT_EQUAL_UINT8(1u, r1.f2_rerolled);
 
-    /* Round 2: F1 atk=2 (reroll used), F2 atk=5 (no reroll) */
+    /* Round 2: F1 self-rr, F2 no reroll */
     fq_round_result_t r2 = fq_combat_step(&ctx);
     TEST_ASSERT_EQUAL_UINT8(1u, r2.f1_rerolled);
     TEST_ASSERT_EQUAL_UINT8(0u, r2.f2_rerolled);
@@ -301,9 +341,9 @@ static void test_n11_lucky_star_prng_always_consumed(void)
     fq_prng_t ref;
     fq_prng_init(&ref, 12345u);
 
-    /* Consume the 2 initiative calls */
-    fq_prng_range(&ref, 0u, 99u);
-    fq_prng_range(&ref, 0u, 99u);
+    /* Consume the 2 initiative d6 calls (B1 fix: d6 not d100) */
+    fq_prng_range(&ref, 1u, 6u);
+    fq_prng_range(&ref, 1u, 6u);
 
     /* After init both states must match */
     TEST_ASSERT_EQUAL_UINT32(ref.state, ctx.rng.state);
@@ -321,22 +361,22 @@ static void test_n11_lucky_star_prng_always_consumed(void)
     fq_combat_step(&ctx2);
     TEST_ASSERT_EQUAL_UINT32(ctx.rng.state, ctx2.rng.state);
 
-    /* Additionally verify with the known anchor: state after round 1 = 0x2CF48FBE
+    /* Additionally verify with the known anchor: state after round 1 = 0x8CA71E78
      * (from offline trace with hp=100, same fighters). Use hp=100 version. */
     fq_combat_ctx_t ctx3;
     fq_character_t d1 = make_char(100, 50, 50, 50, 50);
     fq_character_t d2 = make_char(100, 50, 50, 50, 50);
     fq_combat_init(&ctx3, &d1, &d2, 12345u);
     fq_combat_step(&ctx3);
-    TEST_ASSERT_EQUAL_UINT32(0x2CF48FBEu, ctx3.rng.state);
+    TEST_ASSERT_EQUAL_UINT32(0x8CA71E78u, ctx3.rng.state);
 }
 
 /* ---------------------------------------------------------------------------
  * N15: Conditional reroll PRNG ordering.
  *
- * When the attacker is NOT eligible for reroll (atk_roll > 2 or no charges),
- * no extra PRNG call is made. When eligible, exactly 1 extra call is made.
- * This is verified by comparing PRNG state against known-seed traces.
+ * When the first attacker has NO reroll charges (intel=0), no defensive reroll
+ * PRNG call is made even when second attacker rolls >= 5. This is verified
+ * by comparing PRNG state against known-seed traces.
  * ---------------------------------------------------------------------------*/
 static void test_n15_reroll_only_consumes_prng_when_eligible(void)
 {
@@ -362,12 +402,12 @@ static void test_n15_reroll_only_consumes_prng_when_eligible(void)
     TEST_ASSERT_EQUAL_UINT8(0u, r_no_rr.f1_rerolled);
     TEST_ASSERT_EQUAL_UINT8(0u, r_no_rr.f2_rerolled);
 
-    /* With charges=4, reroll may or may not have occurred depending on rolls.
-     * From offline trace: F1 did NOT reroll (atk=5), F2 DID reroll (atk=1→3) */
+    /* With charges=4, first_attacker=F2 did defensive reroll on F1's roll=6>=5.
+     * f2_rerolled=1, f1_rerolled=0 (F1 had charges but never used them). */
     TEST_ASSERT_EQUAL_UINT8(0u, r_rr.f1_rerolled);
     TEST_ASSERT_EQUAL_UINT8(1u, r_rr.f2_rerolled);
 
-    /* PRNG states diverge because ctx_rr consumed an extra call for F2 reroll */
+    /* PRNG states diverge because ctx_rr consumed an extra call for F2 defensive reroll */
     TEST_ASSERT_TRUE(ctx_no_rr.rng.state != ctx_rr.rng.state);
 }
 
@@ -376,6 +416,12 @@ static void test_n15_reroll_only_consumes_prng_when_eligible(void)
  *
  * Two fighters with different hp_max but same absolute HP → the one with
  * higher percentage wins. This requires driving a fight to round 12.
+ *
+ * Offline trace (seed=7777, str=0, spd=50, prec=0, int=0):
+ *   F1 hp_max=1000, F2 hp_max=100.
+ *   Fight goes to round 12 (overtime kills F2 first is possible, but with
+ *   very high F1 HP, F1 wins on percentage if not KO'd).
+ *   Expected winner=1 (F1 has much higher HP percentage after 12 rounds).
  * ---------------------------------------------------------------------------*/
 static void test_n17_round12_tiebreaker_uses_percentage(void)
 {
@@ -384,9 +430,6 @@ static void test_n17_round12_tiebreaker_uses_percentage(void)
     fq_character_t c1 = make_char(1000, 0, 50, 0, 0);   /* hp_max=1000, str=0 */
     fq_character_t c2 = make_char(100,  0, 50, 0, 0);   /* hp_max=100, str=0 */
 
-    /* We need them to reach round 12 without KO. With str=0:
-     * eff_str=0, so damage = atk_roll + 0/2 = atk_roll (1-6).
-     * With high HP they should survive. */
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 7777u);
 
@@ -400,8 +443,35 @@ static void test_n17_round12_tiebreaker_uses_percentage(void)
 
     /* The fight must have finished */
     TEST_ASSERT_EQUAL_UINT8(1u, last_result.finished);
-    /* Winner must be non-zero */
-    TEST_ASSERT_TRUE(last_result.winner != 0u || last_result.f1_hp == last_result.f2_hp);
+    /* From offline trace: F1 wins (96% HP vs 54% HP after round 12 OT) */
+    TEST_ASSERT_EQUAL_UINT8(1u, last_result.winner);
+}
+
+/* ---------------------------------------------------------------------------
+ * N_B6: current_round overflow bound.
+ *
+ * With FQ_MAX_ROUNDS=12, current_round must never exceed 13 (12 + 1 post-
+ * increment after the final round is resolved). Verify combat always ends
+ * by round 12 and the counter stays within bounds.
+ * ---------------------------------------------------------------------------*/
+static void test_nb6_round_overflow_bound(void)
+{
+    /* High HP, low strength — fight goes to round 12 */
+    fq_character_t c1 = make_char(5000, 0, 50, 0, 0);
+    fq_character_t c2 = make_char(5000, 0, 50, 0, 0);
+    fq_combat_ctx_t ctx;
+    fq_combat_init(&ctx, &c1, &c2, 99999u);
+
+    fq_round_result_t last;
+    memset(&last, 0, sizeof(last));
+    for (int i = 0; i < 20; i++) {
+        last = fq_combat_step(&ctx);
+        /* current_round (post-increment) must never exceed FQ_MAX_ROUNDS+1 */
+        TEST_ASSERT_TRUE(ctx.current_round <= (uint8_t)(FQ_MAX_ROUNDS + 1u));
+        if (last.finished) break;
+    }
+    /* Combat must always end — never loops past 12 rounds */
+    TEST_ASSERT_EQUAL_UINT8(1u, last.finished);
 }
 
 /* ---------------------------------------------------------------------------
@@ -412,13 +482,12 @@ static void test_n13_zero_memset_ctx_is_noop(void)
 {
     fq_combat_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));
-    /* finished=0, winner=0 in zero-memset. But current_round=0.
-     * The step should detect finished==0 but handle gracefully (or finish immediately).
+    /* finished=0 in a zero-fill context. The step will run with all-zero state.
      * Primary requirement: must not crash. */
     fq_round_result_t r = fq_combat_step(&ctx);
-    /* Just verify it doesn't crash — result can be anything reasonable */
-    (void)r;
-    TEST_ASSERT_TRUE(1); /* If we got here, no crash */
+    /* HP fields must be in valid range (0 is valid — hp_max=0 triggers finished). */
+    TEST_ASSERT_TRUE(r.finished == 0u || r.finished == 1u);
+    TEST_ASSERT_TRUE(r.f1_hp >= 0);
 }
 
 /* ---------------------------------------------------------------------------
@@ -462,15 +531,11 @@ static void test_n14_step_after_finished_is_noop(void)
 /* ---------------------------------------------------------------------------
  * N9 (advisory): Crit damage overflow clamped to INT8_MAX.
  *
- * Maximum possible damage: atk_roll=6, eff_str=23 (raw=255).
- * damage_before_crit = 6 + 23/2 = 6 + 11 = 17
- * damage_after_crit  = 17 * 3 / 2 = 25
- * 25 < 127 so this doesn't overflow in practice.
- * But we can construct a scenario to verify the clamp is enforced by
- * checking the field type and assert max is capped at INT8_MAX.
- *
- * We verify: after one round, f1_damage_dealt and f2_damage_dealt are always
- * in range [0, 127] (INT8_MAX).
+ * B2 fix: Maximum possible damage with precision tier 3:
+ *   adjusted_roll max = 5 (PRECISION_TABLE[3][5]=5), eff_str(255)=23, 23/2=11.
+ *   damage_before_crit = 5 + 11 = 16.
+ *   damage_after_crit  = 16 * 3 / 2 = 24.
+ *   24 < INT8_MAX (127) so no overflow in practice, but clamp is still enforced.
  * ---------------------------------------------------------------------------*/
 static void test_n9_damage_clamped_to_int8_max(void)
 {
@@ -521,8 +586,9 @@ static void test_n12_seed_zero_no_deadlock(void)
     TEST_ASSERT_TRUE(ctx.rng.state != 0u);
     /* Step must not hang or crash */
     fq_round_result_t r = fq_combat_step(&ctx);
-    (void)r;
-    TEST_ASSERT_TRUE(1);
+    /* Result must be in valid state */
+    TEST_ASSERT_TRUE(r.finished == 0u || r.finished == 1u);
+    TEST_ASSERT_EQUAL_UINT8(1u, r.round);
 }
 
 int main(void)
@@ -551,7 +617,7 @@ int main(void)
     test_n2_prng_state_after_round1_known_seed();
 
     /* N10: reroll order */
-    test_n10_reroll_order_f1_before_f2();
+    test_n10_reroll_order_evaluation();
 
     /* N11: lucky star PRNG always consumed */
     test_n11_lucky_star_prng_always_consumed();
@@ -561,6 +627,9 @@ int main(void)
 
     /* N17: round 12 tiebreaker by percentage */
     test_n17_round12_tiebreaker_uses_percentage();
+
+    /* N_B6: round overflow bound */
+    test_nb6_round_overflow_bound();
 
     /* Advisory items */
     test_n13_zero_memset_ctx_is_noop();

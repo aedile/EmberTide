@@ -4,13 +4,21 @@
  * See combat.h for full API contract, PRNG call ordering, and
  * Constitution compliance notes.
  *
- * Design decisions (PM-approved):
+ * Design decisions (PM-approved, B1–B5 rework applied):
+ *   - B1: Initiative = d6 + eff_speed/3 (was d100 + full eff_speed).
+ *   - B2: Precision tier table maps raw d6 → adjusted roll before damage calc.
+ *   - B3: Dodge clamp upper bound is 40 (was 75) per design doc Section 2.4.
+ *   - B4: Crit determined from raw_roll >= crit_threshold; no separate PRNG call.
+ *         crit_threshold = 6 - (precision_tier / 2).
+ *   - B5: Two reroll conditions per fighter per round:
+ *         (1) Self-reroll if own raw_roll <= 2 and charges > 0 (keep higher).
+ *         (2) Defensive reroll if opponent's attack roll >= 5 and own charges > 0
+ *             (keep LOWER for opponent). Evaluated after attacker 2 rolls.
  *   - HP clamped to INT16_MAX in init (defense-in-depth for uint16_t hp_max).
  *   - Simultaneous KO is impossible: first attacker's KO ends the fight immediately.
  *   - Round limit (FQ_MAX_ROUNDS=12): winner by HP percentage, ties → F2.
- *   - Reroll evaluation order: first attacker then second, per Appendix A.
- *   - Lucky Star: always consumes 2 PRNG calls; bonus damage deferred to Phase 5.
- *   - Conditional PRNG calls (crit, reroll) only advance PRNG when the branch is taken.
+ *   - Lucky Star: always consumes 2 PRNG calls (d20); bonus damage deferred to Phase 5.
+ *   - Conditional PRNG calls only advance PRNG when the branch is taken.
  *
  * Constitution Priority 0: No floats, no time.h, no external entropy.
  * All random decisions use fq_prng_t exclusively.
@@ -20,6 +28,23 @@
 #include "progression.h"
 #include <string.h>
 #include <limits.h>
+
+/* ---------------------------------------------------------------------------
+ * Precision tier lookup table (B2).
+ *
+ * precision_tier = min(eff_precision / 5, 3)
+ *
+ * After rolling raw d6 (1-6), look up adjusted_roll = PRECISION_TABLE[tier][raw-1].
+ * Tier 0: no adjustment. Tier 3: tight distribution (3-5 range).
+ *
+ * Crit uses the ORIGINAL raw_roll, not adjusted_roll.
+ * ---------------------------------------------------------------------------*/
+static const uint8_t PRECISION_TABLE[4][6] = {
+    {1u, 2u, 3u, 4u, 5u, 6u},  /* Tier 0: no change */
+    {2u, 2u, 3u, 4u, 5u, 6u},  /* Tier 1: floor raised */
+    {2u, 3u, 3u, 4u, 5u, 5u},  /* Tier 2: compressed toward middle */
+    {3u, 3u, 4u, 4u, 5u, 5u},  /* Tier 3: tight distribution */
+};
 
 /* ---------------------------------------------------------------------------
  * Internal helpers
@@ -117,12 +142,12 @@ game_err_t fq_combat_init(fq_combat_ctx_t      *ctx,
     /* fq_prng_init guards against seed == 0. */
     fq_prng_init(&ctx->rng, seed);
 
-    /* Initiative: two PRNG calls. Total = roll[0..99] + effective_speed.
+    /* B1 Initiative: d6 + eff_speed/3.
      * F1 must strictly exceed F2 to go first; ties give initiative to F2 (defender). */
-    uint32_t init1 = fq_prng_range(&ctx->rng, 0u, 99u)
-                     + (uint32_t)fq_effective_stat(c1->speed);
-    uint32_t init2 = fq_prng_range(&ctx->rng, 0u, 99u)
-                     + (uint32_t)fq_effective_stat(c2->speed);
+    uint32_t init1 = fq_prng_range(&ctx->rng, 1u, 6u)
+                     + (uint32_t)(fq_effective_stat(c1->speed) / 3);
+    uint32_t init2 = fq_prng_range(&ctx->rng, 1u, 6u)
+                     + (uint32_t)(fq_effective_stat(c2->speed) / 3);
 
     ctx->first_attacker = (init1 > init2) ? 1u : 2u;
     ctx->current_round  = 1u;
@@ -131,89 +156,33 @@ game_err_t fq_combat_init(fq_combat_ctx_t      *ctx,
 }
 
 /* ---------------------------------------------------------------------------
- * resolve_attack() — Resolve a single attacker→responder attack.
- *
- * Mutates responder->hp and (conditionally) attacker->reroll_charges.
- * PRNG call ordering per Appendix A:
- *   1. Attack roll:              fq_prng_range(1, 6)         — always
- *   2. Dodge roll:               fq_prng_range(1, 100)       — always
- *   3. Reroll (conditional):     fq_prng_range(1, 6)         — if atk_roll <= 2 AND charges > 0
- *   4. Crit check (conditional): fq_prng_range(1, 100)       — if hit
- * ---------------------------------------------------------------------------*/
-static void resolve_attack(fq_prng_t           *rng,
-                           fq_combat_fighter_t *attacker,
-                           fq_combat_fighter_t *responder,
-                           uint8_t             *out_hit,
-                           uint8_t             *out_crit,
-                           uint8_t             *out_rerolled,
-                           int8_t              *out_damage_dealt)
-{
-    /* 1. Attack roll d6. */
-    uint32_t atk = fq_prng_range(rng, 1u, 6u);
-
-    /* 2. Dodge check: dodge_chance = eff_spd_resp*2 − eff_prec_atk/2, clamped [5, 75]. */
-    uint32_t dodge_roll = fq_prng_range(rng, 1u, 100u);
-    int32_t  dc = (int32_t)fq_effective_stat(responder->speed) * 2
-                - (int32_t)fq_effective_stat(attacker->precision) / 2;
-    if (dc < 5)  dc = 5;
-    if (dc > 75) dc = 75;
-    int hit = ((int32_t)dodge_roll > dc);
-
-    /* 3. Conditional reroll: only if atk <= 2 and attacker has charges. */
-    int rerolled = 0;
-    if ((atk <= 2u) && (attacker->reroll_charges > 0u)) {
-        uint32_t rr = fq_prng_range(rng, 1u, 6u);
-        if (rr > atk) atk = rr;
-        attacker->reroll_charges--;
-        rerolled = 1;
-    }
-
-    /* 4. Damage and crit — only if the attack landed. */
-    int32_t damage = 0;
-    int     crit   = 0;
-    if (hit) {
-        damage = (int32_t)atk + (int32_t)fq_effective_stat(attacker->strength) / 2;
-
-        uint32_t crit_roll   = fq_prng_range(rng, 1u, 100u);
-        uint32_t crit_thresh = (uint32_t)fq_effective_stat(attacker->precision) * 5u;
-        if (crit_thresh > 50u) crit_thresh = 50u;
-
-        if (crit_roll <= crit_thresh) {
-            damage = damage * 3 / 2; /* integer 50% bonus */
-            crit   = 1;
-        }
-
-        /* N9: clamp damage to [0, INT8_MAX]. */
-        if (damage > (int32_t)INT8_MAX) damage = (int32_t)INT8_MAX;
-        if (damage < 0)                 damage = 0;
-
-        responder->hp = clamp_hp((int32_t)responder->hp - damage);
-    }
-
-    *out_hit          = (uint8_t)hit;
-    *out_crit         = (uint8_t)crit;
-    *out_rerolled     = (uint8_t)rerolled;
-    *out_damage_dealt = clamp_damage(damage);
-}
-
-/* ---------------------------------------------------------------------------
  * consume_lucky_star() — Advance PRNG for Lucky Star phase.
  *
- * Always consumes exactly 2 calls (N11 / Appendix A invariant). Phase 4:
- * bonus damage is not wired (no perk ownership system yet). The calls keep
- * both BLE peers' PRNG streams synchronized regardless of perk ownership.
+ * Always consumes exactly 2 calls (A1 fix: d20, not d100). Both BLE peers'
+ * PRNG streams stay synchronized regardless of perk ownership.
  *
  * ADVISORY ADV-P4-01: Phase 5 item engine must hook here to check perk
- * ownership and apply bonus d6 on trigger when ls_roll <= 5.
+ * ownership and apply bonus attack when ls_roll == 1 (5% of d20).
  * ---------------------------------------------------------------------------*/
 static void consume_lucky_star(fq_prng_t *rng)
 {
-    fq_prng_range(rng, 1u, 100u); /* F1 Lucky Star check */
-    fq_prng_range(rng, 1u, 100u); /* F2 Lucky Star check */
+    fq_prng_range(rng, 1u, 20u); /* F1 Lucky Star check */
+    fq_prng_range(rng, 1u, 20u); /* F2 Lucky Star check */
 }
 
 /* ---------------------------------------------------------------------------
  * fq_combat_step
+ *
+ * PRNG order per round:
+ *   1. Attacker 1 d6 attack roll
+ *   2. [Conditional] Attacker 1 self-reroll d6  (if raw_roll<=2 and charges>0)
+ *   3. Dodge roll for attack 1 d100
+ *   4. Attacker 2 d6 attack roll
+ *   5. [Conditional] Attacker 2 self-reroll d6  (if raw_roll<=2 and charges>0)
+ *   6. [Conditional] Defensive reroll d6         (if atk2_raw>=5 and atk1 charges>0)
+ *   7. Dodge roll for attack 2 d100
+ *   8. Lucky Star F1 d20
+ *   9. Lucky Star F2 d20
  * ---------------------------------------------------------------------------*/
 fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
 {
@@ -236,19 +205,63 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
     fq_combat_fighter_t *first  = (ctx->first_attacker == 1u) ? &ctx->f1 : &ctx->f2;
     fq_combat_fighter_t *second = (ctx->first_attacker == 1u) ? &ctx->f2 : &ctx->f1;
 
-    /* --- Attack 1: first → second ---------------------------------------- */
+    /* ------------------------------------------------------------------
+     * Attack 1: first → second
+     * ------------------------------------------------------------------ */
     {
-        uint8_t hit, crit, rr;
-        int8_t  dmg;
-        resolve_attack(&ctx->rng, first, second, &hit, &crit, &rr, &dmg);
+        /* Step 1: d6 attack roll. */
+        uint32_t raw1 = fq_prng_range(&ctx->rng, 1u, 6u);
 
-        /* Write into the always-F1/F2 result fields. */
+        /* Step 2: Self-reroll — only if raw1 <= 2 and attacker has charges. */
+        uint8_t rr1 = 0u;
+        if ((raw1 <= 2u) && (first->reroll_charges > 0u)) {
+            uint32_t rr = fq_prng_range(&ctx->rng, 1u, 6u);
+            if (rr > raw1) { raw1 = rr; }
+            first->reroll_charges--;
+            rr1 = 1u;
+        }
+
+        /* Step 3: Dodge roll d100.
+         * B3: dodge_chance clamped to [5, 40]. */
+        uint32_t dodge1 = fq_prng_range(&ctx->rng, 1u, 100u);
+        int32_t  dc1    = (int32_t)fq_effective_stat(second->speed) * 2
+                        - (int32_t)fq_effective_stat(first->precision) / 2;
+        if (dc1 < 5)  dc1 = 5;
+        if (dc1 > 40) dc1 = 40; /* B3 fix */
+        int      hit1   = ((int32_t)dodge1 > dc1);
+
+        /* B2: Precision tier and adjusted roll. */
+        int     eff_prec1 = fq_effective_stat(first->precision);
+        int     tier1     = eff_prec1 / 5;
+        if (tier1 > 3) { tier1 = 3; }
+        uint8_t adj1 = PRECISION_TABLE[tier1][raw1 - 1u];
+
+        /* B4: Crit from original raw_roll, no separate PRNG call.
+         * crit_threshold = 6 - (precision_tier / 2). */
+        int crit_thresh1 = 6 - (tier1 / 2);
+        int crit1        = ((int)raw1 >= crit_thresh1);
+
+        int32_t damage1 = 0;
+        if (hit1) {
+            damage1 = (int32_t)adj1
+                    + (int32_t)fq_effective_stat(first->strength) / 2;
+            if (crit1) {
+                damage1 = damage1 * 3 / 2; /* integer 50% bonus */
+            }
+            second->hp = clamp_hp((int32_t)second->hp - damage1);
+        }
+
+        /* Write result fields (always in F1/F2 absolute terms). */
         if (ctx->first_attacker == 1u) {
-            result.f1_hit = hit; result.f1_crit = crit;
-            result.f1_rerolled = rr; result.f1_damage_dealt = dmg;
+            result.f1_hit          = (uint8_t)hit1;
+            result.f1_crit         = (uint8_t)crit1;
+            result.f1_rerolled     = rr1;
+            result.f1_damage_dealt = clamp_damage(damage1);
         } else {
-            result.f2_hit = hit; result.f2_crit = crit;
-            result.f2_rerolled = rr; result.f2_damage_dealt = dmg;
+            result.f2_hit          = (uint8_t)hit1;
+            result.f2_crit         = (uint8_t)crit1;
+            result.f2_rerolled     = rr1;
+            result.f2_damage_dealt = clamp_damage(damage1);
         }
     }
 
@@ -260,18 +273,77 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
         goto done;
     }
 
-    /* --- Attack 2: second → first ---------------------------------------- */
+    /* ------------------------------------------------------------------
+     * Attack 2: second → first
+     * ------------------------------------------------------------------ */
     {
-        uint8_t hit, crit, rr;
-        int8_t  dmg;
-        resolve_attack(&ctx->rng, second, first, &hit, &crit, &rr, &dmg);
+        /* Step 4: d6 attack roll. */
+        uint32_t raw2 = fq_prng_range(&ctx->rng, 1u, 6u);
 
+        /* Step 5: Attacker 2 self-reroll. */
+        uint8_t rr2 = 0u;
+        if ((raw2 <= 2u) && (second->reroll_charges > 0u)) {
+            uint32_t rr = fq_prng_range(&ctx->rng, 1u, 6u);
+            if (rr > raw2) { raw2 = rr; }
+            second->reroll_charges--;
+            rr2 = 1u;
+        }
+
+        /* Step 6: B5 Defensive reroll by first (attacker 1 defending).
+         * If second's raw roll >= 5 AND first still has charges, first
+         * defensively rerolls second's attack, keeping the LOWER value. */
+        uint8_t def_rr1 = 0u;
+        if ((raw2 >= 5u) && (first->reroll_charges > 0u)) {
+            uint32_t rr = fq_prng_range(&ctx->rng, 1u, 6u);
+            if (rr < raw2) { raw2 = rr; }
+            first->reroll_charges--;
+            def_rr1 = 1u;
+        }
+
+        /* Step 7: Dodge roll d100.
+         * B3: dodge_chance clamped to [5, 40]. */
+        uint32_t dodge2 = fq_prng_range(&ctx->rng, 1u, 100u);
+        int32_t  dc2    = (int32_t)fq_effective_stat(first->speed) * 2
+                        - (int32_t)fq_effective_stat(second->precision) / 2;
+        if (dc2 < 5)  dc2 = 5;
+        if (dc2 > 40) dc2 = 40; /* B3 fix */
+        int      hit2   = ((int32_t)dodge2 > dc2);
+
+        /* B2: Precision tier and adjusted roll. */
+        int     eff_prec2 = fq_effective_stat(second->precision);
+        int     tier2     = eff_prec2 / 5;
+        if (tier2 > 3) { tier2 = 3; }
+        uint8_t adj2 = PRECISION_TABLE[tier2][raw2 - 1u];
+
+        /* B4: Crit from original raw_roll, no separate PRNG call. */
+        int crit_thresh2 = 6 - (tier2 / 2);
+        int crit2        = ((int)raw2 >= crit_thresh2);
+
+        int32_t damage2 = 0;
+        if (hit2) {
+            damage2 = (int32_t)adj2
+                    + (int32_t)fq_effective_stat(second->strength) / 2;
+            if (crit2) {
+                damage2 = damage2 * 3 / 2;
+            }
+            first->hp = clamp_hp((int32_t)first->hp - damage2);
+        }
+
+        /* Write result fields. Merge reroll flags (self + defensive). */
         if (ctx->first_attacker == 1u) {
-            result.f2_hit = hit; result.f2_crit = crit;
-            result.f2_rerolled = rr; result.f2_damage_dealt = dmg;
+            result.f2_hit          = (uint8_t)hit2;
+            result.f2_crit         = (uint8_t)crit2;
+            result.f2_rerolled     = rr2;
+            result.f2_damage_dealt = clamp_damage(damage2);
+            /* def_rr1: F1 (first) used a defensive reroll — merge with f1_rerolled. */
+            result.f1_rerolled    |= def_rr1;
         } else {
-            result.f1_hit = hit; result.f1_crit = crit;
-            result.f1_rerolled = rr; result.f1_damage_dealt = dmg;
+            result.f1_hit          = (uint8_t)hit2;
+            result.f1_crit         = (uint8_t)crit2;
+            result.f1_rerolled     = rr2;
+            result.f1_damage_dealt = clamp_damage(damage2);
+            /* def_rr1: F2 (first) used a defensive reroll — merge with f2_rerolled. */
+            result.f2_rerolled    |= def_rr1;
         }
     }
 
@@ -283,7 +355,7 @@ fq_round_result_t fq_combat_step(fq_combat_ctx_t *ctx)
         goto done;
     }
 
-    /* --- Lucky Star phase (N11): always 2 PRNG calls ---------------------- */
+    /* --- Lucky Star phase (N11): always 2 PRNG calls (d20) --------------- */
     consume_lucky_star(&ctx->rng);
     /* f1_lucky_star and f2_lucky_star remain 0 (Phase 5 TODO). */
 

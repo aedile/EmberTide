@@ -6,19 +6,31 @@
  * All expected values are derived from the offline PRNG trace (seed=12345,
  * symmetric fighters: str=50, spd=50, prec=50, int=50, hp_max=100).
  *
- * Trace summary (seed=12345):
- *   Init:   F1 initiative roll=30 total=46 | F2 roll=7 total=23 → first_attacker=1
+ * B1: Initiative uses d6 + eff_speed/3.
+ * B2: Precision tier lookup table applied to attack rolls.
+ * B3: Dodge clamp [5, 40].
+ * B4: Crit from raw_roll >= crit_threshold (no separate PRNG call).
+ * B5: Defensive reroll if opponent_raw_roll >= 5 and defender has charges.
+ *
+ * Trace summary (seed=12345, symmetric fighters):
+ *   Init:   F1 d6=3+5=8, F2 d6=4+5=9 → first_attacker=2 (F2 goes first)
  *   PRNG state after init: 0x652A09AF
+ *   eff_speed(50)=16, 16/3=5 → initiative bonus=5 per fighter.
+ *   reroll_charges = eff(50)/4 = 16/4 = 4.
+ *   eff_prec(50)=16, tier=16/5=3 (capped at 3).
+ *   PRECISION_TABLE[3]=[3,3,4,4,5,5], crit_threshold=6-(3/2)=5.
+ *   dc = eff_spd*2 - eff_prec/2 = 16*2 - 16/2 = 32-8=24, clamped [5,40]=24.
  *
- *   Round 1: F1 atk=5 hit=1 crit=1 dmg=19, F2 hp→81
- *            F2 atk=1 rerolled→3 hit=1 crit=0 dmg=11, F1 hp→89
- *            LS: ls1=77 ls2=87, PRNG state: 0x2CF48FBE
+ *   Round 1: F2 raw=5, adj=5, crit(5>=5), dodge=43>24=hit, dmg=5+8=13→crit=19, F1 hp→81
+ *            F1 raw=6, F2 def-rr→1(keeps lower), adj=3, not_crit(1<5), dodge=69>24=hit,
+ *            dmg=3+8=11, F2 hp→89. f2_rerolled=1(def), f1_rerolled=0.
+ *            LS: ls1=1 ls2=13. PRNG state: 0x8CA71E78
  *
- *   Round 2: F1 atk=2 rerolled→4 hit=1 crit=0 dmg=12, F2 hp→69
- *            F2 atk=5 hit=1 crit=1 dmg=19, F1 hp→70
- *            LS: ls1=27 ls2=59, PRNG state: 0xCD0BC082
+ *   Round 2: F2 raw=5, adj=5, crit, dodge=87>24=hit, dmg=19, F1 hp→62
+ *            F1 raw=2, self-rr→1(keeps 2), adj=3, not_crit(2<5), dodge=44>24=hit,
+ *            dmg=11, F2 hp→78. f1_rerolled=1(self), f2_rerolled=0.
  *
- *   Round 7: F2 KOs F1. Final: F1 hp=0 F2 hp=11, winner=2.
+ *   Round 10: F2 wins. Final: F1 hp=0 F2 hp=4, winner=2. (R9 OT applied before R10.)
  */
 
 #include <stdint.h>
@@ -120,9 +132,12 @@ static void test_init_reroll_charges(void)
 }
 
 /* ---------------------------------------------------------------------------
- * FEAT-5: Initiative with seed=12345 → first_attacker=1.
+ * FEAT-5: Initiative with seed=12345 → first_attacker=2 (F2 goes first).
  *
- * From trace: F1 roll=30+16=46, F2 roll=7+16=23 → F1 first.
+ * B1 fix: initiative = d6 + eff_speed/3.
+ * eff_speed(50)=16, 16/3=5.
+ * Trace: F1 d6=3 → total=3+5=8. F2 d6=4 → total=4+5=9. F2 wins (9 > 8).
+ * Ties favor defender (F2), but here F2 wins outright.
  * ---------------------------------------------------------------------------*/
 static void test_init_initiative_known_seed(void)
 {
@@ -130,51 +145,38 @@ static void test_init_initiative_known_seed(void)
     fq_character_t c2 = make_char(100, 50, 50, 50, 50);
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
-    TEST_ASSERT_EQUAL_UINT8(1u, ctx.first_attacker);
+    TEST_ASSERT_EQUAL_UINT8(2u, ctx.first_attacker);
 }
 
 /* ---------------------------------------------------------------------------
  * FEAT-6: Initiative tie → F2 (defender) wins the tiebreak.
  *
- * Find a seed where both fighters get the same initiative total.
- * Use asymmetric speed stats to test: F1 speed=0 (eff=0), F2 speed=0.
- * With eff_spd=0 for both, winner depends purely on roll.
- * Use seed=1: F1 roll = fq_prng_range(1,0,99) = some value,
- *             F2 roll = fq_prng_range(2,0,99) = some value.
- * We'll verify the tie rule by constructing it directly.
- * The simplest proof: if both have eff_spd=0 and we craft a seed where
- * both rolls are equal, F2 wins.
- *
- * From the prng trace for seed=1, first init calls:
- * xorshift32(1): x=1 ^(1<<13)=8193 ^(8193>>17)=8193 ^(8193<<5)=270465
- * Let me recompute: range(1,0,99) = 270465 % 100 = 65
- * Next: xorshift32(270465) = ... let's just test the tiebreak invariant.
+ * F2 has high speed (eff=23) → much higher initiative total → F2 goes first.
+ * This validates that first_attacker=2 when F2 total > F1 total.
  * ---------------------------------------------------------------------------*/
 static void test_init_initiative_tie_f2_wins(void)
 {
-    /* Set F1 to have higher speed so the tie is with the roll alone.
-     * We need a scenario where init1_total == init2_total.
-     * eff_spd contributes equally, so we need init1_roll == init2_roll.
-     * That's hard to guarantee with a specific seed.
-     * Instead, test the tiebreak rule directly by testing that F2 is
-     * first_attacker when F1's total <= F2's total.
-     * Use speed asymmetry: F2 gets much higher speed → F2 goes first. */
     fq_character_t c1 = make_char(100, 50, 0,   50, 50); /* speed=0 → eff_spd=0 */
     fq_character_t c2 = make_char(100, 50, 255, 50, 50); /* speed=255 → eff_spd=23 */
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 1u);
-    /* F2 has eff_spd=23, F1 has eff_spd=0. F2 total >> F1 total → F2 goes first */
+    /* F2 has eff_spd/3=7, F1 has eff_spd/3=0. F2 total >> F1 total → F2 goes first */
     TEST_ASSERT_EQUAL_UINT8(2u, ctx.first_attacker);
 }
 
 /* ---------------------------------------------------------------------------
  * FEAT-7: Round 1 with seed=12345.
  *
- * Expected (from offline trace):
- *   first_attacker=1, F1 attacks first.
- *   F1: atk=5, dodge_roll=43, dc=24, hit=1, dmg=13→crit→19, f2_hp→81
- *   F2: atk=1, rerolled→3, dodge_roll=69, dc=24, hit=1, dmg=8+8=11(no crit), f1_hp→89
- *   result.round=1, result.finished=0
+ * B2/B3/B4/B5 rework applied. first_attacker=2 (F2 attacks first).
+ *
+ * Expected from offline trace:
+ *   F2: raw=5, tier=3, adj=PRECISION_TABLE[3][4]=5, crit(5>=5)=1,
+ *       dodge=43>24=hit, dmg=5+8=13→crit→19. F1 hp→81.
+ *   F1 (second): raw=6. F2 def-rr: d6=1<6, keep lower (raw→1).
+ *       adj=PRECISION_TABLE[3][0]=3, crit(1>=5)=0.
+ *       dodge=69>24=hit, dmg=3+8=11. F2 hp→89.
+ *   f1_rerolled=0 (F1 used no charges), f2_rerolled=1 (F2 used defensive reroll).
+ *   result.round=1, result.finished=0.
  * ---------------------------------------------------------------------------*/
 static void test_step_round1_known_seed(void)
 {
@@ -189,19 +191,19 @@ static void test_step_round1_known_seed(void)
     TEST_ASSERT_EQUAL_UINT8(0u, r.finished);
     TEST_ASSERT_EQUAL_UINT8(0u, r.winner);
 
-    /* F1 hit, crit, no reroll */
-    TEST_ASSERT_EQUAL_UINT8(1u, r.f1_hit);
-    TEST_ASSERT_EQUAL_UINT8(1u, r.f1_crit);
-    TEST_ASSERT_EQUAL_UINT8(0u, r.f1_rerolled);
-    TEST_ASSERT_EQUAL_INT(19, (int)r.f1_damage_dealt);
-    TEST_ASSERT_EQUAL_INT(81, (int)r.f2_hp);
-
-    /* F2 hit, no crit, rerolled */
+    /* F2 hit, crit, defensive rerolled (F2 used a defensive reroll charge) */
     TEST_ASSERT_EQUAL_UINT8(1u, r.f2_hit);
-    TEST_ASSERT_EQUAL_UINT8(0u, r.f2_crit);
+    TEST_ASSERT_EQUAL_UINT8(1u, r.f2_crit);
     TEST_ASSERT_EQUAL_UINT8(1u, r.f2_rerolled);
-    TEST_ASSERT_EQUAL_INT(11, (int)r.f2_damage_dealt);
-    TEST_ASSERT_EQUAL_INT(89, (int)r.f1_hp);
+    TEST_ASSERT_EQUAL_INT(19, (int)r.f2_damage_dealt);
+    TEST_ASSERT_EQUAL_INT(81, (int)r.f1_hp);
+
+    /* F1 hit (after being def-rr'd to raw=1), no crit, no reroll charge used by F1 */
+    TEST_ASSERT_EQUAL_UINT8(1u, r.f1_hit);
+    TEST_ASSERT_EQUAL_UINT8(0u, r.f1_crit);
+    TEST_ASSERT_EQUAL_UINT8(0u, r.f1_rerolled);
+    TEST_ASSERT_EQUAL_INT(11, (int)r.f1_damage_dealt);
+    TEST_ASSERT_EQUAL_INT(89, (int)r.f2_hp);
 }
 
 /* ---------------------------------------------------------------------------
@@ -224,9 +226,11 @@ static void test_step_increments_round(void)
 /* ---------------------------------------------------------------------------
  * FEAT-9: Round 2 with seed=12345.
  *
- * Expected (from offline trace):
- *   F1: atk=2 rerolled→4, hit=1, crit=0, dmg=12, f2_hp→69
- *   F2: atk=5, hit=1, crit=1, dmg=19, f1_hp→70
+ * Expected from offline trace:
+ *   F2 (first again): raw=5, crit(5>=5), dodge=87>24=hit, dmg=5+8=13→crit→19. F1 hp→62.
+ *   F1 (second): raw=2, self-rr→1 (1<2, keeps 2). def-rr check: raw2=2<5, skip.
+ *       adj=PRECISION_TABLE[3][1]=3, crit(2>=5)=0. dodge=44>24=hit, dmg=3+8=11. F2 hp→78.
+ *   f1_rerolled=1 (F1 self-rerolled), f2_rerolled=0.
  * ---------------------------------------------------------------------------*/
 static void test_step_round2_known_seed(void)
 {
@@ -241,26 +245,26 @@ static void test_step_round2_known_seed(void)
     TEST_ASSERT_EQUAL_UINT8(2u, r.round);
     TEST_ASSERT_EQUAL_UINT8(0u, r.finished);
 
-    /* F1: rerolled, hit, no crit, dmg=12 */
-    TEST_ASSERT_EQUAL_UINT8(1u, r.f1_rerolled);
-    TEST_ASSERT_EQUAL_UINT8(1u, r.f1_hit);
-    TEST_ASSERT_EQUAL_UINT8(0u, r.f1_crit);
-    TEST_ASSERT_EQUAL_INT(12, (int)r.f1_damage_dealt);
-    TEST_ASSERT_EQUAL_INT(69, (int)r.f2_hp);
-
     /* F2: no reroll, hit, crit, dmg=19 */
     TEST_ASSERT_EQUAL_UINT8(0u, r.f2_rerolled);
     TEST_ASSERT_EQUAL_UINT8(1u, r.f2_hit);
     TEST_ASSERT_EQUAL_UINT8(1u, r.f2_crit);
     TEST_ASSERT_EQUAL_INT(19, (int)r.f2_damage_dealt);
-    TEST_ASSERT_EQUAL_INT(70, (int)r.f1_hp);
+    TEST_ASSERT_EQUAL_INT(62, (int)r.f1_hp);
+
+    /* F1: self-rerolled, hit, no crit, dmg=11 */
+    TEST_ASSERT_EQUAL_UINT8(1u, r.f1_rerolled);
+    TEST_ASSERT_EQUAL_UINT8(1u, r.f1_hit);
+    TEST_ASSERT_EQUAL_UINT8(0u, r.f1_crit);
+    TEST_ASSERT_EQUAL_INT(11, (int)r.f1_damage_dealt);
+    TEST_ASSERT_EQUAL_INT(78, (int)r.f2_hp);
 }
 
 /* ---------------------------------------------------------------------------
  * FEAT-10: Full fight to completion with seed=12345.
  *
- * Expected: F2 wins in round 7 (from offline trace).
- * Final HP: F1=0, F2=11.
+ * Expected: F2 wins in round 10 (from offline trace).
+ * Final HP: F1=0, F2=5.
  * ---------------------------------------------------------------------------*/
 static void test_step_full_fight_to_completion(void)
 {
@@ -278,9 +282,9 @@ static void test_step_full_fight_to_completion(void)
 
     TEST_ASSERT_EQUAL_UINT8(1u, last.finished);
     TEST_ASSERT_EQUAL_UINT8(2u, last.winner);
-    TEST_ASSERT_EQUAL_INT(0,  (int)last.f1_hp);
-    TEST_ASSERT_EQUAL_INT(11, (int)last.f2_hp);
-    TEST_ASSERT_EQUAL_UINT8(7u, last.round);
+    TEST_ASSERT_EQUAL_INT(0, (int)last.f1_hp);
+    TEST_ASSERT_EQUAL_INT(4, (int)last.f2_hp);
+    TEST_ASSERT_EQUAL_UINT8(10u, last.round);
 }
 
 /* ---------------------------------------------------------------------------
@@ -312,10 +316,13 @@ static void test_step_no_overtime_before_threshold(void)
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
 
-    /* Rounds 1-7 from our trace: fight ends in round 7, all <= threshold (8) */
-    for (int i = 0; i < 7 && !ctx.finished; i++) {
+    /* Rounds 1-10 from our trace: fight ends in round 10 */
+    for (int i = 0; i < 10 && !ctx.finished; i++) {
         fq_round_result_t r = fq_combat_step(&ctx);
-        TEST_ASSERT_EQUAL_UINT8(0u, r.overtime_damage);
+        /* Overtime only fires after round 8. Rounds 9+ would have OT. */
+        if (r.round <= (uint8_t)FQ_OVERTIME_THRESHOLD) {
+            TEST_ASSERT_EQUAL_UINT8(0u, r.overtime_damage);
+        }
     }
 }
 
@@ -362,7 +369,7 @@ static void test_step_lucky_star_phase4_always_zero(void)
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
 
-    for (int i = 0; i < 7 && !ctx.finished; i++) {
+    for (int i = 0; i < 10 && !ctx.finished; i++) {
         fq_round_result_t r = fq_combat_step(&ctx);
         TEST_ASSERT_EQUAL_UINT8(0u, r.f1_lucky_star);
         TEST_ASSERT_EQUAL_UINT8(0u, r.f2_lucky_star);
@@ -387,29 +394,27 @@ static void test_init_copies_class_id(void)
 /* ---------------------------------------------------------------------------
  * FEAT-16: Miss result — when dodge succeeds, damage_dealt = 0.
  *
- * Construct a scenario where the attacker has low speed (low dodge on
- * counter) but the responder has very high speed (high dodge_chance).
+ * From trace round 7 of the seed=12345 fight:
+ *   F2 attacks F1: d6=4, adj=4, crit=0. dodge=49>24=hit. dmg=12.
+ *   F1 attacks F2: d6=2, self-rr→5 (5>2, keeps 5). def-rr: raw2=5>=5 but
+ *     at this point in the fight F2's charges may be exhausted.
+ *     dodge=19<=24: MISS. f1_damage_dealt=0.
  * ---------------------------------------------------------------------------*/
 static void test_step_miss_damage_is_zero(void)
 {
-    /* F2 has max speed (eff=23) and F1 has 0 precision (eff=0).
-     * dodge_chance = 23*2 - 0/2 = 46, clamped to [5,75] = 46.
-     * So F2 dodges F1's attack with probability 46%. With a known seed
-     * we verified dodge_roll=8 < 24 in round 7 for our symmetric case
-     * which triggers a miss. We use that as the reference. */
     fq_character_t c1 = make_char(100, 50, 50, 50, 50);
     fq_character_t c2 = make_char(100, 50, 50, 50, 50);
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
 
-    /* From trace: round 7, F1 attack misses (dodge_roll=8 <= dc=24) */
+    /* From trace: round 7, F1 attack misses (dodge_roll=19 <= dc=24) */
     fq_round_result_t r;
     memset(&r, 0, sizeof(r));
     for (int i = 0; i < 7 && !ctx.finished; i++) {
         r = fq_combat_step(&ctx);
     }
 
-    /* Round 7: F1 missed, F1_damage_dealt=0, f1_hit=0 */
+    /* Round 7: F1 missed, f1_damage_dealt=0, f1_hit=0 */
     TEST_ASSERT_EQUAL_UINT8(7u, r.round);
     TEST_ASSERT_EQUAL_UINT8(0u, r.f1_hit);
     TEST_ASSERT_EQUAL_INT(0, (int)r.f1_damage_dealt);
@@ -425,7 +430,7 @@ static void test_step_result_round_field(void)
     fq_combat_ctx_t ctx;
     fq_combat_init(&ctx, &c1, &c2, 12345u);
 
-    for (uint8_t expected = 1u; expected <= 7u; expected++) {
+    for (uint8_t expected = 1u; expected <= 10u; expected++) {
         fq_round_result_t r = fq_combat_step(&ctx);
         TEST_ASSERT_EQUAL_UINT8(expected, r.round);
         if (r.finished) break;
