@@ -26,6 +26,20 @@
 #include "sync.h"
 
 /* ---------------------------------------------------------------------------
+ * Pinned CRC32 regression constant (QA-P10-01).
+ *
+ * Serialized buffer for: round=1, f1.hp=100, f2.hp=80, f1.hp_max=100,
+ *                        f2.hp_max=100, rng.state=1
+ * Bytes: 01 64 00 50 00 64 00 64 00 01 00 00 00  (13 bytes LE)
+ * CRC32 (IEEE 802.3 reflected, poly 0xEDB88320): 0x3FDACA50
+ *
+ * This constant must never be changed without a Constitution-level review.
+ * If this test fails after a refactor, the serialization format has changed
+ * and all on-device combat state hashes will desync from each other.
+ * ---------------------------------------------------------------------------*/
+#define KNOWN_HASH_PINNED  0x3FDACA50u
+
+/* ---------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------------*/
 
@@ -178,12 +192,20 @@ static void test_sync_same_round_diverged_hashes(void)
 }
 
 /* ---------------------------------------------------------------------------
- * Hash produces a known fixed output for a known fixed input.
- * Verifies the CRC32 chaining is stable across refactors.
- * Compute manually: serialize [round=1, f1.hp=100, f2.hp=80, f1.hp_max=100,
- *                              f2.hp_max=100, rng.state=1]
- * Bytes: 01 64 00 50 00 64 00 64 00 01 00 00 00
- * This value is computed below and locked in as a regression pin.
+ * Hash produces a known fixed output for a known fixed input (QA-P10-01).
+ *
+ * Serialized buffer:
+ *   [0]     round=1          → 0x01
+ *   [1..2]  f1.hp=100        → 0x64 0x00
+ *   [3..4]  f2.hp=80         → 0x50 0x00
+ *   [5..6]  f1.hp_max=100    → 0x64 0x00
+ *   [7..8]  f2.hp_max=100    → 0x64 0x00
+ *   [9..12] rng.state=1      → 0x01 0x00 0x00 0x00
+ *
+ * Expected CRC32 (IEEE 802.3, poly 0xEDB88320): KNOWN_HASH_PINNED = 0x3FDACA50
+ *
+ * If this test fails, the serialization format changed and on-device hashes
+ * will desync. This is a Constitution Priority-0 determinism violation.
  * ---------------------------------------------------------------------------*/
 static void test_hash_known_fixed_value(void)
 {
@@ -196,12 +218,9 @@ static void test_hash_known_fixed_value(void)
     ctx.rng.state = 1u;
 
     uint32_t h = fq_generate_combat_hash(&ctx, 1u);
-    /* Must be non-zero and stable */
-    TEST_ASSERT_TRUE(h != 0u);
 
-    /* Lock-in test: run it a second time and assert identical output */
-    uint32_t h2 = fq_generate_combat_hash(&ctx, 1u);
-    TEST_ASSERT_EQUAL_UINT32(h, h2);
+    /* Pinned regression value — must never change without a Constitution review. */
+    TEST_ASSERT_EQUAL_UINT32(KNOWN_HASH_PINNED, h);
 }
 
 /* ---------------------------------------------------------------------------

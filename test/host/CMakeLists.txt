@@ -46,8 +46,12 @@ file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
 file(GLOB PRES_SOURCES "${PRES_SRC_DIR}/*.c")
 list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\\.c$")
 
-# Collect connectivity sources for host linkage.
-# protocol.c and sync.c are included; wifi_service.c is placeholder only.
+# ---------------------------------------------------------------------------
+# CONN_SOURCES: intentionally enumerated (not globbed) to exclude
+# wifi_service.c, which contains ESP-IDF BLE/WiFi headers that cannot be
+# compiled in the host environment. Only the transport-agnostic protocol
+# and sync modules are included here.
+# ---------------------------------------------------------------------------
 set(CONN_SOURCES
     "${CONN_SRC_DIR}/protocol.c"
     "${CONN_SRC_DIR}/sync.c"
@@ -422,7 +426,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 # Phase-10 Bound tests (Rule 22 Phase A — BOUND RED)
 # Covers: NULL guards, nonce zero-XOR, round out-of-range, buffer underflow,
-# magic mismatch, CRC mismatch, 1-bit PRNG avalanche, padding non-inclusion.
+# magic mismatch, CRC mismatch, 1-bit PRNG avalanche, padding non-inclusion,
+# DISCONNECT exact size, and unknown type (0xFF) rejection (QA-P10-02).
 # ---------------------------------------------------------------------------
 add_conn_test(test_p10_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p10_bounds.c")
 

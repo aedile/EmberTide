@@ -13,6 +13,7 @@
  *   N8  : CRC field not fed into CRC computation (verify idempotency)
  *   N9  : Round 0, 13, 255 rejected by fq_generate_combat_hash and parse
  *   N10 : 1-bit PRNG state difference detected in hash (avalanche test)
+ *   QA-P10-02: DISCONNECT exact size; unknown type (0xFF) parse rejection
  */
 
 #include <stdint.h>
@@ -324,6 +325,49 @@ static void test_parse_round_hash_round_13_rejected(void)
 }
 
 /* ---------------------------------------------------------------------------
+ * QA-P10-02: FQ_PKT_DISCONNECT serializes to exactly FQ_PACKET_OVERHEAD bytes.
+ *
+ * DISCONNECT has no payload — only magic(4) + type(1) + CRC(4) = 9 bytes.
+ * Verifies the no-payload fast-path in fq_packet_serialize.
+ * ---------------------------------------------------------------------------*/
+static void test_disconnect_serialize_exact_size(void)
+{
+    /* DISCONNECT has no payload; the packet pointer is unused but must be non-NULL
+     * (serialize NULL-guards on packet before checking type). Pass a dummy byte. */
+    uint8_t dummy = 0u;
+    uint8_t buf[FQ_PACKET_OVERHEAD];
+    size_t n = fq_packet_serialize(&dummy, FQ_PKT_DISCONNECT, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)FQ_PACKET_OVERHEAD, (uint32_t)n);
+}
+
+/* ---------------------------------------------------------------------------
+ * QA-P10-02: A buffer with valid magic but type=0xFF is rejected with
+ * FQ_PKT_ERR_UNKNOWN_TYPE (not a crash, not a silent OK).
+ *
+ * Build: write "FQ01" magic + 0xFF type byte + 4 zero CRC bytes.
+ * The magic check passes; the type switch hits default → UNKNOWN_TYPE.
+ * CRC is not checked because the type is validated before CRC computation
+ * uses the expected_size (which is unknown for type 0xFF).
+ * ---------------------------------------------------------------------------*/
+static void test_parse_unknown_type_rejected(void)
+{
+    /* Manually craft a minimal buffer: magic(4) + type(1) + crc_placeholder(4) */
+    uint8_t buf[FQ_PACKET_OVERHEAD];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = (uint8_t)'F';
+    buf[1] = (uint8_t)'Q';
+    buf[2] = (uint8_t)'0';
+    buf[3] = (uint8_t)'1';
+    buf[4] = 0xFFu;  /* Unknown type */
+    /* CRC bytes [5..8] left as zero — parse must reject before CRC check */
+
+    fq_packet_type_t   out_type;
+    fq_packet_invite_t out_pkt;
+    fq_packet_err_t err = fq_packet_parse(buf, sizeof(buf), &out_type, &out_pkt);
+    TEST_ASSERT_EQUAL_INT(FQ_PKT_ERR_UNKNOWN_TYPE, (int)err);
+}
+
+/* ---------------------------------------------------------------------------
  * Sync: NULL round mismatch — round check before hash check
  * ---------------------------------------------------------------------------*/
 static void test_sync_round_mismatch_before_hash(void)
@@ -391,6 +435,10 @@ int main(void)
     /* N7 / N8 / N10: hash quality */
     test_hash_deterministic_no_padding_leak();
     test_hash_prng_bit_flip_detected();
+
+    /* QA-P10-02: DISCONNECT size + unknown type rejection */
+    test_disconnect_serialize_exact_size();
+    test_parse_unknown_type_rejected();
 
     /* Sync logic */
     test_sync_round_mismatch_before_hash();
