@@ -2,29 +2,30 @@
  * ui_widgets.c — FiestaQuest Presentation Layer: Reusable UI Widgets
  *
  * Implements word-wrapping dialogue box overlay.
+ * Phase 18: wired real font rendering via fq_get_font_small().
  *
  * Dialogue box layout (overlays y=120..199 on the 200x200 display):
  *   Outer rect:  (2, 120) → (197, 197)
  *   Inner rect:  (4, 122) → (195, 195)  (2px gap ornate border)
- *   Title band:  y=124..136  (12px tall)
- *   Title divider: y=137
- *   Body area:   y=139..181  (up to 4 lines × 10px each + 1px gap)
+ *   Title band:  y=124..153  (glyph_h=30)
+ *   Title divider: y=155
+ *   Body area:   y=157..196  (up to 4 lines × 10px each + 1px gap)
  *   Buttons:     y=184..194  (only when show_yes_no=1)
  *
  * Word-wrap algorithm (no malloc, stack-only):
  *   - Input string is scanned with strnlen-safe pointer arithmetic.
  *   - '\n' forces a line break.
- *   - Lines are split at the last space within 25 characters.
- *   - If no space found within 25 characters, force-break at position 25.
+ *   - Lines are split at the last space within 20 characters (narrowed from 25
+ *     to account for real font advance widths averaging ~8px/char on a 186px
+ *     usable body width).
+ *   - If no space found within 20 characters, force-break at position 20.
  *   - Max 4 lines total. Line 4 suffix "..." is applied if input exceeds 4.
- *
- * NO font rendering — placeholder horizontal rules represent text lines.
- * This matches Phase 7/8 convention (fonts are device-side concerns).
  *
  * Constitution Priority 0: no float, no malloc, no PRNG calls.
  */
 
 #include "ui_widgets.h"
+#include "asset_data.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -48,15 +49,15 @@
 
 /** Title band top y. */
 #define DLG_TITLE_Y     (DLG_INNER_Y + 2)
-/** Title band height. */
-#define DLG_TITLE_H     12
+/** Title band height = font glyph_h (30). */
+#define DLG_TITLE_H     30
 
 /** Divider line y (between title and body). */
 #define DLG_DIVIDER_Y   (DLG_TITLE_Y + DLG_TITLE_H + 1)
 
 /** Body area start y. */
 #define DLG_BODY_Y      (DLG_DIVIDER_Y + 2)
-/** Body line height (including gap). */
+/** Body line height (including gap) — keep compact to fit 4 lines. */
 #define DLG_LINE_H      10
 /** Maximum body lines before truncation. */
 #define DLG_MAX_LINES    4
@@ -69,8 +70,8 @@
 #define DLG_NO_X        (DLG_CONTENT_X + 50)
 #define DLG_NO_W        30
 
-/** Max characters per wrapped line. */
-#define DLG_WRAP_COLS   25
+/** Max characters per wrapped line (tightened for ~8px/char average). */
+#define DLG_WRAP_COLS   20
 
 /* ── Internal word-wrap helper ───────────────────────────────────────────── */
 
@@ -82,12 +83,6 @@
  *
  * Operates entirely on the original string — no copies, no malloc.
  * Safe for NULL input (treats as empty).
- *
- * @param body       Input body string (may be NULL).
- * @param out_ptrs   Output array of line start pointers [DLG_MAX_LINES].
- * @param out_lens   Output array of line lengths [DLG_MAX_LINES].
- * @param out_count  Number of lines populated (0..DLG_MAX_LINES).
- * @param truncated  Set to 1 if overflow occurred, else 0.
  */
 static void wrap_lines(const char  *body,
                        const char  *out_ptrs[DLG_MAX_LINES],
@@ -175,6 +170,8 @@ void fq_render_dialogue(fq_fb_t    *fb,
         return;
     }
 
+    const fq_font_t *font = fq_get_font_small();
+
     /* ── Erase dialogue region (fill white) ─────────────────────────────── */
     fq_fb_fill_rect(fb,
                     DLG_OUTER_X, DLG_OUTER_Y,
@@ -188,22 +185,9 @@ void fq_render_dialogue(fq_fb_t    *fb,
                     DLG_INNER_X, DLG_INNER_Y,
                     DLG_INNER_W, DLG_INNER_H, 1u);
 
-    /* ── Title band ─────────────────────────────────────────────────────── */
-    /* Title is represented as a filled rect in the title band.
-     * Width proportional to title length (capped at DLG_CONTENT_W).
-     * NULL or empty title → minimal width placeholder. */
-    {
-        size_t title_len = (title != NULL) ? strnlen(title, 24u) : 0u;
-        int    title_w   = (title_len > 0u)
-                               ? (int)(title_len * 7u)   /* ~7px per char */
-                               : 20;
-        if (title_w > DLG_CONTENT_W) {
-            title_w = DLG_CONTENT_W;
-        }
-        /* Draw a filled rect as the ALL-CAPS title placeholder */
-        fq_fb_fill_rect(fb,
-                        DLG_CONTENT_X, DLG_TITLE_Y,
-                        (int16_t)title_w, DLG_TITLE_H, 1u);
+    /* ── Title text ─────────────────────────────────────────────────────── */
+    if (title != NULL && title[0] != '\0') {
+        fq_draw_text(fb, font, DLG_CONTENT_X, DLG_TITLE_Y, title);
     }
 
     /* ── Title / body divider ───────────────────────────────────────────── */
@@ -211,49 +195,52 @@ void fq_render_dialogue(fq_fb_t    *fb,
                     DLG_INNER_X + 1, DLG_DIVIDER_Y,
                     DLG_INNER_X + DLG_INNER_W - 2, DLG_DIVIDER_Y, 1u);
 
-    /* ── Body text lines (as horizontal rule placeholders) ─────────────── */
+    /* ── Body text lines ────────────────────────────────────────────────── */
     {
         const char *line_ptrs[DLG_MAX_LINES];
         int         line_lens[DLG_MAX_LINES];
         int         line_count = 0;
         int         truncated  = 0;
 
+        /* Stack buffer for rendering each line (null-terminated copy). */
+        char line_buf[DLG_WRAP_COLS + 4];  /* +4 for "..." and null */
+
         wrap_lines(body, line_ptrs, line_lens, &line_count, &truncated);
 
         for (int i = 0; i < line_count; i++) {
             int line_y = DLG_BODY_Y + i * DLG_LINE_H;
-            /* Compute placeholder width from line length (≈7px per char) */
-            int line_w = line_lens[i] * 7;
-            if (line_w < 4) {
-                line_w = 4;  /* minimum visible line */
-            }
-            if (line_w > DLG_CONTENT_W) {
-                line_w = DLG_CONTENT_W;
+            int len    = line_lens[i];
+            if (len < 0) {
+                len = 0;
             }
 
-            /* For the last line, append "..." indicator if truncated */
-            if (truncated && i == DLG_MAX_LINES - 1) {
-                /* Draw the line slightly shorter to leave room for "..." mark */
-                int abbrev_w = line_w - 14;
-                if (abbrev_w < 4) {
-                    abbrev_w = 4;
-                }
-                fq_fb_draw_line(fb,
-                                DLG_CONTENT_X, (int16_t)(line_y + DLG_LINE_H / 2),
-                                DLG_CONTENT_X + abbrev_w,
-                                (int16_t)(line_y + DLG_LINE_H / 2), 1u);
-                /* "..." three dots */
-                for (int d = 0; d < 3; d++) {
-                    fq_fb_set_pixel(fb,
-                                    (int16_t)(DLG_CONTENT_X + abbrev_w + 3 + d * 4),
-                                    (int16_t)(line_y + DLG_LINE_H / 2), 1u);
-                }
-            } else {
-                fq_fb_draw_line(fb,
-                                DLG_CONTENT_X, (int16_t)(line_y + DLG_LINE_H / 2),
-                                DLG_CONTENT_X + line_w,
-                                (int16_t)(line_y + DLG_LINE_H / 2), 1u);
+            /* Build null-terminated string for this line. */
+            int copy_len = len;
+            if (copy_len > DLG_WRAP_COLS) {
+                copy_len = DLG_WRAP_COLS;
             }
+
+            /* Append "..." on last line if truncated. */
+            if (truncated && i == DLG_MAX_LINES - 1) {
+                int abbrev = copy_len - 3;
+                if (abbrev < 0) {
+                    abbrev = 0;
+                }
+                for (int k = 0; k < abbrev; k++) {
+                    line_buf[k] = line_ptrs[i][k];
+                }
+                line_buf[abbrev + 0] = '.';
+                line_buf[abbrev + 1] = '.';
+                line_buf[abbrev + 2] = '.';
+                line_buf[abbrev + 3] = '\0';
+            } else {
+                for (int k = 0; k < copy_len; k++) {
+                    line_buf[k] = line_ptrs[i][k];
+                }
+                line_buf[copy_len] = '\0';
+            }
+
+            fq_draw_text(fb, font, DLG_CONTENT_X, (int16_t)line_y, line_buf);
         }
     }
 
@@ -262,8 +249,11 @@ void fq_render_dialogue(fq_fb_t    *fb,
         fq_fb_draw_rect(fb,
                         DLG_YES_X, DLG_BTN_Y,
                         DLG_YES_W, DLG_BTN_H, 1u);
+        fq_draw_text(fb, font, DLG_YES_X + 2, DLG_BTN_Y, "YES");
+
         fq_fb_draw_rect(fb,
                         DLG_NO_X, DLG_BTN_Y,
                         DLG_NO_W, DLG_BTN_H, 1u);
+        fq_draw_text(fb, font, DLG_NO_X + 2, DLG_BTN_Y, "NO");
     }
 }
