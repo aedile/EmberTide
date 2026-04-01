@@ -120,6 +120,15 @@ static void render_current_state(fq_app_ctx_t   *app,
             break;
     }
 
+    {
+        uint32_t black = 0;
+        for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
+            uint8_t b = fb->pixels[i];
+            while (b) { black += b & 1u; b >>= 1u; }
+        }
+        ESP_LOGI(TAG, "render: state=%d, %lu black pixels", (int)app->state, (unsigned long)black);
+    }
+
     err = hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
     if (err != HAL_EPAPER_OK) {
         ESP_LOGE(TAG, "hal_epaper_flush failed: %d", (int)err);

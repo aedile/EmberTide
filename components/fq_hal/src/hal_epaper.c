@@ -437,6 +437,8 @@ hal_epaper_err_t hal_epaper_flush(const uint8_t *fb_pixels, uint32_t size)
         return HAL_EPAPER_ERR_INIT;
     }
 
+    ESP_LOGI(TAG, "flush: writing %lu bytes", (unsigned long)size);
+
     /* Wait for display to be ready before starting the transfer. */
     err = epd_wait_busy();
     if (err != HAL_EPAPER_OK) return err;
@@ -453,6 +455,8 @@ hal_epaper_err_t hal_epaper_flush(const uint8_t *fb_pixels, uint32_t size)
     err = epd_data_buf(fb_pixels, HAL_EPAPER_FB_SIZE);
     if (err != HAL_EPAPER_OK) return err;
 
+    ESP_LOGI(TAG, "flush: RAM write done, triggering update");
+
     /* Display update control 2 (0x22 0xF7) + Master activation (0x20). */
     err = epd_cmd(0x22u);
     if (err != HAL_EPAPER_OK) return err;
@@ -461,9 +465,13 @@ hal_epaper_err_t hal_epaper_flush(const uint8_t *fb_pixels, uint32_t size)
     err = epd_cmd(0x20u);
     if (err != HAL_EPAPER_OK) return err;
 
+    ESP_LOGI(TAG, "flush: waiting for refresh...");
+
     /* Wait for refresh to complete (up to 3 s). */
     err = epd_wait_busy();
     if (err != HAL_EPAPER_OK) return err;
+
+    ESP_LOGI(TAG, "flush: refresh complete");
 
     return HAL_EPAPER_OK;
 }
