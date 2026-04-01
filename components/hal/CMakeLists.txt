@@ -3,6 +3,8 @@ idf_component_register(
         "src/hal_gpio.c"
         "src/hal_epaper.c"
         "src/hal_flash.c"
+        "src/hal_audio.c"
+        "src/hal_sleep.c"
     INCLUDE_DIRS
         "include"
     # hal/ sits at the bottom of the dependency graph.
@@ -13,4 +15,9 @@ idf_component_register(
     # without ESP-IDF driver headers.  When real SPI and LittleFS
     # implementations are added, add the following to REQUIRES:
     #   driver esp_vfs_littlefs
+    #
+    # Phase 13 note: hal_audio.c and hal_sleep.c are stubs that compile
+    # without ESP-IDF driver headers.  When LEDC and deep-sleep
+    # implementations are added, add to REQUIRES:
+    #   driver esp_timer
 )

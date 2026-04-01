@@ -537,3 +537,38 @@ add_hal_test(test_p12_hal_epaper_feature
 add_hal_test(test_p12_hal_flash_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p12_hal_flash_feature.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_flash.c")
+
+# ---------------------------------------------------------------------------
+# Phase-13: HAL GPIO Buttons + Audio Piezo + Deep Sleep (host mocks)
+#
+# Same add_hal_test() pattern as Phase-12. Each test executable links its
+# corresponding mock .c file which replaces the target stub at link time.
+# HAL_INCLUDE is already set above — no game/ or presentation/ paths added,
+# preserving the bottom-layer isolation boundary.
+# ---------------------------------------------------------------------------
+
+# Phase-13 Bound tests (Rule 22 Phase A — BOUND RED)
+add_hal_test(test_p13_hal_gpio_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p13_hal_gpio_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_gpio.c")
+
+add_hal_test(test_p13_hal_audio_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p13_hal_audio_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_audio.c")
+
+add_hal_test(test_p13_hal_sleep_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p13_hal_sleep_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_sleep.c")
+
+# Phase-13 Feature tests (Rule 22 Phase B — FEATURE RED)
+add_hal_test(test_p13_hal_gpio_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p13_hal_gpio_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_gpio.c")
+
+add_hal_test(test_p13_hal_audio_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p13_hal_audio_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_audio.c")
+
+add_hal_test(test_p13_hal_sleep_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p13_hal_sleep_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_sleep.c")
