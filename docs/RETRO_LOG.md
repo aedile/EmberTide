@@ -814,3 +814,52 @@ ADR, screen_mgr wiring, and inventory duplicate guard). None block the Phase
 | `test/host/` | — | 63 test entries across 40+ files |
 | `test/visual/` | — | 8 golden PNG baselines |
 | `test/target/` | — | 1 target scaffold |
+
+---
+
+## Phase 16 — Hardware Bring-Up (feat/phase-16-hardware-bringup)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-16-hardware-bringup`
+
+### Audit Remediation
+
+This phase entry records the fixes applied in response to the Phase 16
+boundary audit BLOCKER findings raised before PR merge.
+
+#### BLOCKER TC-1: Missing GPIO feature test
+
+`test/host/test_p16_hal_gpio_feature.c` was missing from the test suite.
+The file has been created with 7 feature tests (F1–F7) covering:
+- Init with valid callback returns HAL_GPIO_OK.
+- Simulate press BTN_A fires callback with BTN_A; press count == 1.
+- Simulate press BTN_B increments BTN_B counter independently.
+- Rapid burst of 10 BTN_A presses yields press count == 10 (mock, no debounce gate).
+- Rapid burst of 10 BTN_B presses independent of BTN_A count.
+- Deinit + reinit cycle restores full callback operation.
+- Double init replaces callback cleanly (old callback not called after reinit).
+
+Registered in `test/host/CMakeLists.txt` via `add_hal_test()`.
+
+#### BLOCKER DS-1: Stale module status in architecture doc
+
+`docs/fiestaquest-architecture.md` Section 15.1 module status table updated:
+- `hal_epaper.c`: STUB → LIVE
+- `hal_flash.c`:  STUB → LIVE
+- `hal_gpio.c`:   STUB → LIVE
+
+The LIVE legend entry was added to the status key: LIVE = Public API +
+host-compilable target stub + failure-injection bounds/feature tests fully
+passing under Phase 16 validation.
+
+### Advisory
+
+**ADVISORY DC-1:** `hal_gpio_is_pressed()` has no production caller — firmware
+uses ISR callback path exclusively. Retained as public API for future polling
+use cases.
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (Gate #1): all tests pass — 0 failures.
+- No presentation/ files touched — visual regression reviewer not required.
+- No new game/ files — architecture reviewer not required.

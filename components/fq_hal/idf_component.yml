@@ -1,0 +1,6 @@
+## IDF Component Manager manifest for fq_hal
+## Phase 16: LittleFS VFS is required for hal_flash.c real implementation.
+## esp_vfs_littlefs was removed from ESP-IDF built-in components in v5.x
+## and must be fetched from the ESP-IDF Component Registry.
+dependencies:
+  joltwallet/littlefs: "*"

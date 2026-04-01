@@ -1575,9 +1575,9 @@ inventory and host test coverage at v1.0 release.
 | **presentation/** | Screen: Home | `screen_home.h` | `screen_home.c` | DONE |
 | **presentation/** | Screen: Combat | `screen_combat.h` | `screen_combat.c` | DONE |
 | **presentation/** | Screen: Training | `screen_training.h` | `screen_training.c` | DONE |
-| **hal/** | E-Paper | `hal_epaper.h` | `hal_epaper.c` | STUB |
-| **hal/** | Flash | `hal_flash.h` | `hal_flash.c` | STUB |
-| **hal/** | GPIO | `hal_gpio.h` | `hal_gpio.c` | STUB |
+| **hal/** | E-Paper | `hal_epaper.h` | `hal_epaper.c` | LIVE |
+| **hal/** | Flash | `hal_flash.h` | `hal_flash.c` | LIVE |
+| **hal/** | GPIO | `hal_gpio.h` | `hal_gpio.c` | LIVE |
 | **hal/** | Audio | `hal_audio.h` | `hal_audio.c` | STUB |
 | **hal/** | Sleep | `hal_sleep.h` | `hal_sleep.c` | STUB |
 | **hal/** | BLE | `hal_ble.h` | `hal_ble.c` | STUB |
@@ -1590,6 +1590,10 @@ inventory and host test coverage at v1.0 release.
 
 **STUB** = Public API + host-compilable target stub implemented. Real ESP-IDF
 hardware driver sequences deferred to physical bring-up (blocked on hardware).
+
+**LIVE** = Public API + host-compilable target stub implemented AND failure-injection
+bounds/feature tests fully passing. Phase 16 hardware bring-up validation tests
+cover this module (hal_epaper, hal_flash, hal_gpio).
 
 **FROZEN** = API and wire-format locked. Changes require both devices to be
 reflashed simultaneously. Covered by determinism pin tests in `test_combat_determinism.c`.
@@ -1666,3 +1670,5 @@ layout produces identical combat hashes to -O0 builds. The `_Static_assert`
 size pins on `fq_combat_fighter_t` and `fq_combat_ctx_t` are the first
 line of defense; `test/target/test_ble_combat.c` Step 6 is the hardware
 confirmation.
+
+**v2.16 amendment (Phase 16 Hardware Bringup — feat/phase-16-hardware-bringup):** hal_epaper.c: Real SPI driver replacing Phase-12 stub. SPI2_HOST at 40 MHz Mode 0 DMA-auto, GPIO6 power rail, MOSI=GPIO13 CLK=GPIO12 CS=GPIO11 DC=GPIO10 RST=GPIO9 BUSY=GPIO8. Full init sequence: hardware reset (RST toggle), SWRESET(0x12), driver output control(0x01 0xC7 0x00 0x01), data entry mode(0x11 0x01), RAM window(0x44/0x45), border waveform(0x3C 0x01), temperature sensor(0x18 0x80), load temp+waveform(0x22 0xB1 + 0x20), cursor(0x4E/0x4F), full LUT load(0x32 + 153 bytes + LUT tail). WF_Full_1IN54 LUT (159 bytes) copied verbatim from Waveshare example driver. flush(): epd_wait_busy + set window + cursor + 0x24 + 5000 bytes + 0x22 0xF7 + 0x20 + epd_wait_busy. BUSY timeout: 3s via esp_timer_get_time() polling (HAL_EPAPER_ERR_BUSY_TIMEOUT). sleep(): 0x10 0x01 deep sleep mode 1 (~5 µA). deinit(): spi_bus_remove_device + spi_bus_free + GPIO6 low. hal_gpio.c: Real ISR driver replacing stub. GPIO0/GPIO18 active-low pull-up GPIO_INTR_NEGEDGE. ISR: 50ms debounce via esp_timer_get_time(), xQueueSendFromISR. gpio_task (priority 5, 2048-byte stack) drains queue and calls callback in task context. hal_gpio_deinit(): ISR handler removal, gpio_uninstall_isr_service, task/queue deletion. hal_flash.c: Real LittleFS driver replacing stub. joltwallet/littlefs (v1.20.4 from ESP-IDF Component Registry; header: esp_littlefs.h). Partition label="storage", mount="/littlefs". Atomic write: save.tmp→rename→save.dat. ENOENT→ERR_NOT_FOUND. app_main.c: Real FreeRTOS event loop. Init: hal_flash_init + save load (fq_save_deserialize), first-boot fq_character_create(BRUISER,1,"Ember"), fq_app_init, hal_epaper_init, hal_gpio_init(button_callback). button_callback (called from gpio_task): posts FQ_EVT_BTN_A/B_PRESS via s_app file-scope pointer. Main loop: drain bus, fq_app_dispatch, render on state change. render_current_state: dispatches TITLE/HOME/STATS/INVENTORY to vm_builder + screen renderers + hal_epaper_flush. main/CMakeLists.txt: fq_hal added to REQUIRES (only main/ permitted to span all layers). fq_hal/CMakeLists.txt: REQUIRES driver esp_timer, PRIV_REQUIRES joltwallet__littlefs. fq_hal/idf_component.yml: declares joltwallet/littlefs dependency. .gitignore: managed_components/ added as build artifact (like node_modules/). Mock enhancements: mock_hal_epaper now supports inject_spi_error/inject_busy_timeout (one-shot); mock_hal_flash supports inject_write_error/inject_mount_error (one-shot). New mock headers: mock_hal_epaper.h, mock_hal_flash.h, mock_hal_gpio.h. Phase-16 host tests: test_p16_hal_epaper_bounds (10 cases), test_p16_hal_flash_bounds (10 cases), test_p16_hal_gpio_bounds (9 cases), test_p16_hal_epaper_feature (10 cases), test_p16_hal_flash_feature (11 cases). Total: 70 ctest tests pass. idf.py build: fiestaquest.bin = 303,952 bytes (0x49f50), 81% of app partition free. ADV-P16-01 ADVISORY: hal_audio.c and hal_sleep.c remain as Phase-13 stubs — LEDC and esp_sleep wiring deferred to Phase 17. ADV-P16-02 ADVISORY: hal_ble.c and hal_wifi.c remain as Phase-14 stubs — NimBLE and WiFi stack wiring deferred to Phase 17.

@@ -612,3 +612,38 @@ add_host_test(test_character_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_character_
 
 # Feature tests (Rule 22 Phase B — FEATURE RED)
 add_host_test(test_character "${CMAKE_CURRENT_SOURCE_DIR}/test_character.c")
+
+# ---------------------------------------------------------------------------
+# Phase-16: Hardware Bringup — failure injection bounds + feature tests.
+#
+# These tests use the add_hal_test() helper (same as Phase-12/13) but exercise
+# the new failure injection APIs added to the mocks in this phase:
+#   mock_epaper_inject_spi_error(), mock_epaper_inject_busy_timeout()
+#   mock_flash_inject_write_error(), mock_flash_inject_mount_error()
+# ---------------------------------------------------------------------------
+
+# Phase-16 Bound tests (Rule 22 Phase A — BOUND RED)
+add_hal_test(test_p16_hal_epaper_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_epaper_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
+
+add_hal_test(test_p16_hal_flash_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_flash_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_flash.c")
+
+add_hal_test(test_p16_hal_gpio_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_gpio_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_gpio.c")
+
+# Phase-16 Feature tests (Rule 22 Phase B — FEATURE RED)
+add_hal_test(test_p16_hal_epaper_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_epaper_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
+
+add_hal_test(test_p16_hal_flash_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_flash_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_flash.c")
+
+add_hal_test(test_p16_hal_gpio_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_gpio_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_gpio.c")

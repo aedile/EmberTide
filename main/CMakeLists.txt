@@ -11,6 +11,9 @@ idf_component_register(
         presentation
         platform
         connectivity
-    # hal/ is NOT required directly by main — it is accessed through platform/.
-    # This enforces the layered dependency: main -> platform -> hal.
+        fq_hal
+    # Phase 16: fq_hal added to REQUIRES so app_main.c can call
+    # hal_epaper_init/flush, hal_gpio_init, hal_flash_init/read/write directly.
+    # Architecture note: main/ is the ONLY module permitted to span all layers.
+    # game/, presentation/, and connectivity/ still MUST NOT depend on fq_hal.
 )
