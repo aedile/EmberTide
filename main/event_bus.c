@@ -9,11 +9,11 @@
  *   - tail  : index of the oldest populated slot (read on pop, advanced modulo 16).
  *   - count : number of events currently in the ring [0, FQ_EVENT_QUEUE_SIZE].
  *
- * Since FQ_EVENT_QUEUE_SIZE == 16 and all indices are uint8_t, no special
- * wraparound logic is required beyond the modulo operation.
+ * Since FQ_EVENT_QUEUE_SIZE == 16 and all indices are uint8_t, the modulo
+ * operation keeps indices in range with no additional wraparound logic.
  *
- * overflow_count is incremented (saturating) rather than wrapping because
- * a saturated diagnostic counter is more useful than a reset one.
+ * overflow_count saturates at UINT8_MAX rather than wrapping — a saturated
+ * diagnostic counter is more useful than a reset one.
  *
  * Constitution Priority 0: No PRNG calls. No floating point. No combat logic.
  */
@@ -29,12 +29,9 @@ void fq_event_bus_init(fq_event_bus_t *bus)
     if (bus == NULL) {
         return;
     }
-    bus->head           = 0u;
-    bus->tail           = 0u;
-    bus->count          = 0u;
-    bus->overflow_count = 0u;
-    /* Zero the event storage so no stale data leaks across reinits. */
-    memset(bus->events, 0, sizeof(bus->events));
+    /* Single memset zeros all fields (head, tail, count, overflow_count) and
+     * the events array in one operation, preventing stale data across reinits. */
+    memset(bus, 0, sizeof(*bus));
 }
 
 /* ---------------------------------------------------------------------------
@@ -70,7 +67,7 @@ uint8_t fq_event_bus_pop(fq_event_bus_t *bus, fq_event_t *out)
     if (bus->count == 0u) {
         return 0u;
     }
-    *out = bus->events[bus->tail];
+    *out      = bus->events[bus->tail];
     bus->tail = (uint8_t)((bus->tail + 1u) % FQ_EVENT_QUEUE_SIZE);
     bus->count--;
     return 1u;
