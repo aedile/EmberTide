@@ -1514,3 +1514,42 @@ File-local:     static, no prefix
 - Casting away `const` -- `-Werror=cast-qual`
 - Implicit fallthrough -- `-Werror=implicit-fallthrough`
 - `void*` in event payloads -- tagged union enforced
+
+---
+
+## Phase 2 Implementation Status (2026-03-31)
+
+The following `components/game/` modules are fully implemented and host-tested:
+
+| Module | Header | Implementation | Status |
+|--------|--------|---------------|--------|
+| XOR-shift PRNG | `include/prng.h` | `src/prng.c` | DONE |
+| CRC32 hash | `include/crc32.h` | `src/crc32.c` | DONE |
+| Effective stat curve | `include/progression.h` | `src/progression.c` | DONE |
+
+### Frozen Constants
+
+**PRNG algorithm:** xorshift32 with shifts `<<13`, `>>17`, `<<5`. Shifts are frozen
+and must not change without updating all sequence literals in `test_prng.c` and the
+BLE combat protocol.
+
+**PRNG seed=0 guard:** Both `fq_prng_init()` and `fq_prng_next()` carry independent
+zero-state guards. The first prevents init-time deadlock; the second guards against
+uninitialized structs.
+
+**CRC32 polynomial:** `0xEDB88320` (IEEE 802.3, reflected). Check vector:
+`fq_crc32("123456789", 9) == 0xCBF43926`. Table is 256 × uint32_t static const,
+frozen. `_Static_assert` verifies size at compile time.
+
+**Stat curve range:** `fq_effective_stat(raw)` maps uint8_t [0,255] → uint8_t [0,23].
+Table is monotonically non-decreasing. `_Static_assert(sizeof(table) == 256)`.
+
+**Determinism pin:** 10,000 PRNG values from seed=1, packed as LE bytes, CRC32 hash
+= `0x7B1900A6`. This literal is frozen in `test_combat_determinism.c`.
+
+### Float Ban Enforcement
+
+`test/host/bound_float_ban.c` is compiled by both `assert_compile_fails()` at
+CMake configure time and `check_boundary.sh` at CTest runtime. The file calls
+`sin()` without declaration — under `-Wall -Werror` the implicit function
+declaration is a hard error, proving the float ban is enforced in CI.
