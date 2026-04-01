@@ -1,23 +1,23 @@
 /**
  * render_all_screens.c
  *
- * Visual regression harness — Phase 1 skeleton version.
+ * Visual regression harness — Phase 7 updated version.
  *
- * Allocates a 5000-byte 1-bit framebuffer (200x200 pixels, 1 bit per pixel,
- * 25 bytes per row), fills it with 1s (all-black for this e-paper display),
- * then writes output/blank.png using stb_image_write.
+ * B1 (review): Replaced raw uint8_t framebuffer[5000] with fq_fb_t from
+ * fq_framebuffer.h. Uses fq_fb_clear/fq_fb_fill instead of raw memset.
+ * Passes framebuffer.pixels to the PNG writer. Local constants (FB_WIDTH_PX
+ * etc.) removed; FQ_FB_WIDTH, FQ_FB_HEIGHT, FQ_FB_STRIDE, FQ_FB_SIZE used.
+ *
+ * B1 visual demo: In addition to output/blank.png (all-black), writes
+ * output/fb_test.png — a framebuffer with:
+ *   - A border rect (full display outline)
+ *   - An X drawn from corner to corner using fq_fb_draw_line
+ * This exercises fq_fb_draw_line and fq_fb_draw_rect in the visual harness.
  *
  * Per spec-challenger N3: the return value of stbi_write_png() is checked.
  * Exit code is non-zero if the write fails.
  *
- * Per spec-challenger N7: _Static_assert validates framebuffer is exactly
- * 5000 bytes.
- *
- * Per review advisory A2: the failure path test uses NULL as the filepath
- * instead of a non-existent directory path. stbi_write_png(NULL, ...) is
- * specified to return 0 without attempting I/O, making this test reliable
- * across all environments (no dependency on directory permissions or OS
- * behavior for non-existent paths).
+ * Per review advisory A2: the failure path test uses NULL as the filepath.
  *
  * The output/ directory is created if it does not exist (POSIX mkdir).
  */
@@ -27,6 +27,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "vendors/stb_image_write.h"
 
+#include "fq_framebuffer.h"
+
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -34,24 +36,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
-
-/* ---------------------------------------------------------------------------
- * Framebuffer constants
- * ---------------------------------------------------------------------------
- * Display: 200 x 200 pixels, 1 bit per pixel.
- * Packed row-major: 200 pixels / 8 bits = 25 bytes per row.
- * Total: 200 rows * 25 bytes = 5000 bytes.
- */
-#define FB_WIDTH_PX    (200u)
-#define FB_HEIGHT_PX   (200u)
-#define FB_STRIDE_BYTES ((FB_WIDTH_PX + 7u) / 8u)   /* 25 bytes per row */
-#define FB_SIZE_BYTES  (FB_HEIGHT_PX * FB_STRIDE_BYTES) /* 5000 bytes */
-
-/* N7: Compile-time assertion that framebuffer is exactly 5000 bytes. */
-_Static_assert(FB_SIZE_BYTES == 5000u,
-               "Framebuffer must be exactly 5000 bytes (200x200 1-bit)");
-_Static_assert(FB_STRIDE_BYTES == 25u,
-               "Framebuffer stride must be exactly 25 bytes (200 pixels / 8)");
 
 /* ---------------------------------------------------------------------------
  * ensure_output_dir
@@ -90,14 +74,14 @@ static int ensure_output_dir(const char *path)
  * Bit convention: 1 = black (0x00), 0 = white (0xFF).
  * This matches typical e-paper display convention.
  *
- * packed_row : pointer to FB_STRIDE_BYTES packed bytes for one row.
- * out_row    : caller-allocated buffer of FB_WIDTH_PX bytes.
+ * packed_row : pointer to FQ_FB_STRIDE packed bytes for one row.
+ * out_row    : caller-allocated buffer of FQ_FB_WIDTH bytes.
  * ---------------------------------------------------------------------------
  */
 static void expand_1bit_to_grayscale_row(const uint8_t *packed_row,
                                           uint8_t       *out_row)
 {
-    for (uint32_t x = 0; x < FB_WIDTH_PX; x++) {
+    for (uint32_t x = 0; x < FQ_FB_WIDTH; x++) {
         uint32_t byte_idx = x / 8u;
         uint32_t bit_idx  = 7u - (x % 8u);  /* MSB first */
         uint8_t  bit      = (packed_row[byte_idx] >> bit_idx) & 0x01u;
@@ -110,38 +94,39 @@ static void expand_1bit_to_grayscale_row(const uint8_t *packed_row,
  * write_framebuffer_png
  *
  * Expands the 1-bit framebuffer to grayscale and writes a PNG file.
+ * Takes a pointer to fq_fb_t and uses fb->pixels.
  *
  * Returns 0 on success, -1 on failure.
  * ---------------------------------------------------------------------------
  */
-static int write_framebuffer_png(const uint8_t *framebuffer,
+static int write_framebuffer_png(const fq_fb_t *fb,
                                   const char    *filepath)
 {
     /* Temporary row buffer — one grayscale byte per pixel. */
-    uint8_t row_gray[FB_WIDTH_PX];
+    uint8_t row_gray[FQ_FB_WIDTH];
 
     /* stbi_write_png expects a flat RGBA or grayscale byte array.
-     * We build a full grayscale image buffer (200*200 bytes). */
-    uint8_t *gray_image = (uint8_t *)malloc(FB_WIDTH_PX * FB_HEIGHT_PX);
+     * We build a full grayscale image buffer (FQ_FB_WIDTH * FQ_FB_HEIGHT bytes). */
+    uint8_t *gray_image = (uint8_t *)malloc(FQ_FB_WIDTH * FQ_FB_HEIGHT);
     if (!gray_image) {
         fprintf(stderr, "render_all_screens: malloc failed for gray_image\n");
         return -1;
     }
 
-    for (uint32_t y = 0; y < FB_HEIGHT_PX; y++) {
-        const uint8_t *src_row = framebuffer + (y * FB_STRIDE_BYTES);
+    for (uint32_t y = 0; y < FQ_FB_HEIGHT; y++) {
+        const uint8_t *src_row = fb->pixels + (y * FQ_FB_STRIDE);
         expand_1bit_to_grayscale_row(src_row, row_gray);
-        memcpy(gray_image + (y * FB_WIDTH_PX), row_gray, FB_WIDTH_PX);
+        memcpy(gray_image + (y * FQ_FB_WIDTH), row_gray, FQ_FB_WIDTH);
     }
 
     /* N3: Check stbi_write_png return value — 0 = failure. */
     int result = stbi_write_png(
         filepath,
-        (int)FB_WIDTH_PX,
-        (int)FB_HEIGHT_PX,
-        1,              /* 1 channel = grayscale */
+        (int)FQ_FB_WIDTH,
+        (int)FQ_FB_HEIGHT,
+        1,                  /* 1 channel = grayscale */
         gray_image,
-        (int)FB_WIDTH_PX  /* stride in bytes for the grayscale buffer */
+        (int)FQ_FB_WIDTH    /* stride in bytes for the grayscale buffer */
     );
 
     free(gray_image);
@@ -160,45 +145,69 @@ static int write_framebuffer_png(const uint8_t *framebuffer,
  */
 int main(void)
 {
-    /* Static 5000-byte 1-bit framebuffer. No malloc in the fast path. */
-    static uint8_t framebuffer[FB_SIZE_BYTES];
-
-    /* Fill with 0xFF — every bit set = all pixels black (e-paper convention). */
-    memset(framebuffer, 0xFF, sizeof(framebuffer));
+    /* B1: Static fq_fb_t — no malloc in the fast path. */
+    static fq_fb_t framebuffer;
 
     /* Ensure the output directory exists. */
     if (ensure_output_dir("output") != 0) {
         return EXIT_FAILURE;
     }
 
-    /* Write blank (all-black) screen. */
+    /* -----------------------------------------------------------------------
+     * Screen 1: blank.png — all-black (fq_fb_fill with color=1).
+     * ----------------------------------------------------------------------- */
+    fq_fb_fill(&framebuffer, 1u);
+
     printf("render_all_screens: writing output/blank.png ...\n");
-    if (write_framebuffer_png(framebuffer, "output/blank.png") != 0) {
+    if (write_framebuffer_png(&framebuffer, "output/blank.png") != 0) {
         return EXIT_FAILURE;
     }
     printf("render_all_screens: output/blank.png written successfully "
            "(%u x %u, 1-bit, %u bytes framebuffer)\n",
-           FB_WIDTH_PX, FB_HEIGHT_PX, FB_SIZE_BYTES);
+           (unsigned)FQ_FB_WIDTH, (unsigned)FQ_FB_HEIGHT, (unsigned)FQ_FB_SIZE);
 
-    /* ---------------------------------------------------------------------------
-     * A2: Failure path test — pass NULL as the filepath.
+    /* -----------------------------------------------------------------------
+     * Screen 2: fb_test.png — visual demo: X from corners + border rect.
+     *
+     * Demonstrates fq_fb_draw_line and fq_fb_draw_rect on a white background.
+     *   - Border rect: full display outline (0,0) to (199,199)
+     *   - Diagonal 1:  top-left (0,0) to bottom-right (199,199)
+     *   - Diagonal 2:  top-right (199,0) to bottom-left (0,199)
+     * ----------------------------------------------------------------------- */
+    fq_fb_clear(&framebuffer);
+
+    /* Border rect: outline of the full 200x200 display. */
+    fq_fb_draw_rect(&framebuffer, 0, 0,
+                    (int16_t)FQ_FB_WIDTH, (int16_t)FQ_FB_HEIGHT, 1u);
+
+    /* Diagonal: top-left → bottom-right. */
+    fq_fb_draw_line(&framebuffer, 0, 0, (int16_t)(FQ_FB_WIDTH - 1u),
+                    (int16_t)(FQ_FB_HEIGHT - 1u), 1u);
+
+    /* Diagonal: top-right → bottom-left. */
+    fq_fb_draw_line(&framebuffer, (int16_t)(FQ_FB_WIDTH - 1u), 0,
+                    0, (int16_t)(FQ_FB_HEIGHT - 1u), 1u);
+
+    printf("render_all_screens: writing output/fb_test.png ...\n");
+    if (write_framebuffer_png(&framebuffer, "output/fb_test.png") != 0) {
+        return EXIT_FAILURE;
+    }
+    printf("render_all_screens: output/fb_test.png written successfully "
+           "(border rect + X from corners)\n");
+
+    /* -----------------------------------------------------------------------
+     * Failure path test — pass NULL as the filepath.
      *
      * stbi_write_png(NULL, ...) returns 0 without attempting any I/O.
-     * This is reliable across all platforms and does not depend on directory
-     * permissions, OS behavior for non-existent paths, or environment state.
-     * Previous approach used "/nonexistent_dir_that_cannot_exist/test.png"
-     * which could theoretically succeed on some systems or produce unexpected
-     * errno side-effects.
-     * ---------------------------------------------------------------------------
-     */
+     * ----------------------------------------------------------------------- */
     printf("render_all_screens: testing stbi_write_png failure path (NULL filepath) ...\n");
     int bad_result = stbi_write_png(
-        NULL,           /* A2: NULL triggers immediate return 0 from stb */
-        (int)FB_WIDTH_PX,
-        (int)FB_HEIGHT_PX,
+        NULL,
+        (int)FQ_FB_WIDTH,
+        (int)FQ_FB_HEIGHT,
         1,
-        framebuffer,
-        (int)FB_STRIDE_BYTES
+        framebuffer.pixels,
+        (int)FQ_FB_STRIDE
     );
     if (bad_result != 0) {
         fprintf(stderr,

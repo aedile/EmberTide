@@ -330,3 +330,57 @@ Phase 4 delivered the deterministic combat engine stepper (`fq_combat_init` / `f
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 7 |
 
 ---
+
+## Phase 7 — Visual Render Primitives (Review Findings)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-7-visual-primitives`
+
+### Review Findings Addressed (Phase 7 Review)
+
+#### Blockers (4 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| B1 | Visual harness used raw `uint8_t framebuffer[5000]` instead of `fq_fb_t` | `render_all_screens.c` updated: `#include "fq_framebuffer.h"`, `static fq_fb_t framebuffer`. Uses `fq_fb_fill` and `fq_fb_clear` instead of raw `memset`. Passes `framebuffer.pixels` to PNG writer. Local `FB_WIDTH_PX` etc. constants removed; `FQ_FB_WIDTH/HEIGHT/STRIDE/SIZE` used. Visual demo added: border rect + X from corners written to `output/fb_test.png` using `fq_fb_draw_rect` and `fq_fb_draw_line`. |
+| B2 | `test_reversed_line_draws_same_pixels` compared full framebuffer bytes — fragile for non-45-degree lines with asymmetric Bresenham | Replaced with `test_reversed_line_endpoints_both_set`. Uses non-45-degree line (10,20)→(50,25). Asserts both endpoints set in both directions. Asserts pixel count == 41 (abs_dx+1) for both forward and reversed draws. |
+| B3 | No `draw_rect` zero/negative dimension bound tests | Added `test_draw_rect_zero_width_no_pixels`, `test_draw_rect_zero_height_no_pixels`, `test_draw_rect_negative_width_no_pixels` to `test_fb_bounds.c`. All assert no pixels set. |
+| B4 | Bresenham `dx`/`dy` computed as `int16_t` — signed overflow UB for coordinates spanning full int16_t range | `fq_framebuffer.c` `fq_fb_draw_line`: widened `dx`/`dy` to `int32_t` before subtraction. All loop variables (`cx`, `cy`, `ex`, `ey`, `sx`, `sy`, `abs_dx`, `abs_dy`) are now `int32_t`. Cast to `int16_t` only at `fq_fb_set_pixel` call sites (safe: bounds check inside). Added `test_draw_line_extreme_coords_no_crash` and `test_draw_line_horizontal_int16_extremes_no_crash` to `test_fb_bounds.c`. |
+
+#### Advisories (5 addressed inline)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 | Only octants 1, 5, 8 tested for Bresenham | Added `test_all_octants_endpoints_set` to `test_fb_feature.c` with 6 sub-cases covering octants 2, 3, 4, 6, 7, and the shallow-left-up case. |
+| A2 | NULL safety tests did not prove NULL avoided corrupting nearby stack | All 7 NULL safety tests in `test_fb_bounds.c` strengthened: each allocates a local `fq_fb_t canary`, clears it, calls the function under test with NULL, then asserts all bytes of `canary` remain 0x00. |
+| A3 | `fq_framebuffer_t` type name used in architecture doc; function signatures used `int` instead of `int16_t` | All 9 `fq_framebuffer_t` occurrences in `docs/fiestaquest-architecture.md` replaced with `fq_fb_t`. Function signatures in Section 7.2 updated to use `int16_t` for x, y, w, h parameters. v2.7 amendment note added at top of doc. |
+| A4 | RETRO_LOG missing Phase 7 section | This section. Visual PNG generation now produces two files: `output/blank.png` (all-black) and `output/fb_test.png` (border rect + X from corners). `fq_text_width` int16_t overflow accepted for practical string lengths (<200 chars); the return type is `int16_t` with no intermediate widening, which overflows at 2730 chars at 12px/char — unreachable in practice for 200px display strings. |
+| A5 | No defensive early-exit for extreme-coordinate lines (performance advisory) | Added early-exit guard in `fq_fb_draw_line`: if `abs_dx > 1000` AND both x-endpoints are outside `[-200, 400)`, return immediately. This avoids iterating up to 65535 steps for extreme-range lines with zero visible pixels. Threshold chosen conservatively: any line with an endpoint inside `[-200, 400)` in x may partially intersect the 200-wide display and is processed normally. |
+
+### Design Notes
+
+- **B4 int32_t widening scope:** Only `fq_fb_draw_line` required widening. `fq_fb_set_pixel`, `fq_fb_get_pixel`, `fq_fb_draw_rect`, and `fq_fb_fill_rect` accept `int16_t` parameters and their internal arithmetic stays in `uint32_t` (byte/bit index computation) — no overflow risk there.
+
+- **B2 pixel count rationale:** For an X-major line (10,20)→(50,25), `abs_dx=40`, `abs_dy=5`. Bresenham draws `abs_dx+1 = 41` pixels. This is exact for both forward and reversed traversal, confirming symmetry without relying on full-framebuffer byte equality (which was the fragile part of the old test).
+
+- **A5 early-exit bounds:** `-200` and `400` are conservative margins. The display is 200 pixels wide (0-199). A line starting at x=-199 could still clip into the display. A line starting at x=399 is 200 pixels past the right edge. Any line with both endpoints outside this extended range cannot contribute any visible pixel, regardless of slope.
+
+- **Visual harness fb_test.png:** The X-from-corners plus border-rect demo exercises both `fq_fb_draw_line` (two diagonal lines covering all four Bresenham quadrants) and `fq_fb_draw_rect` (four `draw_line` calls in one). This is the first non-trivial visual output from the Phase 7 render primitives.
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (host): **36/36 tests passed**
+  - `test_fb_bounds`: PASS (27 tests, includes B2/B3/B4/A2 additions)
+  - `test_fb_feature`: PASS (19 tests, includes A1 octant test)
+  - All prior phases unaffected (tests 1–30 all PASS)
+- `render_all_screens` (visual): PASS — `output/blank.png` and `output/fb_test.png` both written
+- `diff_screens.py`: PASS (no golden baselines yet; skips diff gracefully)
+
+### Open Advisories
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 8 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 8 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 8 |
+

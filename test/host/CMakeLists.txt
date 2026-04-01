@@ -34,9 +34,15 @@ enable_testing()
 set(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(GAME_INCLUDE  "${PROJECT_ROOT}/components/game/include")
 set(GAME_SRC_DIR  "${PROJECT_ROOT}/components/game/src")
+set(PRES_INCLUDE  "${PROJECT_ROOT}/components/presentation/include")
+set(PRES_SRC_DIR  "${PROJECT_ROOT}/components/presentation/src")
 
 # Collect all game component .c sources for host linkage.
 file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
+
+# Collect presentation sources (exclude device-only screen_mgr.c).
+file(GLOB PRES_SOURCES "${PRES_SRC_DIR}/*.c")
+list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\\.c$")
 
 # ---------------------------------------------------------------------------
 # add_host_test(<target> <source>)
@@ -51,6 +57,29 @@ function(add_host_test target source)
         "${CMAKE_CURRENT_SOURCE_DIR}")
     if(GAME_SOURCES)
         target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# add_pres_test(<target> <source>)
+#
+# Builds a presentation-layer test that links both game and presentation
+# sources (minus screen_mgr.c). Includes PRES_INCLUDE for fq_framebuffer.h,
+# fq_sprite.h, fq_text.h.
+# Architecture constraint: presentation/ MUST NOT include hal_*.h.
+# ---------------------------------------------------------------------------
+function(add_pres_test target source)
+    add_executable(${target} ${source})
+    target_include_directories(${target} PRIVATE
+        "${GAME_INCLUDE}"
+        "${PRES_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    if(PRES_SOURCES)
+        target_sources(${target} PRIVATE ${PRES_SOURCES})
     endif()
     add_test(NAME ${target} COMMAND ${target})
 endfunction()
@@ -257,3 +286,27 @@ add_host_test(test_legacy_bounds   "${CMAKE_CURRENT_SOURCE_DIR}/test_legacy_boun
 add_host_test(test_training        "${CMAKE_CURRENT_SOURCE_DIR}/test_training.c")
 add_host_test(test_level_up        "${CMAKE_CURRENT_SOURCE_DIR}/test_level_up.c")
 add_host_test(test_legacy          "${CMAKE_CURRENT_SOURCE_DIR}/test_legacy.c")
+
+# ---------------------------------------------------------------------------
+# Phase-7 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any phase-7 implementation. Prove the system REJECTS:
+#   - OOB pixel coordinates (negative AND >=200)
+#   - NULL pointer inputs on all fb/sprite/font functions
+#   - Signed INT16_MIN coordinate underflow
+#   - Degenerate line inputs (same point, all-OOB coords)
+#   - MSB bit-order fidelity (pixel 0,0 == bit 7 of byte 0)
+#   - 4-edge sprite clipping (negative x/y, past right/bottom)
+#   - Zero-dimension sprites
+#   - ASCII boundary enforcement (0x20-0x7E only)
+#   - int16_t cursor not uint8_t
+# ---------------------------------------------------------------------------
+add_pres_test(test_fb_bounds     "${CMAKE_CURRENT_SOURCE_DIR}/test_fb_bounds.c")
+add_pres_test(test_sprite_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_sprite_bounds.c")
+add_pres_test(test_text_bounds   "${CMAKE_CURRENT_SOURCE_DIR}/test_text_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-7 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_pres_test(test_fb_feature     "${CMAKE_CURRENT_SOURCE_DIR}/test_fb_feature.c")
+add_pres_test(test_sprite_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_sprite_feature.c")
+add_pres_test(test_text_feature   "${CMAKE_CURRENT_SOURCE_DIR}/test_text_feature.c")
