@@ -13,17 +13,11 @@
  */
 
 #include "legacy.h"
+#include "game_math.h"
 
 /* ---------------------------------------------------------------------------
  * Internal helpers
  * ---------------------------------------------------------------------------*/
-
-/** Saturating uint8_t addition. */
-static uint8_t sat8_add(uint8_t a, uint8_t b)
-{
-    uint32_t s = (uint32_t)a + (uint32_t)b;
-    return (uint8_t)(s > 255u ? 255u : s);
-}
 
 /** Saturating uint16_t addition. */
 static uint16_t sat16_add(uint16_t a, uint16_t b)
@@ -206,7 +200,7 @@ game_err_t fq_rebirth(fq_character_t *ch, fq_prng_t *rng)
 
     /* Calculate and add rebirth tokens (saturate legacy_points at 255). */
     uint8_t tokens = fq_calc_rebirth_tokens(ch->level, ch->wins);
-    ch->legacy_points = sat8_add(ch->legacy_points, tokens);
+    ch->legacy_points = fq_sat8_add(ch->legacy_points, tokens);
 
     /* Clear dead flag. */
     ch->is_dead = 0u;
@@ -237,15 +231,15 @@ void fq_legacy_apply_bonuses(fq_character_t *ch)
         ch->hp_max = sat16_add(ch->hp_max, 5u);
     }
     if ((tree & FQ_LEGACY_KEEN_EYE) != 0u) {
-        ch->precision = sat8_add(ch->precision, 2u);
+        ch->precision = fq_sat8_add(ch->precision, 2u);
     }
     if ((tree & FQ_LEGACY_QUICK_FEET) != 0u) {
-        ch->speed = sat8_add(ch->speed, 2u);
+        ch->speed = fq_sat8_add(ch->speed, 2u);
     }
 
     /* Tier 2 bonuses. */
     if ((tree & FQ_LEGACY_IRON_WILL) != 0u) {
-        ch->intelligence = sat8_add(ch->intelligence, 3u);
+        ch->intelligence = fq_sat8_add(ch->intelligence, 3u);
     }
     if ((tree & FQ_LEGACY_SCAVENGER) != 0u) {
         /* Grant 5th equipment slot if not already at 5. */
@@ -262,23 +256,23 @@ void fq_legacy_apply_bonuses(fq_character_t *ch)
         ch->hp_max = sat16_add(ch->hp_max, 10u);
     }
     if ((tree & FQ_LEGACY_BATTLE_SCARS) != 0u) {
-        ch->strength = sat8_add(ch->strength, 3u);
+        ch->strength = fq_sat8_add(ch->strength, 3u);
     }
     if ((tree & FQ_LEGACY_SIXTH_SENSE) != 0u) {
-        ch->speed = sat8_add(ch->speed, 3u);
+        ch->speed = fq_sat8_add(ch->speed, 3u);
     }
 
     /* Tier 4 bonuses. */
     if ((tree & FQ_LEGACY_MASTER_MIND) != 0u) {
-        ch->intelligence = sat8_add(ch->intelligence, 5u);
+        ch->intelligence = fq_sat8_add(ch->intelligence, 5u);
     }
     if ((tree & FQ_LEGACY_DIAMOND_SKIN) != 0u) {
         ch->hp_max = sat16_add(ch->hp_max, 15u);
     }
     if ((tree & FQ_LEGACY_GODSPEED) != 0u) {
-        ch->speed = sat8_add(ch->speed, 5u);
+        ch->speed = fq_sat8_add(ch->speed, 5u);
     }
     if ((tree & FQ_LEGACY_BERSERKER) != 0u) {
-        ch->strength = sat8_add(ch->strength, 5u);
+        ch->strength = fq_sat8_add(ch->strength, 5u);
     }
 }

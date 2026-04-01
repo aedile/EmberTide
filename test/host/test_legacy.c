@@ -11,7 +11,7 @@
  *   - fq_rebirth(): basic stat halving (50% retention), is_dead cleared.
  *   - fq_rebirth(): rebirth_count increments, tokens added to legacy_points.
  *   - fq_rebirth(): PHOENIX_FLAME (75%) retention.
- *   - fq_rebirth(): Wildcard passive reroll.
+ *   - fq_rebirth(): Wildcard passive reroll (pinned exact value).
  *   - Legacy tree: full T1→T2→T3→T4 unlock chain.
  */
 
@@ -299,7 +299,8 @@ static void test_rebirth_phoenix_flame_75pct_retention(void)
     TEST_ASSERT_EQUAL_UINT8(18u, ch.strength);
 }
 
-/* Wildcard passive must be rerolled on rebirth and stay in [0, 3]. */
+/* Wildcard passive must be rerolled on rebirth to an exact pinned value.
+ * seed=0xCAFE: fq_prng_init(&rng, 0xCAFE); fq_prng_range(&rng, 0, 3) == 1. */
 static void test_rebirth_wildcard_passive_rerolled(void)
 {
     fq_character_t ch;
@@ -311,7 +312,8 @@ static void test_rebirth_wildcard_passive_rerolled(void)
     fq_prng_t rng;
     fq_prng_init(&rng, 0xCAFEu);
     TEST_ASSERT_EQUAL_INT(GAME_OK, (int)fq_rebirth(&ch, &rng));
-    TEST_ASSERT_TRUE(ch.wildcard_passive <= 3u);
+    /* Pinned: seed=0xCAFE, fq_prng_range(0, 3) == 1. */
+    TEST_ASSERT_EQUAL_UINT8(1u, ch.wildcard_passive);
 }
 
 /* Non-Wildcard class: wildcard_passive must NOT change on rebirth. */
@@ -331,7 +333,7 @@ static void test_rebirth_non_wildcard_passive_unchanged(void)
 }
 
 /* Rebirth stat floor: Trickster base SPD=3. If character SPD=3 (at base),
- * after rebirth SPD must still be 3. */
+ * after rebirth SPD must still be exactly 3. */
 static void test_rebirth_trickster_spd_floor_at_base(void)
 {
     fq_character_t ch;
@@ -348,8 +350,8 @@ static void test_rebirth_trickster_spd_floor_at_base(void)
     fq_prng_t rng;
     fq_prng_init(&rng, 1u);
     TEST_ASSERT_EQUAL_INT(GAME_OK, (int)fq_rebirth(&ch, &rng));
-    /* After rebirth with 50% of 0 gained → floor at base 3. */
-    TEST_ASSERT_TRUE(ch.speed >= 3u);
+    /* After rebirth with 50% of 0 gained → floor at base 3 exactly. */
+    TEST_ASSERT_EQUAL_UINT8(3u, ch.speed);
 }
 
 int main(void)

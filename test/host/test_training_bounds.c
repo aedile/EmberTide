@@ -111,7 +111,8 @@ static void test_score_no_overflow_large_values(void)
     TEST_ASSERT_EQUAL_UINT8(100u, mg.score);
 }
 
-/* Score must never exceed 100 regardless of hits > targets. */
+/* Score must never exceed 100 regardless of hits > targets.
+ * Exact assertion: hits=200, targets=100 → min(100, 200*100/100) = min(100, 200) = 100. */
 static void test_score_never_exceeds_100(void)
 {
     fq_minigame_t mg;
@@ -122,7 +123,8 @@ static void test_score_never_exceeds_100(void)
     mg.targets = 100u;
     mg.state   = FQ_MG_SUCCESS;
     (void)fq_minigame_finish(&mg);
-    TEST_ASSERT_TRUE(mg.score <= 100u);
+    /* Exact: min(100, 200*100/100) = min(100, 200) = 100. */
+    TEST_ASSERT_EQUAL_UINT8(100u, mg.score);
 }
 
 int main(void)

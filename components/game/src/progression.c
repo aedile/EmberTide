@@ -12,6 +12,7 @@
  */
 
 #include "progression.h"
+#include "game_math.h"
 
 /* ---------------------------------------------------------------------------
  * Section 1: Effective stat lookup table.
@@ -56,16 +57,6 @@ uint8_t fq_effective_stat(uint8_t raw)
 /* ---------------------------------------------------------------------------
  * Section 2: XP curve and level-up.
  * ---------------------------------------------------------------------------*/
-
-/**
- * sat8_add() — Saturating uint8_t addition.
- * Returns min(a + b, 255).
- */
-static uint8_t sat8_add(uint8_t a, uint8_t b)
-{
-    uint32_t sum = (uint32_t)a + (uint32_t)b;
-    return (uint8_t)(sum > 255u ? 255u : sum);
-}
 
 /**
  * k_class_stat_gains — Per-class stat gain table for one level-up.
@@ -131,10 +122,10 @@ game_err_t fq_level_up(fq_character_t *ch)
         return GAME_OK;
     }
 
-    ch->strength     = sat8_add(ch->strength,     k_class_stat_gains[cls][0]);
-    ch->speed        = sat8_add(ch->speed,         k_class_stat_gains[cls][1]);
-    ch->precision    = sat8_add(ch->precision,     k_class_stat_gains[cls][2]);
-    ch->intelligence = sat8_add(ch->intelligence,  k_class_stat_gains[cls][3]);
+    ch->strength     = fq_sat8_add(ch->strength,     k_class_stat_gains[cls][0]);
+    ch->speed        = fq_sat8_add(ch->speed,         k_class_stat_gains[cls][1]);
+    ch->precision    = fq_sat8_add(ch->precision,     k_class_stat_gains[cls][2]);
+    ch->intelligence = fq_sat8_add(ch->intelligence,  k_class_stat_gains[cls][3]);
 
     return GAME_OK;
 }

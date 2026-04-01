@@ -11,12 +11,15 @@ As a player, I want deterministic mini-games (e.g. reflex timings or matching pa
 - [ ] Incorporates integer math calculating difficulty scaling as the beast levels up.
 
 ### Negative Test Requirements (from spec-challenger)
-- **Score Overflow:** Force a minigame execution where the player perfectly hits 65,000 targets (simulating a macro or long session). Assert that the math `(hits * 10) / targets` does not integer-overflow during the intermediate multiplication step before division.
+- **Score Overflow:** Force a minigame execution where the player perfectly hits 65,000 targets (simulating a macro or long session). Assert that the math `min(100, (uint32_t)hits * 100u / targets)` does not integer-overflow during the intermediate multiplication step before division.
+
+  **Formula corrected from backlog v1 `*10` to `*100` to produce correct 0-100 percentage scale.**
+
 - **Divide by Zero:** Trigger a minigame score evaluation where `total_targets = 0` (e.g. the game ended instantly). Ensure the logic safely returns a `0` score rather than a hardware Div-by-Zero panic.
 
 ### Implementation Steps
 1. Create `training.c` with a pure functional FSM for mini-game states (Wait, Active, Success, Fail).
-2. Write scoring normalization `min(100, (hits * 10) / total_targets)`.
+2. Write scoring normalization `min(100, (uint32_t)hits * 100u / total_targets)`.
 
 ### Test Expectations
 - `test_training.c` executes the state machine for "Speed" game simulating perfect reaction times (100 score) and misses (0 score).
@@ -72,7 +75,11 @@ As a long-term player, when my character dies I want to permanently unlock start
 - [ ] Implements Rebirth Token calculation `fq_calc_rebirth_tokens(level, wins)`.
 
 ### Negative Test Requirements (from spec-challenger)
-- **Token Hoarding Overflow:** Force a situation where a player generates `65535` tokens and earns 1 more. Verify `uint16_t` saturation math clamps it at `0xFFFF`.
+- **Token Accumulation Overflow:** Token accumulation saturates at `uint8_t` 255 (matching
+  `fq_character_t.legacy_points` type). The original spec-challenger erroneously referenced
+  `uint16_t` saturation at `0xFFFF`. The implementation uses `uint8_t` because
+  `fq_character_t.legacy_points` is defined as `uint8` in the Character struct (see design doc
+  Section 1.1). Test: `fq_calc_rebirth_tokens(99, 65535)` = `9 + 655` = 664 → clamped to 255.
 - **Invalid Node Bit:** Pass a corrupt `legacy_unlocked_nodes` bitmask (e.g. `0xFFFFFFFF`) into the builder. Ensure the stat applicator safely ignores undefined bits without referencing out-of-bounds pointer functions or tables.
 
 ### Implementation Steps
