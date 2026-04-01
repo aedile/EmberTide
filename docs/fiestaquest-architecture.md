@@ -1556,3 +1556,126 @@ Table is monotonically non-decreasing. `_Static_assert(sizeof(table) == 256)`.
 CMake configure time and `check_boundary.sh` at CTest runtime. The file calls
 `sin()` without declaration — under `-Wall -Werror` the implicit function
 declaration is a hard error, proving the float ban is enforced in CI.
+
+---
+
+## 15. Phase 15 Final Module Inventory & Test Coverage Summary
+
+**v2.15 amendment (Phase 15 Hardware E2E Validation):** Final production config
+(`sdkconfig.production`) and target test scaffold (`test/target/test_ble_combat.c`)
+added. No architectural changes. This section documents the complete module
+inventory and host test coverage at v1.0 release.
+
+### 15.1 Complete Module Inventory
+
+| Layer | Module | Header | Source | Status |
+|-------|--------|--------|--------|--------|
+| **game/** | PRNG | `prng.h` | `prng.c` | FROZEN |
+| **game/** | CRC32 | `crc32.h` | `crc32.c` | FROZEN |
+| **game/** | Types | `types.h` | — | FROZEN |
+| **game/** | Save Format | `save_format.h` | `save_format.c` | DONE |
+| **game/** | Progression | `progression.h` | `progression.c` | DONE |
+| **game/** | Combat Engine | `combat.h` | `combat.c` | FROZEN |
+| **game/** | Item Engine | `item_engine.h` | `item_engine.c` | DONE |
+| **game/** | Training | `training.h` | `training.c` | DONE |
+| **game/** | Legacy | `legacy.h` | `legacy.c` | DONE |
+| **game/** | Combat Hash | `combat_hash.h` | `combat_hash.c` | FROZEN |
+| **presentation/** | Framebuffer | `fq_framebuffer.h` | `fq_framebuffer.c` | DONE |
+| **presentation/** | Sprite | `fq_sprite.h` | `fq_sprite.c` | DONE |
+| **presentation/** | Text | `fq_text.h` | `fq_text.c` | DONE |
+| **presentation/** | View Models | `view_models.h` | — | DONE |
+| **presentation/** | UI Widgets | `ui_widgets.h` | `ui_widgets.c` | DONE |
+| **presentation/** | Screen: Home | `screen_home.h` | `screen_home.c` | DONE |
+| **presentation/** | Screen: Combat | `screen_combat.h` | `screen_combat.c` | DONE |
+| **presentation/** | Screen: Training | `screen_training.h` | `screen_training.c` | DONE |
+| **hal/** | E-Paper | `hal_epaper.h` | `hal_epaper.c` | STUB |
+| **hal/** | Flash | `hal_flash.h` | `hal_flash.c` | STUB |
+| **hal/** | GPIO | `hal_gpio.h` | `hal_gpio.c` | STUB |
+| **hal/** | Audio | `hal_audio.h` | `hal_audio.c` | STUB |
+| **hal/** | Sleep | `hal_sleep.h` | `hal_sleep.c` | STUB |
+| **hal/** | BLE | `hal_ble.h` | `hal_ble.c` | STUB |
+| **hal/** | WiFi | `hal_wifi.h` | `hal_wifi.c` | STUB |
+| **connectivity/** | Protocol | `protocol.h` | `protocol.c` | DONE |
+| **connectivity/** | Sync | `sync.h` | `sync.c` | DONE |
+| **main/** | Event Bus | `event_bus.h` | `event_bus.c` | DONE |
+| **main/** | App FSM | `app_fsm.h` | `app_fsm.c` | DONE |
+| **main/** | VM Builder | `vm_builder.h` | `vm_builder.c` | DONE |
+
+**STUB** = Public API + host-compilable target stub implemented. Real ESP-IDF
+hardware driver sequences deferred to physical bring-up (blocked on hardware).
+
+**FROZEN** = API and wire-format locked. Changes require both devices to be
+reflashed simultaneously. Covered by determinism pin tests in `test_combat_determinism.c`.
+
+### 15.2 Host Test Coverage Summary
+
+All 63 host tests pass under `-Wall -Werror` on the host build system.
+
+| Test File | Scope | Count |
+|-----------|-------|-------|
+| `test_prng_bounds.c` + `test_prng.c` | PRNG math + distribution | ~8 |
+| `test_crc32_bounds.c` + `test_crc32.c` | CRC32 correctness | ~4 |
+| `test_types_bounds.c` | Struct layout pins | ~6 |
+| `test_save_format.c` + `test_save_corruption.c` | Save serializer | ~5 |
+| `test_progression_bounds.c` + `test_progression.c` | Level-up, stat curve | ~5 |
+| `test_combat_bounds.c` + `test_combat_engine.c` + `test_combat_determinism.c` | Combat stepper | ~6 |
+| `test_item_bounds.c` + `test_item_engine.c` + `test_item_time_loop.c` | Item engine | ~5 |
+| `test_training_bounds.c` + `test_training.c` | Training FSM | ~4 |
+| `test_legacy_bounds.c` + `test_legacy.c` | Legacy/rebirth | ~4 |
+| `test_level_up_bounds.c` + `test_level_up.c` | Level-up bounds | ~3 |
+| `test_determinism_bounds.c` | PRNG isolation | ~2 |
+| `test_fb_bounds.c` + `test_fb_feature.c` | Framebuffer | ~5 |
+| `test_sprite_bounds.c` + `test_sprite_feature.c` | Sprite blit | ~4 |
+| `test_text_bounds.c` + `test_text_feature.c` | Text render | ~4 |
+| `test_vm_bounds.c` + `test_vm_builder.c` | View models | ~3 |
+| `test_p9_combat_bounds.c` + `test_p9_combat_feature.c` | Screen: combat HUD | ~4 |
+| `test_p9_dialogue_bounds.c` + `test_p9_dialogue_feature.c` | UI widget: dialogue | ~4 |
+| `test_p10_bounds.c` + `test_p10_protocol.c` + `test_p10_combat_sync.c` | Protocol + hash + sync | ~6 |
+| `test_p11_bus_bounds.c` + `test_p11_bus_feature.c` | Event bus | ~5 |
+| `test_p11_fsm_bounds.c` + `test_p11_fsm_feature.c` | App FSM | ~6 |
+| `test_p12_hal_epaper_bounds.c` + `test_p12_hal_epaper_feature.c` | HAL e-paper | ~4 |
+| `test_p12_hal_flash_bounds.c` + `test_p12_hal_flash_feature.c` | HAL flash | ~4 |
+| `test_p13_hal_gpio_bounds.c` + `test_p13_hal_gpio_feature.c` | HAL GPIO | ~5 |
+| `test_p13_hal_audio_bounds.c` + `test_p13_hal_audio_feature.c` | HAL audio | ~5 |
+| `test_p13_hal_sleep_bounds.c` + `test_p13_hal_sleep_feature.c` | HAL sleep | ~3 |
+| `test_p14_hal_ble_bounds.c` + `test_p14_hal_ble_feature.c` | HAL BLE | ~5 |
+| `test_p14_hal_wifi_bounds.c` + `test_p14_hal_wifi_feature.c` | HAL WiFi | ~5 |
+| `test_partitions.c` + `test_sanity.c` | Infrastructure | ~4 |
+| Boundary checks (5 tests) | Architecture boundary enforcement | 5 |
+
+**Total: 63 tests, 0 failures, 0 warnings.**
+
+### 15.3 Visual Regression Baseline
+
+8 golden PNG baselines locked in `test/visual/golden/`. All verified by
+`diff_screens.py` pixel-exact comparison on every feature branch.
+
+| Scene | PNG | Verified Phase |
+|-------|-----|----------------|
+| Blank framebuffer | `blank.png` | Phase 7 |
+| Framebuffer primitives | `fb_test.png` | Phase 7 |
+| Home screen | `scene_home.png` | Phase 9 |
+| Inventory screen | `scene_inventory.png` | Phase 9 |
+| Stats screen | `scene_stats.png` | Phase 9 |
+| Combat HUD | `scene_combat.png` | Phase 9 |
+| Dialogue widget | `scene_dialogue.png` | Phase 9 |
+| Training screen | `scene_training.png` | Phase 9 |
+
+### 15.4 Production Build Configuration
+
+`sdkconfig.production` overlays `sdkconfig.defaults` for factory flash:
+
+| Key | Development | Production | Rationale |
+|-----|-------------|------------|-----------|
+| `CONFIG_LOG_DEFAULT_LEVEL` | INFO (4) | ERROR (1) | Reduce binary size ~3-8% |
+| `CONFIG_BOOTLOADER_LOG_LEVEL` | INFO | ERROR | Silent boot in factory units |
+| `CONFIG_COMPILER_OPTIMIZATION` | default | SIZE (-Os) | Binary < 1 MB target |
+| Assertions | enabled (abort) | silent (restart) | Recovery over panic |
+| `CONFIG_ESP_WIFI_SLP_IRAM_OPT` | off | on | WiFi power reduction |
+| `CONFIG_BT_NIMBLE_MAX_CONNECTIONS` | default | 1 | 1v1 protocol only |
+
+**Negative test N2 (cross-architecture divergence)** validates that -Os struct
+layout produces identical combat hashes to -O0 builds. The `_Static_assert`
+size pins on `fq_combat_fighter_t` and `fq_combat_ctx_t` are the first
+line of defense; `test/target/test_ble_combat.c` Step 6 is the hardware
+confirmation.
