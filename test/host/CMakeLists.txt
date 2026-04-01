@@ -363,3 +363,16 @@ add_vm_test(test_vm_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_vm_bounds.c")
 # Phase-8 Feature tests (Rule 22 Phase B — FEATURE RED)
 # ---------------------------------------------------------------------------
 add_vm_test(test_vm_builder "${CMAKE_CURRENT_SOURCE_DIR}/test_vm_builder.c")
+
+# ---------------------------------------------------------------------------
+# Phase-9 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any Phase-9 implementation.
+# ---------------------------------------------------------------------------
+add_vm_test(test_p9_combat_bounds   "${CMAKE_CURRENT_SOURCE_DIR}/test_p9_combat_bounds.c")
+add_vm_test(test_p9_dialogue_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p9_dialogue_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-9 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_vm_test(test_p9_combat_feature   "${CMAKE_CURRENT_SOURCE_DIR}/test_p9_combat_feature.c")
+add_vm_test(test_p9_dialogue_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p9_dialogue_feature.c")
