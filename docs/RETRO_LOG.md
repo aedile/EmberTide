@@ -465,3 +465,55 @@ No blockers were raised in Phase 9.
 | ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 10 |
 | ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 10 |
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 10 |
+
+---
+
+## Phase 10 — Connectivity Protocol (Review Advisory Resolution)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-10-connectivity-protocol`
+
+### What Was Built (Phase 10 original delivery)
+
+- `components/game/include/combat_hash.h` / `components/game/src/combat_hash.c` — `fq_generate_combat_hash(ctx, round)`: 13-byte LE stack-buffer serialization (round + f1.hp + f2.hp + f1.hp_max + f2.hp_max + rng.state), CRC32 output. NULL ctx or round outside [1,12] returns 0.
+- `components/connectivity/include/protocol.h` / `components/connectivity/src/protocol.c` — wire-format DTOs (`fq_packet_invite_t` 14 bytes, `fq_packet_team_sync_t` 36 bytes, `fq_packet_round_hash_t` 14 bytes, `FQ_PKT_DISCONNECT` 9 bytes) with `fq_packet_serialize` / `fq_packet_parse`. Magic validated before CRC (fast-fail). Round 0/>12 rejected post-CRC for ROUND_HASH type. `fq_protocol_derive_seed`: XOR nonces, force 1 if result is 0 (N1 zero-guard). Stateless (N11).
+- `components/connectivity/include/sync.h` / `components/connectivity/src/sync.c` — `fq_sync_verify_round`: pure equality comparisons, round checked before hash.
+- `test/host/test_p10_bounds.c` — bound tests (N1/N2/N4/N5/N7/N8/N9/N10 per spec-challenger).
+- `test/host/test_p10_protocol.c` — feature tests for serialize/parse/derive_seed round-trips.
+- `test/host/test_p10_combat_sync.c` — feature tests for `fq_generate_combat_hash` and `fq_sync_verify_round`.
+
+### Review Advisories Addressed (this commit)
+
+| ID | Tag | Finding | Resolution |
+|----|-----|---------|-----------|
+| QA-P10-01 | ADVISORY | `test_hash_known_fixed_value` used weak `h != 0u` assertion — CRC32 regression not pinned | Computed exact CRC32 of 13-byte buffer `{0x01,0x64,0x00,0x50,0x00,0x64,0x00,0x64,0x00,0x01,0x00,0x00,0x00}` using the frozen IEEE 802.3 CRC32 table: **0x3FDACA50**. Replaced `TEST_ASSERT_TRUE(h != 0u)` with `TEST_ASSERT_EQUAL_UINT32(KNOWN_HASH_PINNED, h)`. Defined `#define KNOWN_HASH_PINNED 0x3FDACA50u` with a doc comment warning that changing this value indicates a determinism-breaking serialization change. Removed the redundant second-call lock-in test (the pinned value already proves both stability and correctness). |
+| QA-P10-02 | ADVISORY | `test_p10_bounds.c` missing DISCONNECT and unknown-type parse coverage | Added two bound tests: `test_disconnect_serialize_exact_size` asserts `fq_packet_serialize(FQ_PKT_DISCONNECT)` returns exactly `FQ_PACKET_OVERHEAD` (9 bytes); `test_parse_unknown_type_rejected` builds a valid-magic buffer with type=0xFF and asserts `FQ_PKT_ERR_UNKNOWN_TYPE`. Both wired into `main()` under a `QA-P10-02` comment block. |
+| DevOps-P10-01 | ADVISORY | `CONN_SOURCES` set() in `test/host/CMakeLists.txt` had a brief comment but no explanation of why it is enumerated rather than globbed | Replaced the one-line comment with a 5-line block explaining that `CONN_SOURCES` is intentionally enumerated (not globbed) to exclude `wifi_service.c`, which requires ESP-IDF BLE/WiFi headers incompatible with the host build environment. |
+| Docs-P10-01 | ADVISORY | `docs/RETRO_LOG.md` had no Phase 10 section | This section. |
+
+### Pinned CRC32 Value
+
+**Buffer:** `{0x01, 0x64, 0x00, 0x50, 0x00, 0x64, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00, 0x00}` (13 bytes)
+**Input represents:** round=1, f1.hp=100 LE, f2.hp=80 LE, f1.hp_max=100 LE, f2.hp_max=100 LE, rng.state=1 LE
+**CRC32 (IEEE 802.3, poly 0xEDB88320):** `0x3FDACA50`
+
+This value is frozen in `KNOWN_HASH_PINNED` inside `test_p10_combat_sync.c`. Any refactor that changes the serialization byte order, field selection, or CRC polynomial will break this test. That failure is intentional — it is the determinism guard for on-device combat hash desync.
+
+### Deferred Architectural Advisory
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADV-P10-01 | DEFERRED | `crc32.h` is in `game/` but used by `connectivity/` via `PRIV_REQUIRES`. Moving CRC32 to a shared `utils/` component would remove this cross-layer dependency. Deferred pending ADR. | Phase 12 |
+
+### Open Advisories (carried forward)
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 11 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 11 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 11 |
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (Gate #2 pre-merge): **45/45 tests passed** — 0 failures, 0 warnings.
+- No presentation layer changes — visual regression suite not required.

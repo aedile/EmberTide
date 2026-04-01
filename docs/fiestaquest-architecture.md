@@ -1,5 +1,8 @@
 # FiestaQuest -- Architectural Design Document v2
 
+**v2.10 amendment (Phase 10 connectivity data protocol):** combat_hash.h/c added to game/: fq_generate_combat_hash(ctx, round) serializes round(1)+f1.hp(2)+f2.hp(2)+f1.hp_max(2)+f2.hp_max(2)+rng.state(4)=13 bytes LE into a stack buffer and returns fq_crc32() of it. NULL ctx or round outside [1,12] returns 0. No struct casting — field-by-field byte writes (N7: padding not hashed, N8: CRC not fed back). protocol.h/c added to connectivity/: wire-format DTOs fq_packet_invite_t (14 bytes), fq_packet_team_sync_t (36 bytes), fq_packet_round_hash_t (14 bytes) with fq_packet_serialize/fq_packet_parse. Parse validates magic before CRC (fast-fail on spoof); round 0/>12 rejected post-CRC for ROUND_HASH type; stateless (N11). fq_protocol_derive_seed: XOR nonces, force 1 if result is 0 (N1 zero-guard). sync.h/c added to connectivity/: fq_sync_verify_round — pure equality comparisons, round checked before hash. connectivity/ uses PRIV_REQUIRES game for crc32.h; public include boundary preserved. ADV-P10-01 DEFERRED: move crc32 to shared utils/ to remove PRIV_REQUIRES. Rule 8 advisory: combat_hash is wired in game/ only; presentation wiring blocked on BLE HAL integration (next phase).
+
+
 **Target:** ESP-IDF v5.x on ESP32-S3-PICO-1-N8R8
 **Reference:** FiestaQuest Game Design Document v5
 **Methodology:** TDD red-first, clean architecture, defense in depth
