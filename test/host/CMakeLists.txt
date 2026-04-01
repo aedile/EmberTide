@@ -36,6 +36,8 @@ set(GAME_INCLUDE  "${PROJECT_ROOT}/components/game/include")
 set(GAME_SRC_DIR  "${PROJECT_ROOT}/components/game/src")
 set(PRES_INCLUDE  "${PROJECT_ROOT}/components/presentation/include")
 set(PRES_SRC_DIR  "${PROJECT_ROOT}/components/presentation/src")
+set(CONN_INCLUDE  "${PROJECT_ROOT}/components/connectivity/include")
+set(CONN_SRC_DIR  "${PROJECT_ROOT}/components/connectivity/src")
 
 # Collect all game component .c sources for host linkage.
 file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
@@ -43,6 +45,13 @@ file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
 # Collect presentation sources (exclude device-only screen_mgr.c).
 file(GLOB PRES_SOURCES "${PRES_SRC_DIR}/*.c")
 list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\\.c$")
+
+# Collect connectivity sources for host linkage.
+# protocol.c and sync.c are included; wifi_service.c is placeholder only.
+set(CONN_SOURCES
+    "${CONN_SRC_DIR}/protocol.c"
+    "${CONN_SRC_DIR}/sync.c"
+)
 
 # ---------------------------------------------------------------------------
 # add_host_test(<target> <source>)
@@ -376,3 +385,49 @@ add_vm_test(test_p9_dialogue_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p9_dialogu
 # ---------------------------------------------------------------------------
 add_vm_test(test_p9_combat_feature   "${CMAKE_CURRENT_SOURCE_DIR}/test_p9_combat_feature.c")
 add_vm_test(test_p9_dialogue_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p9_dialogue_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-10: Connectivity protocol sources
+#
+# add_conn_test(<target> <source>)
+#
+# Builds a test that links game sources (for crc32, combat_hash, prng) AND
+# the connectivity protocol/sync sources. Adds both GAME_INCLUDE and
+# CONN_INCLUDE so that combat_hash.h and protocol.h/sync.h are both
+# reachable.
+#
+# Architecture note: The test executable itself includes both game/ and
+# connectivity/ headers, which is allowed at the APPLICATION layer (the
+# test harness bridges both). The connectivity sources do NOT re-export
+# game/ headers — they only use crc32.h internally (PRIV_REQUIRES pattern).
+#
+# N1c boundary is preserved: connectivity/include/ has no game/ in its
+# PUBLIC include path (the boundary check tests this separately).
+# ---------------------------------------------------------------------------
+function(add_conn_test target source)
+    add_executable(${target} ${source})
+    target_include_directories(${target} PRIVATE
+        "${GAME_INCLUDE}"
+        "${CONN_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    if(CONN_SOURCES)
+        target_sources(${target} PRIVATE ${CONN_SOURCES})
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Phase-10 Bound tests (Rule 22 Phase A — BOUND RED)
+# Covers: NULL guards, nonce zero-XOR, round out-of-range, buffer underflow,
+# magic mismatch, CRC mismatch, 1-bit PRNG avalanche, padding non-inclusion.
+# ---------------------------------------------------------------------------
+add_conn_test(test_p10_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p10_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-10 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_conn_test(test_p10_protocol    "${CMAKE_CURRENT_SOURCE_DIR}/test_p10_protocol.c")
+add_conn_test(test_p10_combat_sync "${CMAKE_CURRENT_SOURCE_DIR}/test_p10_combat_sync.c")
