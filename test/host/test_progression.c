@@ -11,6 +11,7 @@
  */
 
 #include <stdint.h>
+#include <inttypes.h>
 #include "test_assert.h"
 #include "progression.h"
 
