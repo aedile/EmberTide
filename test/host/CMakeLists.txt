@@ -661,3 +661,18 @@ add_pres_test(test_p17_asset_bounds
 # ---------------------------------------------------------------------------
 add_pres_test(test_p17_asset_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_asset_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-18 Bound tests (Rule 22 Phase A — BOUND RED)
+# Covers asset accessor NULL/OOB guards, screen renderer NULL guards, HP bar
+# overflow clamping, and non-zero pixel proof in name text region.
+# Uses add_vm_test to link game + presentation (incl. screens + asset_data.c).
+# ---------------------------------------------------------------------------
+add_vm_test(test_p18_screen_text_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p18_screen_text_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-18 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_vm_test(test_p18_screen_text_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p18_screen_text_feature.c")
