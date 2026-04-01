@@ -51,6 +51,14 @@
  */
 #define FQ_SAVE_MAX_SIZE         512u
 
+/**
+ * Exact byte length of a version-1 serialized save record.
+ * Layout: 1 (version) + 146 (character fields) + 65 (inventory fields)
+ *         + 4 (CRC32) = 216 bytes.
+ * Tests pin this constant to catch accidental wire-format changes.
+ */
+#define FQ_SAVE_SERIALIZED_SIZE_V1  216u
+
 /* ---------------------------------------------------------------------------
  * Error codes
  * ---------------------------------------------------------------------------*/

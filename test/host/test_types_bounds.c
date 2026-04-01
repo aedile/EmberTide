@@ -102,16 +102,15 @@ static void test_sizeof_rival_entry(void)
      *   uint32_t opponent_id     → 4
      *   uint8_t  encounters      → 1
      *   uint8_t  wins            → 1
-     *   uint32_t last_fight_ts   → 4   (after 2 uint8s: 2 pad bytes expected)
+     *   uint32_t last_fight_ts   → 4
      *   uint8_t  is_nemesis      → 1
-     * Worst case with alignment: 4+1+1+2pad+4+1+3pad = 16
+     * Actual size: 4+1+1+1+4+1 = 12 bytes (no trailing pad on this target).
      * We assert the actual sizeof and print it — pinned by _Static_assert below.
      */
     size_t sz = sizeof(fq_rival_entry_t);
     printf("[INFO] sizeof(fq_rival_entry_t) = %zu\n", sz);
-    /* Must be <= 16 to fit 8 rivals within a reasonable budget */
-    TEST_ASSERT_TRUE(sz <= 16u);
-    TEST_ASSERT_TRUE(sz >= 11u); /* minimum field bytes */
+    /* Exact pin: 4+1+1+1+4 bytes — verified host target. */
+    TEST_ASSERT_EQUAL_UINT32(12u, (uint32_t)sz);
 }
 
 static void test_sizeof_fq_item_def(void)
@@ -120,18 +119,17 @@ static void test_sizeof_fq_item_def(void)
     printf("[INFO] sizeof(fq_item_def_t) = %zu\n", sz);
     /* Fields: uint16_t id(2) + char name[16](16) + uint8_t rarity(1) +
      * uint8_t trigger(1) + fq_condition_t(2) + fq_effect_t(3) +
-     * char flavor_text[32](32) = 57 minimum; padding may add bytes. */
-    TEST_ASSERT_TRUE(sz >= 57u);
-    TEST_ASSERT_TRUE(sz <= 64u); /* reasonable upper bound */
+     * char flavor_text[32](32) + 1 pad byte = 58 total (pinned). */
+    /* Exact pin: 58 bytes — verified host target. */
+    TEST_ASSERT_EQUAL_UINT32(58u, (uint32_t)sz);
 }
 
 static void test_sizeof_fq_inventory(void)
 {
     size_t sz = sizeof(fq_inventory_t);
     printf("[INFO] sizeof(fq_inventory_t) = %zu\n", sz);
-    /* uint16_t items[32] = 64, uint8_t count = 1; padding may add 1 byte → 66 */
-    TEST_ASSERT_TRUE(sz >= 65u);
-    TEST_ASSERT_TRUE(sz <= 68u);
+    /* Exact pin: 66 bytes (64 items + count byte + pad byte) — verified host target. */
+    TEST_ASSERT_EQUAL_UINT32(66u, (uint32_t)sz);
 }
 
 static void test_sizeof_fq_character(void)

@@ -87,6 +87,7 @@ static void test_full_roundtrip(void)
 
     size_t written = fq_save_serialize(&ch_orig, &inv_orig, buf, sizeof(buf));
     TEST_ASSERT_TRUE(written > 0u);
+    TEST_ASSERT_EQUAL_UINT32(FQ_SAVE_SERIALIZED_SIZE_V1, (uint32_t)written);
     printf("[INFO] serialize wrote %zu bytes\n", written);
 
     fq_character_t ch_read;
@@ -294,6 +295,7 @@ static void test_serialize_is_deterministic(void)
     size_t w1 = fq_save_serialize(&ch, &inv, buf1, sizeof(buf1));
     size_t w2 = fq_save_serialize(&ch, &inv, buf2, sizeof(buf2));
 
+    TEST_ASSERT_EQUAL_UINT32(FQ_SAVE_SERIALIZED_SIZE_V1, (uint32_t)w1);
     TEST_ASSERT_EQUAL_UINT32((uint32_t)w1, (uint32_t)w2);
     TEST_ASSERT_EQUAL_INT(0, memcmp(buf1, buf2, w1));
 }

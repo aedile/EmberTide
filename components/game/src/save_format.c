@@ -216,6 +216,13 @@ fq_save_err_t fq_save_deserialize(const uint8_t *buf, size_t buf_size,
         return FQ_SAVE_ERR_BUFFER_TOO_SMALL;
     }
 
+    /* Defense: zero-initialize outputs before any field writes.
+     * Prevents stale stack data from leaking through partially-written
+     * structs if deserialization returns early (Constitution Priority 0:
+     * no uninitialized struct memory inside computation boundaries). */
+    memset(ch, 0, sizeof(*ch));
+    memset(inv, 0, sizeof(*inv));
+
     /* --- Step 1: Version check (BEFORE CRC — fast-reject future formats) --- */
     uint8_t version = buf[0];
 
