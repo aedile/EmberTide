@@ -83,3 +83,34 @@
 * **Item 1:** Write `test_hal_epaper.c` target test
 * **Item 2:** Write `test_storage_integration.c` target test
 * **Item 3:** Flash full game image to physical ESP32-S3 and perform user sanity checks
+
+## Phase 16: Hardware Bringup (COMPLETE)
+* **Item 1:** Real e-paper SPI driver (Waveshare 1.54" V2)
+* **Item 2:** Real GPIO button driver with ISR debounce
+* **Item 3:** Real LittleFS flash driver with atomic writes
+* **Item 4:** Wire app_main event loop with screen rendering pipeline
+
+## Phase 17: Asset Pipeline — PNG to Packed C Arrays
+* **Item 1:** Sprite sheet converter (`tools/sprite_to_c.py` → packed 1-bit C headers)
+* **Item 2:** Font bitmap converter (`tools/font_to_c.py` → glyph C arrays + metrics)
+* **Item 3:** Asset integration visual test (blit real sprite + render real text → PNG proof)
+
+## Phase 18: Screen Renderers — Real Content
+* **Item 1:** Wire text + sprites into Home screen (name, level, HP text, character sprite)
+* **Item 2:** Wire text + sprites into Combat screen (names, HP values, round counter, fighter sprites)
+* **Item 3:** Wire text into Stats, Inventory, Training, Dialogue screens (all labels and values)
+
+## Phase 19: Interactive Gameplay — Training, Items, Onboarding
+* **Item 1:** Character creation / onboarding screen (class selection, name generation)
+* **Item 2:** Training session input handling (timing-based mini-game with button A)
+* **Item 3:** Inventory equip/unequip UI (button A toggles, equipped indicator)
+
+## Phase 20: BLE Combat — Two-Device Multiplayer
+* **Item 1:** NimBLE GATT integration (advertise, connect, team sync, round hash exchange)
+* **Item 2:** Battle result screen (winner, XP earned)
+* **Item 3:** Rebirth screen (stat penalty, legacy token spending)
+
+## Phase 21: Audio Engine
+* **Item 1:** LEDC PWM piezo driver (real hardware, non-blocking)
+* **Item 2:** Sound effect table (SFX IDs → frequency/duration pairs)
+* **Item 3:** Wire sound effects into gameplay (button press, combat hit, level up)
