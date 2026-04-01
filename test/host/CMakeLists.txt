@@ -436,3 +436,57 @@ add_conn_test(test_p10_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p10_bounds.c")
 # ---------------------------------------------------------------------------
 add_conn_test(test_p10_protocol    "${CMAKE_CURRENT_SOURCE_DIR}/test_p10_protocol.c")
 add_conn_test(test_p10_combat_sync "${CMAKE_CURRENT_SOURCE_DIR}/test_p10_combat_sync.c")
+
+# ---------------------------------------------------------------------------
+# Phase-11: Application Event Loop sources (live in main/)
+#
+# add_app_test(<target> <source>)
+#
+# Builds a test that links game, presentation (including screens/), vm_builder,
+# event_bus, AND app_fsm from main/. Includes GAME_INCLUDE, PRES_INCLUDE,
+# MAIN_INCLUDE, and test/ dir so that event_bus.h, app_fsm.h, and view_models.h
+# are all reachable.
+# ---------------------------------------------------------------------------
+set(EVENT_BUS_SOURCE "${PROJECT_ROOT}/main/event_bus.c")
+set(APP_FSM_SOURCE   "${PROJECT_ROOT}/main/app_fsm.c")
+
+function(add_app_test target source)
+    add_executable(${target} ${source})
+    target_include_directories(${target} PRIVATE
+        "${GAME_INCLUDE}"
+        "${PRES_INCLUDE}"
+        "${MAIN_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    if(PRES_SOURCES)
+        target_sources(${target} PRIVATE ${PRES_SOURCES})
+    endif()
+    if(PRES_SCREEN_SOURCES)
+        target_sources(${target} PRIVATE ${PRES_SCREEN_SOURCES})
+    endif()
+    if(EXISTS "${PROJECT_ROOT}/main/vm_builder.c")
+        target_sources(${target} PRIVATE "${PROJECT_ROOT}/main/vm_builder.c")
+    endif()
+    if(EXISTS "${EVENT_BUS_SOURCE}")
+        target_sources(${target} PRIVATE "${EVENT_BUS_SOURCE}")
+    endif()
+    if(EXISTS "${APP_FSM_SOURCE}")
+        target_sources(${target} PRIVATE "${APP_FSM_SOURCE}")
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Phase-11 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any Phase-11 implementation.
+# ---------------------------------------------------------------------------
+add_app_test(test_p11_bus_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_bus_bounds.c")
+add_app_test(test_p11_fsm_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-11 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_app_test(test_p11_bus_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_bus_feature.c")
+add_app_test(test_p11_fsm_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_feature.c")
