@@ -490,3 +490,50 @@ add_app_test(test_p11_fsm_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_bound
 # ---------------------------------------------------------------------------
 add_app_test(test_p11_bus_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_bus_feature.c")
 add_app_test(test_p11_fsm_feature "${CMAKE_CURRENT_SOURCE_DIR}/test_p11_fsm_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-12: HAL E-Paper + Flash (host mocks)
+#
+# HAL headers live in components/hal/include/ — this path is deliberately
+# NOT added to the game/ or presentation/ include lists (boundary preserved).
+# Mock .c files live in test/host/ and are linked directly into the test
+# executables, replacing the real target implementations.
+#
+# add_hal_test(<target> <source>)
+#
+# Links a single HAL mock file (mock_hal_epaper.c or mock_hal_flash.c) with
+# the test source. Only hal/include is added — no game/ or presentation/
+# include paths, keeping HAL tests fully isolated at the bottom layer.
+# ---------------------------------------------------------------------------
+set(HAL_INCLUDE "${PROJECT_ROOT}/components/hal/include")
+
+function(add_hal_test target source mock_src)
+    add_executable(${target} ${source} ${mock_src})
+    target_include_directories(${target} PRIVATE
+        "${HAL_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Phase-12 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any Phase-12 implementation. Fail until headers+mocks exist.
+# ---------------------------------------------------------------------------
+add_hal_test(test_p12_hal_epaper_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p12_hal_epaper_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
+
+add_hal_test(test_p12_hal_flash_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p12_hal_flash_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_flash.c")
+
+# ---------------------------------------------------------------------------
+# Phase-12 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_hal_test(test_p12_hal_epaper_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p12_hal_epaper_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
+
+add_hal_test(test_p12_hal_flash_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p12_hal_flash_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_flash.c")
