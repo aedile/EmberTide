@@ -15,6 +15,8 @@
  *   - Max-size write (HAL_FLASH_SAVE_MAX_SIZE exactly) round-trips
  *   - Overwrite: second write replaces first
  *   - NULL bytes_read out-param: read succeeds with prior written data
+ *   - Short-read truncation: read into smaller buffer yields truncated bytes
+ *     (A3: advisory fix)
  */
 
 #include "hal_flash.h"
@@ -22,6 +24,9 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
+
+/* Forward-declare mock reset accessor (defined in mock_hal_flash.c). */
+void mock_flash_reset(void);
 
 #define ASSERT_EQ(label, expected, actual)                          \
     do {                                                            \
@@ -44,6 +49,9 @@
 
 int main(void)
 {
+    /* Reset mock to clean state before any test. */
+    mock_flash_reset();
+
     static uint8_t write_buf[HAL_FLASH_SAVE_MAX_SIZE];
     static uint8_t read_buf[HAL_FLASH_SAVE_MAX_SIZE];
     size_t bytes_read = 0u;
@@ -145,6 +153,32 @@ int main(void)
     /* 7. Double init is safe.                                             */
     /* ------------------------------------------------------------------ */
     ASSERT_EQ("double_init_ok", HAL_FLASH_OK, hal_flash_init());
+
+    /* ------------------------------------------------------------------ */
+    /* 8. Short-read truncation (A3 advisory fix).                         */
+    /*                                                                     */
+    /* Write 256 bytes with a known pattern, then read into a 4-byte buf.  */
+    /* bytes_read must equal 4 (truncated to caller's buf_size).           */
+    /* First and last bytes of the small buffer must match the source.     */
+    /* ------------------------------------------------------------------ */
+    memset(write_buf, 0x00, sizeof(write_buf));
+    write_buf[0] = 0xABu;
+    write_buf[1] = 0xCDu;
+    write_buf[2] = 0xEFu;
+    write_buf[3] = 0x12u;
+    ASSERT_EQ("short_read_write_ok",
+              HAL_FLASH_OK,
+              hal_flash_write_save(write_buf, 256u));
+
+    static uint8_t small_buf[4];
+    memset(small_buf, 0x00, sizeof(small_buf));
+    bytes_read = 0u;
+    ASSERT_EQ("short_read_ok",
+              HAL_FLASH_OK,
+              hal_flash_read_save(small_buf, sizeof(small_buf), &bytes_read));
+    ASSERT_EQ("short_read_bytes_read_4",   4u,     bytes_read);
+    ASSERT_EQ("short_read_first_byte",     0xABu,  (size_t)small_buf[0]);
+    ASSERT_EQ("short_read_last_byte",      0x12u,  (size_t)small_buf[3]);
 
     hal_flash_deinit();
     return 0;

@@ -565,3 +565,52 @@ This value is frozen in `KNOWN_HASH_PINNED` inside `test_p10_combat_sync.c`. Any
 | ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 12 |
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 12 |
 | ADV-P10-01 | DEFERRED | `crc32.h` in `game/` used by `connectivity/` — move to `utils/` pending ADR. | Phase 12 |
+
+---
+
+## Phase 12 — HAL E-Paper + Flash (Review Findings)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-12-hal-part1`
+
+### What Was Built (Phase 12 original delivery)
+
+- `components/hal/include/hal_epaper.h` / `components/hal/src/hal_epaper.c` — E-paper HAL public API and target stub. `HAL_EPAPER_FB_SIZE=5000u`, `hal_epaper_err_t` enum (OK/ERR_INIT/ERR_BUSY_TIMEOUT/ERR_SPI/ERR_NULL), `hal_epaper_init/flush/sleep/deinit`. Stub returns OK; real SPI sequences deferred to hardware bring-up.
+- `components/hal/include/hal_flash.h` / `components/hal/src/hal_flash.c` — Flash HAL public API and target stub. `HAL_FLASH_SAVE_MAX_SIZE=512u`, `hal_flash_err_t` enum (OK/ERR_MOUNT/ERR_NOT_FOUND/ERR_WRITE/ERR_READ/ERR_NULL/ERR_SIZE), `hal_flash_init/read_save/write_save/deinit`. Atomic temp-file+rename pattern documented; stub deferred to hardware bring-up.
+- `test/host/mock_hal_epaper.c` / `test/host/mock_hal_flash.c` — Host RAM mocks. Epaper mock captures last flushed buffer + flush_count; flash mock persists data across deinit/reinit cycles.
+- `test/host/test_p12_hal_epaper_bounds.c` / `test_p12_hal_flash_bounds.c` — Bound tests (BOUND RED).
+- `test/host/test_p12_hal_epaper_feature.c` / `test_p12_hal_flash_feature.c` — Feature round-trip tests (FEATURE RED + GREEN).
+- `add_hal_test()` CMake helper added to `test/host/CMakeLists.txt`.
+
+### Review Findings Addressed (this commit)
+
+#### Blocker (1 resolved)
+
+| ID | Tag | Finding | Resolution |
+|----|-----|---------|-----------|
+| B1 | BLOCKER | `hal_epaper_flush` size-mismatch returned `ERR_NULL` — conflated two distinct error conditions, making it impossible for callers to distinguish a NULL pointer from a wrong-size call | Added `HAL_EPAPER_ERR_SIZE = 5` to `hal_epaper_err_t` enum in `hal_epaper.h`. Updated docstring: guard order is NULL-check first (→ ERR_NULL), size-check second (→ ERR_SIZE), init-check third. Updated `hal_epaper.c` stub and `mock_hal_epaper.c` to implement the new three-stage guard order. Updated `test_p12_hal_epaper_bounds.c`: all size-mismatch assertions now expect ERR_SIZE; the NULL+wrong-size case still expects ERR_NULL (NULL checked first). |
+
+#### Advisories (7 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 (epaper) | Mock had no reset function — test isolation depended on C runtime zero-init, fragile under test-order changes | Added `mock_epaper_reset()` to `mock_hal_epaper.c`. Forward-declared in `test_p12_hal_epaper_bounds.c`. Called at top of `main()` before all tests. |
+| A1 (flash) | Mock had no reset function | Added `mock_flash_reset()` to `mock_hal_flash.c`. Forward-declared in both `test_p12_hal_flash_bounds.c` and `test_p12_hal_flash_feature.c`. Called at top of each `main()`. |
+| A2 | No test for `hal_epaper_sleep()` after deinit — sleep should be always-valid (no init precondition) | Added test `sleep_after_deinit_ok` to `test_p12_hal_epaper_bounds.c`: calls `hal_epaper_deinit()` then asserts `hal_epaper_sleep() == HAL_EPAPER_OK`. |
+| A3 | No short-read truncation test — `hal_flash_read_save` truncation path exercised only by mock internals, not by a test | Added test block `8. Short-read truncation` to `test_p12_hal_flash_feature.c`: writes 256 bytes, reads into a 4-byte buffer, asserts `bytes_read == 4`, asserts first byte == 0xAB and last byte == 0x12. |
+| A4 | `docs/RETRO_LOG.md` had no Phase 12 section | This section. |
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (Gate #1 post-GREEN): **53/53 tests passed** — 0 failures, 0 warnings.
+- No presentation layer changes — visual regression suite not required.
+
+### Open Advisories (carried forward)
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 13 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 13 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 13 |
+| ADV-P10-01 | DEFERRED | `crc32.h` in `game/` used by `connectivity/` — move to `utils/` pending ADR. | Phase 13 |
+| ADV-P12-01 | ADVISORY | Rule 8: `hal_epaper` and `hal_flash` exist at HAL layer only; `screen_mgr.c` (presentation) wiring deferred — blocked on hardware bring-up. | Phase 13 |

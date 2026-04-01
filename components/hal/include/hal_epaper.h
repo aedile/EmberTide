@@ -30,14 +30,16 @@
  * HAL_EPAPER_ERR_INIT      — Driver not initialised (call hal_epaper_init first).
  * HAL_EPAPER_ERR_BUSY_TIMEOUT — Hardware BUSY pin held high beyond timeout.
  * HAL_EPAPER_ERR_SPI       — SPI bus transaction failed.
- * HAL_EPAPER_ERR_NULL      — Caller passed a NULL pointer or invalid size.
+ * HAL_EPAPER_ERR_NULL      — Caller passed a NULL pointer.
+ * HAL_EPAPER_ERR_SIZE      — size does not equal HAL_EPAPER_FB_SIZE exactly.
  */
 typedef enum {
     HAL_EPAPER_OK              = 0,
     HAL_EPAPER_ERR_INIT        = 1,
     HAL_EPAPER_ERR_BUSY_TIMEOUT = 2,
     HAL_EPAPER_ERR_SPI         = 3,
-    HAL_EPAPER_ERR_NULL        = 4
+    HAL_EPAPER_ERR_NULL        = 4,
+    HAL_EPAPER_ERR_SIZE        = 5
 } hal_epaper_err_t;
 
 /**
@@ -56,12 +58,17 @@ hal_epaper_err_t hal_epaper_init(void);
  * Transmits HAL_EPAPER_FB_SIZE bytes via SPI using the RAM write
  * command (0x24) and triggers a display update sequence.
  *
+ * Guard order (checked in this sequence):
+ *   1. NULL pointer check   → HAL_EPAPER_ERR_NULL   (fb_pixels is NULL)
+ *   2. Size check           → HAL_EPAPER_ERR_SIZE   (size != HAL_EPAPER_FB_SIZE)
+ *   3. Init check           → HAL_EPAPER_ERR_INIT   (driver not initialised)
+ *
  * @param fb_pixels  Pointer to a packed 1-bit pixel buffer.
- *                   Must be exactly HAL_EPAPER_FB_SIZE bytes.
- *                   MSB of byte 0 = pixel (0,0).
+ *                   Must not be NULL.  MSB of byte 0 = pixel (0,0).
  * @param size       Must equal HAL_EPAPER_FB_SIZE exactly.
  * @return HAL_EPAPER_OK           on success.
- *         HAL_EPAPER_ERR_NULL     if fb_pixels is NULL or size != HAL_EPAPER_FB_SIZE.
+ *         HAL_EPAPER_ERR_NULL     if fb_pixels is NULL.
+ *         HAL_EPAPER_ERR_SIZE     if size != HAL_EPAPER_FB_SIZE.
  *         HAL_EPAPER_ERR_INIT     if hal_epaper_init() was not called.
  *         HAL_EPAPER_ERR_BUSY_TIMEOUT if BUSY pin did not clear within timeout.
  *         HAL_EPAPER_ERR_SPI      on SPI transaction failure.

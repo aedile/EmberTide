@@ -37,15 +37,13 @@ hal_epaper_err_t hal_epaper_init(void)
 
 hal_epaper_err_t hal_epaper_flush(const uint8_t *fb_pixels, uint32_t size)
 {
-    /* NULL pointer guard — checked before init guard per spec. */
+    /* Guard order per spec: NULL check first, size check second, init check third. */
     if (!fb_pixels) {
         return HAL_EPAPER_ERR_NULL;
     }
-    /* Exact size guard. */
     if (size != HAL_EPAPER_FB_SIZE) {
-        return HAL_EPAPER_ERR_NULL;
+        return HAL_EPAPER_ERR_SIZE;
     }
-    /* Init guard — driver must have been initialised. */
     if (!g_mock_epaper_initialized) {
         return HAL_EPAPER_ERR_INIT;
     }
@@ -80,4 +78,18 @@ const uint8_t *mock_epaper_get_buffer(void)
 uint32_t mock_epaper_get_flush_count(void)
 {
     return g_mock_flush_count;
+}
+
+/**
+ * mock_epaper_reset — Reset all mock state to power-on defaults.
+ *
+ * Zeroes the capture buffer, clears initialized flag, and resets
+ * flush_count to 0.  Call at the start of each test main() to ensure
+ * clean slate regardless of prior static initialisation order.
+ */
+void mock_epaper_reset(void)
+{
+    memset(g_mock_epaper_buffer, 0, sizeof(g_mock_epaper_buffer));
+    g_mock_epaper_initialized = 0u;
+    g_mock_flush_count = 0u;
 }

@@ -20,6 +20,9 @@
 #include <string.h>
 #include <stdio.h>
 
+/* Forward-declare mock reset accessor (defined in mock_hal_flash.c). */
+void mock_flash_reset(void);
+
 #define ASSERT_EQ(label, expected, actual)                          \
     do {                                                            \
         if ((expected) != (actual)) {                               \
@@ -32,6 +35,9 @@
 
 int main(void)
 {
+    /* Reset mock to clean state before any test. */
+    mock_flash_reset();
+
     static uint8_t buf[HAL_FLASH_SAVE_MAX_SIZE + 1u];
     size_t bytes_read = 0u;
 

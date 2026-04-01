@@ -35,8 +35,12 @@ hal_epaper_err_t hal_epaper_init(void)
 
 hal_epaper_err_t hal_epaper_flush(const uint8_t *fb_pixels, uint32_t size)
 {
-    if (!fb_pixels || size != HAL_EPAPER_FB_SIZE) {
+    /* Guard order: NULL check first, then size check. */
+    if (!fb_pixels) {
         return HAL_EPAPER_ERR_NULL;
+    }
+    if (size != HAL_EPAPER_FB_SIZE) {
+        return HAL_EPAPER_ERR_SIZE;
     }
     return HAL_EPAPER_OK;
 }

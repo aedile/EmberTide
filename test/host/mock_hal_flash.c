@@ -95,3 +95,23 @@ void hal_flash_deinit(void)
     g_mock_flash_mounted = 0u;
     /* Data is intentionally preserved — mirrors real flash persistence. */
 }
+
+/* -------------------------------------------------------------------------
+ * Test accessor — host-only, not declared in hal_flash.h.
+ * -------------------------------------------------------------------------
+ */
+
+/**
+ * mock_flash_reset — Reset all mock state to factory defaults.
+ *
+ * Clears the stored data buffer, resets data size and has_data flag,
+ * and marks the mock as unmounted.  Call at the start of each test
+ * main() to ensure a clean slate regardless of static init order.
+ */
+void mock_flash_reset(void)
+{
+    memset(g_mock_flash_data, 0, sizeof(g_mock_flash_data));
+    g_mock_flash_data_size = 0u;
+    g_mock_flash_has_data  = 0u;
+    g_mock_flash_mounted   = 0u;
+}
