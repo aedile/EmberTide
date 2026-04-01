@@ -10,8 +10,12 @@
  *   - MSB bit-order fidelity (pixel 0,0 == bit 7 of byte 0)
  *
  * Tests here are HOST-only; no hal_*.h included.
+ *
+ * Note: Uses TEST_ASSERT_EQUAL_UINT32 for byte comparisons (avoids
+ * PRIu8 which requires <inttypes.h> not available in all host envs).
  */
 
+#include <inttypes.h>
 #include "test_assert.h"
 #include "fq_framebuffer.h"
 #include <string.h>
@@ -31,8 +35,8 @@ static void test_msb_bit_order_pixel_0_0(void)
     fq_fb_set_pixel(&fb, 0, 0, 1u);
 
     /* Byte 0 should have bit 7 set = 0x80. All others zero. */
-    TEST_ASSERT_EQUAL_UINT8(0x80u, fb.pixels[0]);
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[1]);
+    TEST_ASSERT_EQUAL_UINT32(0x80u, (uint32_t)fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[1]);
 }
 
 static void test_msb_bit_order_pixel_7_0(void)
@@ -42,8 +46,8 @@ static void test_msb_bit_order_pixel_7_0(void)
 
     /* Pixel (7,0) = bit 0 of byte 0 = 0x01. */
     fq_fb_set_pixel(&fb, 7, 0, 1u);
-    TEST_ASSERT_EQUAL_UINT8(0x01u, fb.pixels[0]);
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[1]);
+    TEST_ASSERT_EQUAL_UINT32(0x01u, (uint32_t)fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[1]);
 }
 
 static void test_msb_bit_order_pixel_8_0(void)
@@ -53,8 +57,8 @@ static void test_msb_bit_order_pixel_8_0(void)
 
     /* Pixel (8,0) = bit 7 of byte 1. */
     fq_fb_set_pixel(&fb, 8, 0, 1u);
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[0]);
-    TEST_ASSERT_EQUAL_UINT8(0x80u, fb.pixels[1]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0x80u, (uint32_t)fb.pixels[1]);
 }
 
 /* ── N1: Negative coordinate → drop silently ───────────────────────────── */
@@ -69,7 +73,7 @@ static void test_negative_x_drops_pixel(void)
 
     /* All bytes remain 0x00. */
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[i]);
     }
 }
 
@@ -82,7 +86,7 @@ static void test_negative_y_drops_pixel(void)
     fq_fb_set_pixel(&fb, 100, -100, 1u);
 
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[i]);
     }
 }
 
@@ -95,7 +99,7 @@ static void test_int16_min_coordinates_dropped(void)
     fq_fb_set_pixel(&fb, (int16_t)-32768, (int16_t)-32768, 1u);
 
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[i]);
     }
 }
 
@@ -109,7 +113,7 @@ static void test_x_equals_200_drops_pixel(void)
     fq_fb_set_pixel(&fb, 255, 0, 1u);
 
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[i]);
     }
 }
 
@@ -122,7 +126,7 @@ static void test_y_equals_200_drops_pixel(void)
     fq_fb_set_pixel(&fb, 0, 255, 1u);
 
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[i]);
     }
 }
 
@@ -149,7 +153,7 @@ static void test_null_fb_fill_no_crash(void)
 static void test_null_fb_get_pixel_returns_zero(void)
 {
     uint8_t val = fq_fb_get_pixel(NULL, 0, 0);
-    TEST_ASSERT_EQUAL_UINT8(0u, val);
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)val);
 }
 
 static void test_null_fb_draw_line_no_crash(void)
@@ -178,8 +182,8 @@ static void test_vertical_line_terminates(void)
     /* x0==x1 must not loop forever. */
     fq_fb_draw_line(&fb, 5, 0, 5, 199, 1u);
     /* Pixel (5, 0) should be set. */
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 5, 0));
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 5, 199));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 5, 0));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 5, 199));
 }
 
 /* ── N5: Horizontal line ───────────────────────────────────────────────── */
@@ -188,8 +192,8 @@ static void test_horizontal_line_terminates(void)
     fq_fb_t fb;
     fq_fb_clear(&fb);
     fq_fb_draw_line(&fb, 0, 10, 199, 10, 1u);
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 0, 10));
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 199, 10));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 0, 10));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 199, 10));
 }
 
 /* ── N6: Single-point line (x0==x1, y0==y1) ───────────────────────────── */
@@ -198,7 +202,7 @@ static void test_single_point_line_terminates(void)
     fq_fb_t fb;
     fq_fb_clear(&fb);
     fq_fb_draw_line(&fb, 50, 50, 50, 50, 1u);
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 50, 50));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 50, 50));
 }
 
 /* ── N7: Reversed line (x1<x0 or y1<y0) ───────────────────────────────── */
@@ -213,7 +217,7 @@ static void test_reversed_line_draws_same_pixels(void)
 
     /* Both framebuffers should produce the same pixel pattern. */
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(fb1.pixels[i], fb2.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)fb1.pixels[i], (uint32_t)fb2.pixels[i]);
     }
 }
 
@@ -228,7 +232,7 @@ static void test_fully_oob_line_no_pixels_written(void)
     fq_fb_draw_line(&fb, -10, -10, -50, -50, 1u);
 
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[i]);
     }
 }
 
@@ -239,10 +243,10 @@ static void test_get_pixel_oob_returns_zero(void)
     fq_fb_fill(&fb, 1u); /* All black. */
 
     /* OOB coords must return 0, not 1. */
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_fb_get_pixel(&fb, -1, 0));
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_fb_get_pixel(&fb, 200, 0));
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_fb_get_pixel(&fb, 0, -1));
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_fb_get_pixel(&fb, 0, 200));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)fq_fb_get_pixel(&fb, -1, 0));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)fq_fb_get_pixel(&fb, 200, 0));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)fq_fb_get_pixel(&fb, 0, -1));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)fq_fb_get_pixel(&fb, 0, 200));
 }
 
 /* ── Static size assertion (compile-time) ──────────────────────────────── */

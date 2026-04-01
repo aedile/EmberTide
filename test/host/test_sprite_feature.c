@@ -2,8 +2,10 @@
  * test_sprite_feature.c — Phase 7: Sprite Blitter Feature Tests (FEATURE RED)
  *
  * Happy-path contract tests for fq_blit_sprite.
+ * Uses TEST_ASSERT_EQUAL_UINT32 for byte comparisons.
  */
 
+#include <inttypes.h>
 #include "test_assert.h"
 #include "fq_framebuffer.h"
 #include "fq_sprite.h"
@@ -24,11 +26,13 @@ static void test_8x8_blit_aligned(void)
 
     fq_blit_sprite(&fb, 0, 0, &sp);
 
-    /* All 8 rows × 8 pixels should be set (byte 0 of each row = 0xFF). */
-    for (uint32_t row = 0; row < 8; row++) {
-        TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[row * FQ_FB_STRIDE]);
+    /* All 8 rows x 8 pixels should be set (byte 0 of each row = 0xFF). */
+    for (uint32_t row = 0; row < 8u; row++) {
+        TEST_ASSERT_EQUAL_UINT32(0xFFu,
+                                 (uint32_t)fb.pixels[row * FQ_FB_STRIDE]);
         /* Next byte in same row must be clear. */
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[row * FQ_FB_STRIDE + 1]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u,
+                                 (uint32_t)fb.pixels[row * FQ_FB_STRIDE + 1u]);
     }
 }
 
@@ -48,9 +52,9 @@ static void test_or_blit_preserves_background(void)
 
     fq_blit_sprite(&fb, 0, 0, &half_sp);
 
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 0, 0)); /* preserved */
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 1, 0)); /* sprite set */
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_fb_get_pixel(&fb, 2, 0)); /* untouched */
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 1, 0));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)fq_fb_get_pixel(&fb, 2, 0));
 }
 
 /* ── Checkerboard sprite pattern ────────────────────────────────────────── */
@@ -66,10 +70,10 @@ static void test_checkerboard_pattern(void)
     fq_blit_sprite(&fb, 0, 0, &check_sp);
 
     /* Pixels 0,2,4,6 black; 1,3,5,7 white (0=MSB). */
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 0, 0)); /* bit 7 */
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_fb_get_pixel(&fb, 1, 0)); /* bit 6 */
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 2, 0)); /* bit 5 */
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_fb_get_pixel(&fb, 3, 0)); /* bit 4 */
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)fq_fb_get_pixel(&fb, 1, 0));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 2, 0));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)fq_fb_get_pixel(&fb, 3, 0));
 }
 
 /* ── Unaligned X (x=1): 8-wide sprite starting at bit offset 1 ─────────── */
@@ -85,8 +89,8 @@ static void test_unaligned_x1_single_row(void)
 
     fq_blit_sprite(&fb, 1, 0, &sp);
 
-    TEST_ASSERT_EQUAL_UINT8(0x7Fu, fb.pixels[0]);
-    TEST_ASSERT_EQUAL_UINT8(0x80u, fb.pixels[1]);
+    TEST_ASSERT_EQUAL_UINT32(0x7Fu, (uint32_t)fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0x80u, (uint32_t)fb.pixels[1]);
 }
 
 /* ── Sprite at x=8 (second byte boundary) ──────────────────────────────── */
@@ -100,9 +104,9 @@ static void test_byte_aligned_x8(void)
 
     fq_blit_sprite(&fb, 8, 0, &sp);
 
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[0]); /* byte 0 = pixels 0-7 */
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[1]); /* byte 1 = pixels 8-15 */
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[2]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[1]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[2]);
 }
 
 /* ── 16x2 sprite at (0,0) ───────────────────────────────────────────────── */
@@ -120,13 +124,13 @@ static void test_16x2_two_row_blit(void)
     fq_blit_sprite(&fb, 0, 0, &sp);
 
     /* Row 0: bytes 0,1 = 0xFF each. */
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[0]);
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[1]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[1]);
     /* Row 1: bytes 25,26 = 0xFF each. */
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[FQ_FB_STRIDE]);
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[FQ_FB_STRIDE + 1]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[FQ_FB_STRIDE]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[FQ_FB_STRIDE + 1u]);
     /* Byte 2 = clear. */
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[2]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[2]);
 }
 
 /* ── Bottom-right corner clip (partial bottom) ──────────────────────────── */
@@ -135,7 +139,7 @@ static void test_partial_bottom_clip(void)
     fq_fb_t fb;
     fq_fb_clear(&fb);
 
-    /* 8x8 sprite at y=197: only rows 0..2 visible (y=197,198,199). */
+    /* 8x8 sprite at y=197: only rows 0..2 of sprite visible (y=197,198,199). */
     static const uint8_t data[8] = {
         0xFFu, 0xFFu, 0xFFu, 0xFFu,
         0xFFu, 0xFFu, 0xFFu, 0xFFu
@@ -145,11 +149,11 @@ static void test_partial_bottom_clip(void)
     fq_blit_sprite(&fb, 0, 197, &sp);
 
     /* Rows 197, 198, 199 must be set. */
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[197 * FQ_FB_STRIDE]);
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[198 * FQ_FB_STRIDE]);
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[199 * FQ_FB_STRIDE]);
-    /* Rows 0..196 must be clear (sample row 0). */
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[197u * FQ_FB_STRIDE]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[198u * FQ_FB_STRIDE]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[199u * FQ_FB_STRIDE]);
+    /* Row 0 must be clear. */
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[0]);
 }
 
 /* ── main ──────────────────────────────────────────────────────────────── */

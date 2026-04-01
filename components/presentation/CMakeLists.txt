@@ -1,6 +1,9 @@
 idf_component_register(
     SRCS
         "src/renderer.c"
+        "src/fq_framebuffer.c"
+        "src/fq_sprite.c"
+        "src/fq_text.c"
     INCLUDE_DIRS
         "include"
     # presentation/ does NOT depend on game/ — view model construction happens

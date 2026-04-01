@@ -3,8 +3,10 @@
  *
  * Happy-path contract tests for fq_draw_text and fq_text_width.
  * Uses a minimal inline 8x8 monospace test font to prove the pipeline.
+ * Uses TEST_ASSERT_EQUAL_UINT32 for byte/pixel comparisons.
  */
 
+#include <inttypes.h>
 #include "test_assert.h"
 #include "fq_framebuffer.h"
 #include "fq_text.h"
@@ -14,24 +16,21 @@
 /* ── Minimal 8x8 monospace test font ──────────────────────────────────── */
 /*
  * Covers ASCII 32..126 (95 glyphs).
- * Each glyph: 8 rows × 1 byte = 8 bytes total per glyph.
+ * Each glyph: 8 rows x 1 byte = 8 bytes total per glyph.
  * Advance widths: space=4, all printable chars=8.
  *
  * Glyph data is all-ones (0xFF per row) for every non-space character.
- * This makes it trivial to verify that specific pixels are set.
  */
 
 #define TF_GLYPHS  95u
 #define TF_H        8u
 
-/* Full-black glyph: all 8 rows × 8 bits set. */
+/* Full-black glyph: all 8 rows x 8 bits set. */
 static const uint8_t g_solid_glyph[TF_H] = {
     0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
 };
 
-/* Bitmap: 95 glyphs × 8 rows × 1 byte = 760 bytes.
- * Space (index 0) is all-zero (transparent).
- * Everything else is g_solid_glyph repeated. */
+/* Bitmap: 95 glyphs x 8 rows x 1 byte = 760 bytes. */
 static uint8_t g_bitmap[TF_GLYPHS * TF_H];
 static uint8_t g_widths[TF_GLYPHS];
 static int8_t  g_offx[TF_GLYPHS];
@@ -44,7 +43,7 @@ static void init_font_tables(void)
         g_offx[i]   = 0;
         g_offy[i]   = 0;
         if (i == 0u) {
-            /* Space: transparent. */
+            /* Space: transparent, narrower. */
             for (uint32_t r = 0; r < TF_H; r++) {
                 g_bitmap[i * TF_H + r] = 0x00u;
             }
@@ -126,7 +125,7 @@ static void test_draw_text_returns_cursor_after_three_chars(void)
     fq_fb_t fb;
     fq_fb_clear(&fb);
 
-    /* "ABC": 3 × 8 = 24. */
+    /* "ABC": 3 x 8 = 24. */
     int16_t cursor = fq_draw_text(&fb, &f, 0, 0, "ABC");
     TEST_ASSERT_EQUAL_INT(24, (int)cursor);
 }
@@ -139,14 +138,16 @@ static void test_draw_text_sets_pixels_for_solid_glyph(void)
     fq_fb_t fb;
     fq_fb_clear(&fb);
 
-    /* Draw 'A' at (0,0). All 8 rows × 8 pixels of glyph should be set. */
+    /* Draw 'A' at (0,0). All 8 rows x 8 pixels of glyph should be set. */
     fq_draw_text(&fb, &f, 0, 0, "A");
 
     for (int16_t row = 0; row < 8; row++) {
-        TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[row * FQ_FB_STRIDE]);
+        TEST_ASSERT_EQUAL_UINT32(0xFFu,
+                                 (uint32_t)fb.pixels[row * (int16_t)FQ_FB_STRIDE]);
     }
     /* Row 8 should be clear. */
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[8 * FQ_FB_STRIDE]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u,
+                             (uint32_t)fb.pixels[8u * FQ_FB_STRIDE]);
 }
 
 /* ── fq_draw_text: space glyph is transparent ───────────────────────────── */
@@ -161,7 +162,7 @@ static void test_draw_text_space_leaves_framebuffer_clear(void)
 
     /* Space glyph has all-zero bitmap → OR-blit changes nothing. */
     for (uint32_t i = 0; i < FQ_FB_SIZE; i++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[i]);
     }
 }
 
@@ -177,8 +178,10 @@ static void test_draw_text_x_offset_applied(void)
     fq_draw_text(&fb, &f, 8, 0, "A");
 
     for (int16_t row = 0; row < 8; row++) {
-        TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[row * FQ_FB_STRIDE + 0]);
-        TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[row * FQ_FB_STRIDE + 1]);
+        TEST_ASSERT_EQUAL_UINT32(0x00u,
+                                 (uint32_t)fb.pixels[row * (int16_t)FQ_FB_STRIDE + 0]);
+        TEST_ASSERT_EQUAL_UINT32(0xFFu,
+                                 (uint32_t)fb.pixels[row * (int16_t)FQ_FB_STRIDE + 1]);
     }
 }
 
@@ -194,9 +197,9 @@ static void test_two_chars_placed_consecutively(void)
     fq_draw_text(&fb, &f, 0, 0, "AB");
 
     /* Row 0: bytes 0 and 1 should be 0xFF, byte 2 clear. */
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[0]);
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[1]);
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[2]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[0]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[1]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[2]);
 }
 
 /* ── fq_draw_text: y offset applied ────────────────────────────────────── */
@@ -207,15 +210,15 @@ static void test_draw_text_y_offset_applied(void)
     fq_fb_t fb;
     fq_fb_clear(&fb);
 
-    /* Draw 'A' at (0, 10). Row 10 of FB should start solid. */
+    /* Draw 'A' at (0, 10). Rows 10..17 of FB should start solid. */
     fq_draw_text(&fb, &f, 0, 10, "A");
 
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[10 * FQ_FB_STRIDE]);
-    TEST_ASSERT_EQUAL_UINT8(0xFFu, fb.pixels[17 * FQ_FB_STRIDE]); /* row 17 = 10+7 */
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[10u * FQ_FB_STRIDE]);
+    TEST_ASSERT_EQUAL_UINT32(0xFFu, (uint32_t)fb.pixels[17u * FQ_FB_STRIDE]);
     /* Row 9 must be clear. */
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[9 * FQ_FB_STRIDE]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[9u * FQ_FB_STRIDE]);
     /* Row 18 must be clear. */
-    TEST_ASSERT_EQUAL_UINT8(0x00u, fb.pixels[18 * FQ_FB_STRIDE]);
+    TEST_ASSERT_EQUAL_UINT32(0x00u, (uint32_t)fb.pixels[18u * FQ_FB_STRIDE]);
 }
 
 /* ── main ──────────────────────────────────────────────────────────────── */
