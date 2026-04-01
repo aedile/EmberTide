@@ -4,6 +4,7 @@ idf_component_register(
         "src/prng.c"
         "src/crc32.c"
         "src/progression.c"
+        "src/save_format.c"
     INCLUDE_DIRS
         "include"
     # game/ MUST NOT depend on hal/, presentation/, or connectivity/.

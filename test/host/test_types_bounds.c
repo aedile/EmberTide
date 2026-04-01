@@ -23,6 +23,7 @@
  */
 
 #include <stdint.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
@@ -266,9 +267,12 @@ static void test_max_serialized_size(void)
  * -------------------------------------------------------------------------*/
 static void test_zero_length_buffer_deserialize(void)
 {
+    /* Use a valid (non-NULL) pointer with zero length.
+     * NULL + 0 is caught as NULL_PTR first; this test isolates the size check. */
+    uint8_t dummy[1] = { 0u };
     fq_character_t ch;
     fq_inventory_t inv;
-    fq_save_err_t err = fq_save_deserialize(NULL, 0u, &ch, &inv);
+    fq_save_err_t err = fq_save_deserialize(dummy, 0u, &ch, &inv);
     TEST_ASSERT_EQUAL_INT(FQ_SAVE_ERR_BUFFER_TOO_SMALL, (int)err);
 }
 
