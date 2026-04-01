@@ -50,6 +50,7 @@ As an artist, my 1-bit python-generated C header arrays need to be precisely bli
 ### Implementation Steps
 1. Write the byte-alignment shift logic in `fq_sprite.c`. 
 2. Because E-paper is 1-bit, the blitter uses OR/AND masks instead of memcpy directly.
+3. **[PRE-EXISTING]** Use the existing sprite structures located in `/include/fm_chars.h`, `fm_items.h`, `fm_icons.h`, and `fm_tiles.h` from our earlier rapid-prototyping phase. Move these files into `components/presentation/include/sprites/` during implementation.
 
 ### Test Expectations
 - `test/visual/test_sprite.c` draws the Dark Knight sprite at offset X=5, Y=10 to guarantee unaligned bit shifting succeeds, outputting a PNG.
@@ -79,7 +80,7 @@ As a UI designer, text must look polished with variable character advancement an
 - **Run-on String:** Pass a string without a null terminator, or a string of 10,000 "A"s. Ensure the text parser bounds execution to the edge of the 200x200 screen, breaking the loop before processing hidden characters forever.
 
 ### Implementation Steps
-1. Generate the static font arrays inside `presentation/include/fonts/`.
+1. **[PRE-EXISTING]** Use the existing font bytecode arrays from `/include/fm_fonts.h` and the kerning data from `/tests/font_metrics.json`. Move/convert these into `components/presentation/include/fonts/`.
 2. Write the string parsing loop in `fq_text.c`.
 
 ### Test Expectations
