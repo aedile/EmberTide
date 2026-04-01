@@ -204,3 +204,16 @@ add_host_test(test_combat_determinism "${CMAKE_CURRENT_SOURCE_DIR}/test_combat_d
 # Feature tests (happy-path)
 # ---------------------------------------------------------------------------
 add_host_test(test_sanity "${CMAKE_CURRENT_SOURCE_DIR}/test_sanity.c")
+
+# ---------------------------------------------------------------------------
+# Phase-3 Bound tests (Rule 22 Phase A — BOUND RED)
+# Written before any phase-3 implementation. These fail until types.h and
+# save_format.h/save_format.c are fully implemented (GREEN phase).
+# ---------------------------------------------------------------------------
+add_host_test(test_types_bounds "${CMAKE_CURRENT_SOURCE_DIR}/test_types_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-3 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_host_test(test_save_format     "${CMAKE_CURRENT_SOURCE_DIR}/test_save_format.c")
+add_host_test(test_save_corruption "${CMAKE_CURRENT_SOURCE_DIR}/test_save_corruption.c")

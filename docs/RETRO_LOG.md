@@ -125,3 +125,40 @@ None. All Phase 1 advisory items resolved inline per PM directive.
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve compresses 68% of raw domain into 5 effective values. Three values (1, 2, 4) unreachable. Class advantages yield ~1 combat point through integer truncation. Recommend 10K-fight Monte Carlo validation when combat formulas integrate (Phase 5+). | Phase 7 |
 
 ---
+
+## Phase 3 — Core Data Structures (types.h, save_format)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-3-core-data-structures`
+
+### What Was Built
+
+- `components/game/include/types.h` — `fq_character_t`, `fq_rival_entry_t`, `fq_item_def_t`, `fq_inventory_t` with `_Static_assert` layout pins
+- `components/game/include/save_format.h` — `fq_save_err_t` enum, `FQ_SAVE_MAX_SIZE`, `FQ_SAVE_SERIALIZED_SIZE_V1`, serialize/deserialize API
+- `components/game/src/save_format.c` — field-by-field little-endian serializer/deserializer with CRC32 framing
+- `test/host/test_types_bounds.c` — bound tests: sizeof exact pins, padding canary, name boundary, null pointer guards, enum range validation, CRC range, UINT32/16 max round-trips, rival log field-by-field
+- `test/host/test_save_format.c` — feature tests: full round-trip, endianness verification, version byte, name null-termination, save_version round-trip, zero inventory, determinism
+
+### Review Findings Addressed (Phase 3 Review)
+
+#### Advisories (8 addressed)
+
+| ID | Tag | Finding | Resolution |
+|----|-----|---------|-----------|
+| ADV-P3-01 | ADVISORY | sizeof tests used range assertions (`sz <= X`) instead of exact pins | Replaced with `TEST_ASSERT_EQUAL_UINT32` exact assertions: rival_entry=12, item_def=58, inventory=66 |
+| ADV-P3-02 | ADVISORY | No exported constant for serialized byte count; tests only checked `written > 0` | Added `FQ_SAVE_SERIALIZED_SIZE_V1 216u` to `save_format.h`; pinned in `test_full_roundtrip` and `test_serialize_is_deterministic` |
+| FINDING-4 | ADVISORY | `fq_save_deserialize` wrote to output structs before completing validation; stale stack data could leak through early returns | Added `memset(ch, 0, sizeof(*ch))` and `memset(inv, 0, sizeof(*inv))` immediately after null/size guard checks pass |
+| FINDING-2 | ADVISORY | `fq_save_result_t` enum name inconsistent with actual implementation (`fq_save_err_t`); missing `FQ_SAVE_ERR_NULL_PTR` variant in arch doc | Architecture doc updated: typedef renamed to `fq_save_err_t`, `FQ_SAVE_ERR_NULL_PTR` added, v2.2 amendment note added at top |
+| FINDING-1 | DEFERRED | `fq_modifier_pool_t` parameter omitted from save_format API. Modifier pool serialization deferred to Phase 5 (Item Engine) | See ADVISORY-ARCH-P3-01 below |
+| ADV-DevOps-1 | ADVISORY | CMake GLOB pattern in test harness will not auto-detect new test files | Informational — developer must manually add test targets to CMakeLists.txt. No code change required. |
+| ADV-DevOps-2 | ADVISORY | Latent `-Wconversion` warnings suppressed by current CMake flags | Informational — `-Wconversion` not yet enabled; deferred until all integer promotions are reviewed. No code change required. |
+| BAL-P3-check | ADVISORY | Verify Phase 2 BAL-001 advisory is logged | Confirmed: ADVISORY-BAL-001 present in Phase 2 section. No duplicate needed. |
+
+### Open Advisories
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-ARCH-P3-01 | DEFERRED | `fq_modifier_pool_t` parameter omitted from save_format API. Modifier pool serialization deferred to Phase 5 (Item Engine). | Phase 6 |
+| ADVISORY-ARCH-P3-02 | RESOLVED | `fq_save_result_t` renamed to `fq_save_err_t` with added `FQ_SAVE_ERR_NULL_PTR` variant. Architecture doc amended (v2.2). | Resolved Phase 3 |
+
+---

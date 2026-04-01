@@ -4,6 +4,8 @@
 **Reference:** FiestaQuest Game Design Document v5
 **Methodology:** TDD red-first, clean architecture, defense in depth
 
+**v2.2 amendment:** fq_save_result_t renamed to fq_save_err_t; FQ_SAVE_ERR_NULL_PTR added as new variant. Architecture doc updated to match implementation.
+
 **v2.1 amendment:** fq_prng_range signature changed from int to uint32_t — avoids signed/unsigned conversion hazards in modulo arithmetic.
 
 **v2 changelog:** Combat stepper API (replaces all-at-once resolver). Typed event bus (tagged union, no void*). Mini-game contracts (scoring + running split). Training session FSM. BLE service contract. Captive portal module. View model layer (decouples presentation from game state). Visual test harness (host-rendered PNGs for LLM review before flashing). CRC32 frozen alongside PRNG. PRNG modulo bias accepted and documented. Effective stat lookup table committed. Production error logging. PSRAM policy expanded.
@@ -610,11 +612,12 @@ Explicit field-by-field serialization (not raw struct dump). Decouples in-memory
 
 typedef enum {
     FQ_SAVE_OK,
+    FQ_SAVE_ERR_NULL_PTR,
     FQ_SAVE_ERR_CRC,
     FQ_SAVE_ERR_VERSION_TOO_NEW,
     FQ_SAVE_ERR_CORRUPT,
     FQ_SAVE_ERR_BUFFER_TOO_SMALL,
-} fq_save_result_t;
+} fq_save_err_t; /* renamed from fq_save_result_t (v2.2) */
 
 // Serialize to byte buffer. Field-by-field, explicit byte order (little-endian).
 // Returns bytes written.
@@ -626,7 +629,7 @@ size_t fq_save_serialize(
 );
 
 // Deserialize from byte buffer. Validates CRC. Runs migration if version < current.
-fq_save_result_t fq_save_deserialize(
+fq_save_err_t fq_save_deserialize(
     const uint8_t *buffer, size_t buffer_size,
     fq_character_t *character_out,
     fq_inventory_t *inventory_out,
