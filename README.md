@@ -5,8 +5,9 @@
 EmberTide is a standalone virtual pet and RPG built entirely in C for the ESP32-S3. Two devices discover each other over Bluetooth, exchange a shared random seed, and fight it out — round by round, bit by bit — on a 200x200 pixel black-and-white screen. No companion app. No cloud. Just two tiny screens and a deterministic combat engine that both devices can verify is fair.
 
 <p align="center">
-  <img src="assets/Characters/32x32-Charset.png" alt="Character sprites" width="256" />
+  <img src="assets/Characters/32x32-Charset.png" alt="Character sprites — 21 creatures with 8 animation frames each" width="384" />
 </p>
+<p align="center"><em>21 creatures, 8 animation frames each — all 1-bit pixel art for the e-paper display</em></p>
 
 ---
 
@@ -15,6 +16,8 @@ EmberTide is a standalone virtual pet and RPG built entirely in C for the ESP32-
 EmberTide is a game that runs on the [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/wiki/ESP32-S3-ePaper-1.54) — a tiny board with a 200x200 e-paper display, two buttons, Bluetooth, WiFi, a speaker, and 8MB of flash. The entire game fits in that flash alongside an OTA update partition.
 
 You raise a creature. You train it. You fight other players' creatures over BLE. When your creature dies, it's reborn weaker — but you unlock permanent legacy perks that compound across lifetimes.
+
+**[How to Play](docs/HOW_TO_PLAY.md)** — Full gameplay guide: controls, menu navigation, combat mechanics, items, classes, rebirth system.
 
 ### The Gameplay Loop
 
@@ -38,26 +41,13 @@ Stats follow a logarithmic curve — early training gains are dramatic, but max-
 
 ---
 
-## Screen Layouts
+## The Display
 
-All screens render to a 200x200 1-bit framebuffer and are verified by an automated visual regression pipeline. These are the current host-rendered layouts (geometry only — sprite and font integration happens at hardware bring-up):
+Everything renders to a 200x200 pixel 1-bit framebuffer — pure black and white, no grays. The e-paper display retains its image with zero power draw, so your creature is always visible even when the device is asleep.
 
-<p align="center">
-  <img src="test/visual/golden/scene_home.png" alt="Home screen" width="200" />
-  <img src="test/visual/golden/scene_combat.png" alt="Combat HUD" width="200" />
-  <img src="test/visual/golden/scene_stats.png" alt="Stats screen" width="200" />
-  <img src="test/visual/golden/scene_inventory.png" alt="Inventory grid" width="200" />
-</p>
-<p align="center">
-  <em>Home &mdash; Combat &mdash; Stats &mdash; Inventory</em>
-</p>
-<p align="center">
-  <img src="test/visual/golden/scene_training.png" alt="Training" width="200" />
-  <img src="test/visual/golden/scene_dialogue.png" alt="Dialogue" width="200" />
-</p>
-<p align="center">
-  <em>Training &mdash; Dialogue (Rebirth confirmation)</em>
-</p>
+The game has 8 distinct screens: **Home** (creature dashboard), **Combat** (split-screen battle HUD with dual HP bars), **Stats** (four stat bars + XP progress), **Inventory** (scrollable item grid with selection cursor), **Training** (mini-game with score bar), **Dialogue** (word-wrapped text boxes for rebirth confirmations and onboarding), **Battle Setup** (BLE pairing), and **Battle Results**.
+
+All screen layouts are verified by an automated visual regression pipeline that generates PNGs and diffs them against committed golden baselines. Sprite and font rendering into the screen layouts happens at hardware bring-up — the current golden baselines show the structural geometry (HP bars, borders, grid cells, stat bars) that the renderers produce.
 
 ---
 
@@ -178,17 +168,25 @@ docs/             Architecture doc, design doc, hardware QA checklist
 
 ---
 
-## Assets
+## Art and Assets
 
-All pixel art is 1-bit black-and-white, designed for the e-paper display.
+All pixel art is native 1-bit black-and-white — no dithering, no grays. Every sprite was designed to read clearly on a 200x200 e-paper display.
 
 <p align="center">
-  <img src="assets/Characters/32x32-Charset-Outline.png" alt="Character outlines" width="256" />
-  <img src="assets/Items/Items-24x24.png" alt="Items" width="96" />
-  <img src="assets/Tiles/Dungeon-16x16.png" alt="Dungeon tiles" width="160" />
+  <img src="assets/Characters/32x32-Charset-Outline.png" alt="Character sprite outlines — 21 creatures" width="384" /><br/>
+  <em>21 creature designs with outlined style variant (32x32 each, 8 walk-cycle frames)</em>
 </p>
 
-168 character frames (21 creatures x 8 animation frames), item sprites, dungeon/land/crypt/hold tile sets, and icon sheets for RPG symbols, weather, and UI elements. Font glyphs are variable-width with precomputed metrics.
+<p align="center">
+  <img src="assets/Items/Items-24x24.png" alt="Collectible items" width="144" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/Items/Items2-24x24.png" alt="More items" width="144" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/Tiles/Dungeon-16x16.png" alt="Dungeon tiles" width="240" />
+</p>
+<p align="center"><em>Collectible items (24x24) and dungeon tile set (16x16)</em></p>
+
+The asset pipeline includes 168 character frames, two item sheets, four tile sets (Dungeon, Land, Crypt, Hold), icon sheets for RPG/weather/UI symbols, and two variable-width bitmap fonts with precomputed glyph metrics.
 
 See [docs/sprite-map.md](docs/sprite-map.md) for the complete sprite atlas with pixel coordinates.
 

@@ -4,6 +4,7 @@
 
 | Document | Description |
 |----------|-------------|
+| [HOW_TO_PLAY.md](HOW_TO_PLAY.md) | **Start here** — Controls, menu navigation, combat mechanics, items, classes, rebirth loop |
 | [fiestaquest-design-doc.md](fiestaquest-design-doc.md) | Complete game design: data model, combat mechanics, items, training, rebirth, legacy tree |
 | [fiestaquest-architecture.md](fiestaquest-architecture.md) | Technical architecture: layer diagram, module contracts, API signatures, visual test harness |
 | [sprite-map.md](sprite-map.md) | Sprite atlas: pixel coordinates for all 168 character frames, items, tiles, icons |
