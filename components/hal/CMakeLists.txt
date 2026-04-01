@@ -5,6 +5,8 @@ idf_component_register(
         "src/hal_flash.c"
         "src/hal_audio.c"
         "src/hal_sleep.c"
+        "src/hal_ble.c"
+        "src/hal_wifi.c"
     INCLUDE_DIRS
         "include"
     # hal/ sits at the bottom of the dependency graph.
@@ -20,4 +22,9 @@ idf_component_register(
     # without ESP-IDF driver headers.  When LEDC and deep-sleep
     # implementations are added, add to REQUIRES:
     #   driver esp_timer
+    #
+    # Phase 14 note: hal_ble.c and hal_wifi.c are stubs that compile
+    # without NimBLE or ESP-IDF WiFi/HTTPD headers.  When real NimBLE and
+    # WiFi driver implementations are added, add to REQUIRES:
+    #   bt esp_wifi esp_http_server nvs_flash
 )
