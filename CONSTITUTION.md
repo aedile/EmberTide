@@ -90,6 +90,9 @@ These principles guide your higher-level reasoning and interaction.
 | 6 | Documentation currency | `docs:` commit required per branch |
 | 8 | Project management | Task tracker updated per task |
 | 9 | UI/UX visual fidelity | `visual-regression-reviewer` agent spawned conditionally |
+| PM-1 | Spec-challenger runs before development | `.spec-challenge-complete` artifact required on phase branches. Enforced by `.claude/settings.json` PreToolUse hook — `gh pr create/merge` blocked without artifact. |
+| PM-2 | Phase-boundary-auditor runs before merge | `.phase-audit-complete` artifact required on phase branches. Enforced by `.claude/settings.json` PreToolUse hook — `gh pr create/merge` blocked without artifact. |
+| PM-3 | All required reviewers run before merge | `.reviewers-complete` artifact required on phase branches. Enforced by `.claude/settings.json` PreToolUse hook — `gh pr create/merge` blocked without artifact. |
 
 ## **Final Mandate: Conflict and Blockers**
 

@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // \"\"' | { read -r CMD; if echo \"$CMD\" | grep -qE '^gh pr (merge|create)'; then BRANCH=$(git branch --show-current 2>/dev/null); if echo \"$BRANCH\" | grep -qE '^(feat|chore|fix)/phase-'; then if [ ! -f '.phase-audit-complete' ]; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CONSTITUTIONAL VIOLATION (Priority 0.5): .phase-audit-complete artifact missing. The phase-boundary-auditor MUST run before any phase PR is created or merged. Create this file by running the auditor.\"}}'; exit 0; fi; if [ ! -f '.spec-challenge-complete' ]; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CONSTITUTIONAL VIOLATION (Rule 20): .spec-challenge-complete artifact missing. The spec-challenger MUST run before phase development begins. Create this file after the spec-challenger completes.\"}}'; exit 0; fi; if [ ! -f '.reviewers-complete' ]; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CONSTITUTIONAL VIOLATION (Rule 21/23): .reviewers-complete artifact missing. All required reviewers (QA + DevOps + Balance + conditional Arch/Visual) MUST run before PR creation. Create this file after all reviewers complete.\"}}'; exit 0; fi; fi; fi; echo '{}'; }",
+            "if": "Bash(gh pr:*)",
+            "timeout": 10,
+            "statusMessage": "Checking phase enforcement gates..."
+          }
+        ]
+      }
+    ]
+  }
+}
