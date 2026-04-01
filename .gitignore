@@ -14,6 +14,11 @@ CMakeCache.txt
 CMakeFiles/
 /Makefile
 
+# ESP-IDF Component Manager: managed_components/ is a build artifact,
+# reproducible from the idf_component.yml manifests. Not committed.
+# (analogous to node_modules/ — the manifest is the source of truth.)
+managed_components/
+
 # Env
 .env
 .venv/

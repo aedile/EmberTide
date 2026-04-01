@@ -1,7 +1,8 @@
 /**
  * hal_flash.c — LittleFS Flash HAL: Waveshare ESP32-S3-ePaper-1.54 V2
  *
- * Target: ESP32-S3 internal flash via ESP-IDF v5.x esp_vfs_littlefs.
+ * Target: ESP32-S3 internal flash via ESP-IDF v5.x + joltwallet/littlefs
+ * component (fetched via idf_component.yml; header: esp_littlefs.h).
  * Compiled ONLY with idf.py build — NOT in host tests.
  * The host test suite links mock_hal_flash.c instead of this file.
  *
@@ -21,7 +22,10 @@
 
 #include "hal_flash.h"
 
-#include "esp_vfs_littlefs.h"
+/* joltwallet/littlefs — provides esp_vfs_littlefs_conf_t and
+ * esp_vfs_littlefs_register/unregister (same API as old ESP-IDF built-in,
+ * but now lives in the component registry as joltwallet/littlefs). */
+#include "esp_littlefs.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>

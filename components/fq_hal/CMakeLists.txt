@@ -12,7 +12,9 @@ idf_component_register(
     # Phase 16: Real ESP-IDF driver implementations added.
     # hal_epaper.c uses: spi_master (SPI bus), driver/gpio.h, esp_timer, FreeRTOS.
     # hal_gpio.c uses:   driver/gpio.h, esp_timer, FreeRTOS queues/tasks.
-    # hal_flash.c uses:  esp_vfs_littlefs (LittleFS VFS).
+    # hal_flash.c uses:  joltwallet/littlefs (fetched via idf_component.yml).
+    #   Component registry name: joltwallet/littlefs -> component: joltwallet__littlefs
+    #   which provides the esp_vfs_littlefs.h API.
     # hal_audio.c stub: will need driver (LEDC) + esp_timer in Phase 17.
     # hal_sleep.c stub: will need esp_sleep + driver/rtc_io in Phase 17.
     # hal_ble.c stub:   will need bt (NimBLE) in Phase 17.
@@ -21,5 +23,5 @@ idf_component_register(
         driver
         esp_timer
     PRIV_REQUIRES
-        esp_vfs_littlefs
+        joltwallet__littlefs
 )
