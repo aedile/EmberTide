@@ -3,6 +3,11 @@
  *
  * Happy-path contract tests for fq_fb_t operations.
  * Uses TEST_ASSERT_EQUAL_UINT32 for byte comparisons.
+ *
+ * Review finding fixes (phase-7 review):
+ *   A1: test_all_octants_endpoints_set added — 6 sub-cases covering octants
+ *       2–7. Octants 1, 5, and 8 were already covered by the existing diagonal,
+ *       horizontal, and vertical line tests.
  */
 
 #include <inttypes.h>
@@ -135,6 +140,64 @@ static void test_clipped_line_only_inbounds_pixels(void)
     TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 5, 5));
 }
 
+/* ── A1: All 8 Bresenham octants — endpoints set ────────────────────────────
+ *
+ * Octant convention (standard Bresenham):
+ *   Oct 1: dx>0, dy>=0, |dx|>=|dy|  (shallow right-down)   — covered by diagonal
+ *   Oct 2: dx>0, dy>0,  |dy|>|dx|   (steep right-down)
+ *   Oct 3: dx<0, dy>0,  |dy|>|dx|   (steep left-down)
+ *   Oct 4: dx<0, dy>=0, |dx|>=|dy|  (shallow left-down)
+ *   Oct 5: dx=0, dy>0                (straight down)        — covered by vertical
+ *   Oct 6: dx>0, dy<0, |dy|>|dx|    (steep right-up)
+ *   Oct 7: dx<0, dy<0, |dy|>|dx|    (steep left-up)
+ *   Oct 8: dx>0, dy=0                (straight right)       — covered by horizontal
+ *   (Oct with dx<0, |dx|>|dy|, dy<0 = octant 4 reflected)
+ *
+ * Tests here cover octants 2, 3, 4, 6, 7, and the shallow-left-down case.
+ * All sub-cases draw 10-pixel lines well within display bounds and assert both
+ * endpoints are set.
+ */
+static void test_all_octants_endpoints_set(void)
+{
+    fq_fb_t fb;
+
+    /* Oct 2: dx=5, dy=10 → Y-major, right-down (steep right-down) */
+    fq_fb_clear(&fb);
+    fq_fb_draw_line(&fb, 50, 50, 55, 60, 1u);
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 50, 50));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 55, 60));
+
+    /* Oct 3: dx=-5, dy=10 → Y-major, left-down (steep left-down) */
+    fq_fb_clear(&fb);
+    fq_fb_draw_line(&fb, 55, 50, 50, 60, 1u);
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 55, 50));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 50, 60));
+
+    /* Oct 4: dx=-10, dy=5 → X-major, left-down (shallow left-down) */
+    fq_fb_clear(&fb);
+    fq_fb_draw_line(&fb, 70, 50, 60, 55, 1u);
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 70, 50));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 60, 55));
+
+    /* Oct 6: dx=5, dy=-10 → Y-major, right-up (steep right-up) */
+    fq_fb_clear(&fb);
+    fq_fb_draw_line(&fb, 50, 60, 55, 50, 1u);
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 50, 60));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 55, 50));
+
+    /* Oct 7: dx=-5, dy=-10 → Y-major, left-up (steep left-up) */
+    fq_fb_clear(&fb);
+    fq_fb_draw_line(&fb, 55, 60, 50, 50, 1u);
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 55, 60));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 50, 50));
+
+    /* Oct 4 mirror: dx=-10, dy=-5 → X-major, left-up (shallow left-up) */
+    fq_fb_clear(&fb);
+    fq_fb_draw_line(&fb, 70, 55, 60, 50, 1u);
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 70, 55));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)fq_fb_get_pixel(&fb, 60, 50));
+}
+
 /* ── fq_fb_draw_rect ────────────────────────────────────────────────────── */
 static void test_draw_rect_sets_all_four_sides(void)
 {
@@ -242,6 +305,7 @@ int main(void)
     test_diagonal_line_endpoints_set();
     test_diagonal_line_midpoint_set();
     test_clipped_line_only_inbounds_pixels();
+    test_all_octants_endpoints_set();    /* A1: all 8 Bresenham octants */
 
     test_draw_rect_sets_all_four_sides();
     test_draw_rect_interior_not_filled();

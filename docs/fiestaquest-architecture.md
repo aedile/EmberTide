@@ -8,6 +8,8 @@
 
 **v2.6 amendment (Phase 7 visual render primitives):** fq_framebuffer.h/c implemented: fq_fb_t (5000-byte static 1-bit packed, MSB-first, _Static_assert enforced), fq_fb_clear/fill/set_pixel/get_pixel/draw_line (Bresenham all-octants)/draw_rect/fill_rect. fq_sprite.h/c implemented: fq_sprite_t + fq_blit_sprite (OR-blit, 4-edge clip, all 8 x-alignments, widths not multiple of 8). fq_text.h/c implemented: fq_font_t + fq_draw_text (ASCII 0x20-0x7E, int16_t cursor, stops at x>=200) + fq_text_width. Section 7.2 framebuffer type now matches implementation. Three new .c files registered in components/presentation/CMakeLists.txt.
 
+**v2.7 amendment (Phase 7 review findings):** fq_framebuffer_t type name renamed to fq_fb_t throughout the document to match the implementation in fq_framebuffer.h. Function signatures in Section 7.2 updated from int parameters to int16_t parameters (x, y, w, h) to match actual API. draw_line implementation widened dx/dy to int32_t to eliminate signed overflow UB for extreme int16_t coordinate ranges (B4 fix). Section 7.2 framebuffer type and all screen render signatures now fully consistent with Phase 7 implementation.
+
 **v2.5 amendment (Phase 6 training & progression):** training.h/training.c added: pure mini-game FSM (fq_minigame_t 8 bytes, 5 states WAIT/ACTIVE/SUCCESS/FAIL/DONE), score = min(100, uint32_t(hits)*100/targets), difficulty = min(10, level/10), targets = 5 + difficulty*5. progression.h extended: fq_calc_xp_to_next (50*level^2, floor 50 at L0, sentinel 0 at L99) and fq_level_up (class-biased +3 stat/level, saturating at 255). legacy.h/legacy.c added: 32-bit 16-node tier-gated bitmask tree, fq_rebirth (50/60/75% stat retention, class base floor, rebirth_count/legacy_points saturation), fq_legacy_apply_bonuses, fq_calc_rebirth_tokens (level/10 + wins/100, saturated).
 
 **v2.4 amendment (Phase 5 item engine):** fq_combat_fighter_t expanded from 10→24 bytes (equipped_items[5], equipped_count, damage_bonus, damage_mult_pct, dodge_bonus). fq_combat_ctx_t expanded from 28→64 bytes (round_3_f1_hp, round_3_f2_hp, time_loop_used, item_recursion_depth). item_engine.c implemented with 8 representative items, trigger router with role-specific dispatch (ON_DEFEND/ON_DODGE→defender only; ON_ATTACK/ON_CRIT/ON_KILL/ON_DEATH→attacker only; PASSIVE/ON_ROUND_START/ON_ROUND_END→both fighters, defender first per NTR-C1). Section 5.2 updated. No-item PRNG baseline preserved (NTR-A2).
@@ -481,7 +483,7 @@ typedef void (*fq_mg_done_cb_t)(fq_mg_result_t result, void *user_data);
 
 typedef struct {
     fq_mini_game_id_t   game;
-    fq_framebuffer_t    *fb;        // render target
+    fq_fb_t             *fb;        // render target
     fq_mg_done_cb_t     on_done;
     void                *user_data;
 } fq_mg_runner_config_t;
@@ -746,7 +748,7 @@ typedef struct {
 #include "framebuffer.h"
 #include "view_models.h"
 
-void screen_home_render(fq_framebuffer_t *fb, const fq_view_home_t *view);
+void screen_home_render(fq_fb_t *fb, const fq_view_home_t *view);
 ```
 
 Every screen renderer takes a framebuffer pointer and a read-only view model. Pure function of its inputs. Host-compilable.
@@ -791,19 +793,19 @@ Every screen renderer takes a framebuffer pointer and a read-only view model. Pu
 
 typedef struct {
     uint8_t pixels[FQ_FB_SIZE];  // 1-bit packed, MSB first, row-major
-} fq_framebuffer_t;
+} fq_fb_t;
 
 // Set a single pixel. x: 0-199, y: 0-199. color: 0=white, 1=black.
-void fq_fb_set_pixel(fq_framebuffer_t *fb, int x, int y, uint8_t color);
+void fq_fb_set_pixel(fq_fb_t *fb, int16_t x, int16_t y, uint8_t color);
 
 // Get a single pixel.
-uint8_t fq_fb_get_pixel(const fq_framebuffer_t *fb, int x, int y);
+uint8_t fq_fb_get_pixel(const fq_fb_t *fb, int16_t x, int16_t y);
 
 // Clear entire framebuffer (all white).
-void fq_fb_clear(fq_framebuffer_t *fb);
+void fq_fb_clear(fq_fb_t *fb);
 
 // Fill rectangle.
-void fq_fb_fill_rect(fq_framebuffer_t *fb, int x, int y, int w, int h, uint8_t color);
+void fq_fb_fill_rect(fq_fb_t *fb, int16_t x, int16_t y, int16_t w, int16_t h, uint8_t color);
 
 #endif
 ```
@@ -816,7 +818,7 @@ void fq_fb_fill_rect(fq_framebuffer_t *fb, int x, int y, int w, int h, uint8_t c
 
 // Write framebuffer to a 200x200 grayscale PNG.
 // White pixels = 255, black pixels = 0. Scaled up 3x for readability (600x600 output).
-int fq_fb_write_png(const fq_framebuffer_t *fb, const char *path);
+int fq_fb_write_png(const fq_fb_t *fb, const char *path);
 ```
 
 Implementation uses `stb_image_write.h` (single-header, public domain). Scales 3x so the 200x200 image is legible when viewed on a monitor or by an LLM.
@@ -833,7 +835,7 @@ Implementation uses `stb_image_write.h` (single-header, public domain). Scales 3
 #include "framebuffer_to_png.h"
 
 void render_fresh_character_screens(const char *output_dir) {
-    fq_framebuffer_t fb;
+    fq_fb_t fb;
 
     // HOME screen: fresh Bruiser, level 1
     fq_view_home_t home = {

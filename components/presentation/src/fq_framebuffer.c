@@ -20,6 +20,13 @@
  *   future phase once profiling confirms it is necessary.
  *
  * HOST-COMPILABLE — no hal_*.h, no ESP-IDF.
+ *
+ * v2.7 amendment: draw_line dx/dy widened to int32_t to eliminate signed
+ * overflow UB when coordinates span the full int16_t range (e.g., INT16_MIN
+ * to INT16_MAX). The loop variables (cx, cy) and step counters (sx, sy) remain
+ * int32_t throughout to be consistent. abs_dx/abs_dy computed with stdint-safe
+ * arithmetic. An optional early-exit guard is added for lines whose endpoints
+ * are both fully outside the display by a margin of 200 pixels in x and y.
  */
 
 #include "fq_framebuffer.h"
@@ -97,8 +104,16 @@ uint8_t fq_fb_get_pixel(const fq_fb_t *fb, int16_t x, int16_t y)
  *   - Reversed coords (x1 < x0 or y1 < y0): sx/sy handle direction
  *   - Partially or fully out-of-bounds: per-pixel clip via set_pixel
  *
- * All arithmetic stays in int16_t. Coordinates of ±32767 are safe because
- * abs_dx and abs_dy are derived from differences, not from the raw values.
+ * B4/v2.7: dx and dy are computed as int32_t to eliminate signed overflow UB
+ * when endpoints span the full int16_t range (e.g., INT16_MIN to INT16_MAX).
+ * abs_dx/abs_dy are int32_t. The loop cursor (cx, cy) and step vars are
+ * int32_t throughout to avoid repeated int16_t narrowing casts. set_pixel
+ * performs its own int16_t bounds check, so the cast at the call site is safe.
+ *
+ * A5/v2.7: Early-exit guard: if abs_dx > 1000 AND both x-coordinates are
+ * outside [-200, 400) — i.e., the entire line is guaranteed to be far outside
+ * the display in the dominant axis — return early for performance. This avoids
+ * iterating 65000 steps for extreme-coordinate lines with no visible pixels.
  */
 void fq_fb_draw_line(fq_fb_t *fb,
                      int16_t x0, int16_t y0,
@@ -107,42 +122,61 @@ void fq_fb_draw_line(fq_fb_t *fb,
 {
     if (fb == NULL) { return; }
 
-    int16_t dx     = (int16_t)(x1 - x0);
-    int16_t dy     = (int16_t)(y1 - y0);
-    int16_t abs_dx = (dx < 0) ? (int16_t)(-dx) : dx;
-    int16_t abs_dy = (dy < 0) ? (int16_t)(-dy) : dy;
-    int16_t sx     = (dx < 0) ? (int16_t)(-1) : (int16_t)(1);
-    int16_t sy     = (dy < 0) ? (int16_t)(-1) : (int16_t)(1);
-    int16_t cx     = x0;
-    int16_t cy     = y0;
+    /* Widen to int32_t before subtraction to eliminate int16_t overflow UB. */
+    int32_t dx     = (int32_t)x1 - (int32_t)x0;
+    int32_t dy     = (int32_t)y1 - (int32_t)y0;
+    int32_t abs_dx = (dx < 0) ? -dx : dx;
+    int32_t abs_dy = (dy < 0) ? -dy : dy;
+    int32_t sx     = (dx < 0) ? -1 : 1;
+    int32_t sy     = (dy < 0) ? -1 : 1;
+    int32_t cx     = (int32_t)x0;
+    int32_t cy     = (int32_t)y0;
+    int32_t ex     = (int32_t)x1;
+    int32_t ey     = (int32_t)y1;
+
+    /* A5: Early-exit guard for lines entirely outside the display with a large
+     * span. Avoids iterating up to 65535 steps for extreme-coordinate lines
+     * (e.g., INT16_MIN to INT16_MAX) that contribute zero visible pixels.
+     *
+     * Condition: dominant-axis span > 1000 AND both x-endpoints are outside
+     * the range [-200, 400). These bounds are chosen conservatively: any line
+     * with an endpoint inside [-200, 400) in x could partially intersect the
+     * 200-wide display, so it must be processed normally. */
+    if (abs_dx > 1000) {
+        int x0_far = ((int32_t)x0 < -200) || ((int32_t)x0 >= 400);
+        int x1_far = ((int32_t)x1 < -200) || ((int32_t)x1 >= 400);
+        if (x0_far && x1_far) {
+            return;
+        }
+    }
 
     if (abs_dx >= abs_dy) {
         /* X-major (or horizontal): step one pixel in X per iteration. */
-        int16_t err = (int16_t)(abs_dx / 2);
-        while (cx != x1) {
-            fq_fb_set_pixel(fb, cx, cy, color);
-            err = (int16_t)(err - abs_dy);
+        int32_t err = abs_dx / 2;
+        while (cx != ex) {
+            fq_fb_set_pixel(fb, (int16_t)cx, (int16_t)cy, color);
+            err -= abs_dy;
             if (err < 0) {
-                cy  = (int16_t)(cy  + sy);
-                err = (int16_t)(err + abs_dx);
+                cy  += sy;
+                err += abs_dx;
             }
-            cx = (int16_t)(cx + sx);
+            cx += sx;
         }
     } else {
         /* Y-major (or vertical): step one pixel in Y per iteration. */
-        int16_t err = (int16_t)(abs_dy / 2);
-        while (cy != y1) {
-            fq_fb_set_pixel(fb, cx, cy, color);
-            err = (int16_t)(err - abs_dx);
+        int32_t err = abs_dy / 2;
+        while (cy != ey) {
+            fq_fb_set_pixel(fb, (int16_t)cx, (int16_t)cy, color);
+            err -= abs_dx;
             if (err < 0) {
-                cx  = (int16_t)(cx  + sx);
-                err = (int16_t)(err + abs_dy);
+                cx  += sx;
+                err += abs_dy;
             }
-            cy = (int16_t)(cy + sy);
+            cy += sy;
         }
     }
     /* Draw the final endpoint unconditionally (loop exits before it). */
-    fq_fb_set_pixel(fb, x1, y1, color);
+    fq_fb_set_pixel(fb, (int16_t)ex, (int16_t)ey, color);
 }
 
 /* ── fq_fb_draw_rect ──────────────────────────────────────────────────── */
