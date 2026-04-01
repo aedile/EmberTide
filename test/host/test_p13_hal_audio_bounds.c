@@ -6,9 +6,12 @@
  *   - freq_hz == 0 at play              → HAL_AUDIO_ERR_INVALID_FREQ
  *   - play before init                  → HAL_AUDIO_ERR_INIT
  *   - stop before init                  → HAL_AUDIO_OK (stop is always safe)
+ *   - stop after deinit                 → HAL_AUDIO_OK (stop is always safe)
  *   - UINT16_MAX frequency accepted     → HAL_AUDIO_OK (no upper freq bound)
  *   - Double deinit is safe             → no crash
  *   - Re-init after deinit is safe      → HAL_AUDIO_OK
+ *   - Enum value contract locks (A4)    → HAL_AUDIO_OK==0, ERR_INIT==1,
+ *                                          ERR_INVALID_FREQ==2
  */
 
 #include "hal_audio.h"
@@ -40,6 +43,13 @@ void mock_audio_reset(void);
 int main(void)
 {
     mock_audio_reset();
+
+    /* ------------------------------------------------------------------
+     * A4: Enum value contract locks — numeric values must never change.
+     * ------------------------------------------------------------------ */
+    ASSERT_EQ("audio_ok_is_zero",            0, (int)HAL_AUDIO_OK);
+    ASSERT_EQ("audio_err_init_is_one",       1, (int)HAL_AUDIO_ERR_INIT);
+    ASSERT_EQ("audio_err_invalid_freq_is_2", 2, (int)HAL_AUDIO_ERR_INVALID_FREQ);
 
     /* ------------------------------------------------------------------
      * play before init must return ERR_INIT.
@@ -88,6 +98,13 @@ int main(void)
     hal_audio_deinit();
     hal_audio_deinit();
     ASSERT_TRUE("double_deinit_safe", 1);
+
+    /* ------------------------------------------------------------------
+     * B1: stop after deinit must return OK (stop is unconditionally safe).
+     * ------------------------------------------------------------------ */
+    ASSERT_EQ("stop_after_deinit_ok",
+              HAL_AUDIO_OK,
+              hal_audio_stop());
 
     /* ------------------------------------------------------------------
      * Re-init after deinit returns OK.

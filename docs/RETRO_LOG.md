@@ -614,3 +614,55 @@ This value is frozen in `KNOWN_HASH_PINNED` inside `test_p10_combat_sync.c`. Any
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 13 |
 | ADV-P10-01 | DEFERRED | `crc32.h` in `game/` used by `connectivity/` — move to `utils/` pending ADR. | Phase 13 |
 | ADV-P12-01 | ADVISORY | Rule 8: `hal_epaper` and `hal_flash` exist at HAL layer only; `screen_mgr.c` (presentation) wiring deferred — blocked on hardware bring-up. | Phase 13 |
+
+---
+
+## Phase 13 — HAL GPIO + Audio + Sleep (Review Findings)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-13-hal-part2`
+
+### What Was Built (Phase 13 original delivery)
+
+- `components/hal/include/hal_gpio.h` / `components/hal/src/hal_gpio.c` — GPIO button input HAL. `hal_btn_id_t` enum (HAL_BTN_A=0, HAL_BTN_B=1, HAL_BTN_COUNT=2), `hal_gpio_err_t` enum (OK/ERR_INIT/ERR_NULL), `hal_gpio_init/deinit/is_pressed`. ISR posts to queue; 50 ms debounce applied in task context. Interrupt storm guard documented in header.
+- `components/hal/include/hal_audio.h` / `components/hal/src/hal_audio.c` — Piezo/LEDC audio HAL. `hal_audio_err_t` enum (OK/ERR_INIT/ERR_INVALID_FREQ), `hal_audio_init/play/stop/deinit`. Overlapping tone policy: cancel pending esp_timer, reconfigure LEDC before starting new timer.
+- `components/hal/include/hal_sleep.h` / `components/hal/src/hal_sleep.c` — Deep sleep / ext1 wakeup HAL stub.
+- `test/host/mock_hal_gpio.c` / `mock_hal_audio.c` / `mock_hal_sleep.c` — Host RAM mocks. GPIO mock: callback registry, per-button press counters, one-shot pressed latch. Audio mock: records last freq/duration_ms, cumulative play_count.
+- `test/host/test_p13_hal_gpio_bounds.c` / `test_p13_hal_gpio_feature.c` — GPIO bound and feature tests.
+- `test/host/test_p13_hal_audio_bounds.c` / `test_p13_hal_audio_feature.c` — Audio bound and feature tests.
+- `test/host/test_p13_hal_sleep_bounds.c` / `test_p13_hal_sleep_feature.c` — Sleep bound and feature tests.
+
+### Review Findings Addressed (this commit)
+
+#### Blockers (2 resolved)
+
+| ID | Tag | Finding | Resolution |
+|----|-----|---------|-----------|
+| B1 | BLOCKER | `hal_audio_stop()` called after `hal_audio_deinit()` was not explicitly tested — the "stop is always safe" contract could regress undetected | Added test `stop_after_deinit_ok` to `test_p13_hal_audio_bounds.c`: calls `hal_audio_init()`, `hal_audio_deinit()`, asserts `hal_audio_stop() == HAL_AUDIO_OK`. `mock_hal_audio.c` already returns OK unconditionally from `hal_audio_stop()` — no mock change required. |
+| B2 | BLOCKER | `mock_gpio_simulate_press()` had no `s_mock_initialized` guard — calling it before `hal_gpio_init()` incremented the press counter and set the pressed latch, making uninitialized state observable and invalidating test isolation | Added `if (!s_mock_initialized) return;` as the first statement in `mock_gpio_simulate_press()` in `mock_hal_gpio.c`. Added test `simulate_before_init_no_count` to `test_p13_hal_gpio_bounds.c`: `mock_gpio_reset()` → `mock_gpio_simulate_press(HAL_BTN_A)` → asserts press count == 0. |
+
+#### Advisories (6 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 | `hal_gpio_deinit()` return value was not asserted in tests — a future regression changing it to `HAL_GPIO_ERR_INIT` would be silent | Added `deinit_returns_ok` and `double_deinit_ok` assertions to `test_p13_hal_gpio_bounds.c`: init → `ASSERT_EQ("deinit_returns_ok", HAL_GPIO_OK, hal_gpio_deinit())` → `ASSERT_EQ("double_deinit_ok", HAL_GPIO_OK, hal_gpio_deinit())`. |
+| A2 | No test for `mock_gpio_simulate_press()` with invalid `btn_id` — out-of-range calls were silently dropped but never asserted | Added block to `test_p13_hal_gpio_bounds.c`: init → `simulate_press(HAL_BTN_COUNT)` → `simulate_press(255)` → assert both press counts (A and B) remain 0. |
+| A3 | No test for `hal_gpio_is_pressed()` after `deinit` (not reset) — deinit should clear the init flag so the pressed latch cannot be read | Added block to `test_p13_hal_gpio_bounds.c`: `mock_gpio_reset()` → init → `simulate_press(HAL_BTN_A)` → `deinit` → `ASSERT_EQ("is_pressed_after_deinit_zero", 0, hal_gpio_is_pressed(HAL_BTN_A))`. |
+| A4 | No enum value contract locks for GPIO or Audio enums — silent ABI breakage possible | Added `ASSERT_EQ("gpio_ok_is_zero", 0, HAL_GPIO_OK)`, `gpio_err_init_is_one`, `gpio_err_null_is_two` to `test_p13_hal_gpio_bounds.c`. Added `audio_ok_is_zero`, `audio_err_init_is_one`, `audio_err_invalid_freq_is_2` to `test_p13_hal_audio_bounds.c`. |
+| A5 | No post-deinit state inspection test for audio — mock is documented to preserve `last_freq`/`last_duration_ms` across deinit but this was never asserted | Added test block 8 to `test_p13_hal_audio_feature.c`: `mock_audio_reset()` → `hal_audio_init()` → `hal_audio_play(750, 200)` → `hal_audio_deinit()` → assert `last_freq == 750` and `last_duration_ms == 200`. |
+| A6 | No Phase 13 section in `docs/RETRO_LOG.md` | This section. |
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (Gate #1 post-review): all tests passed — 0 failures, 0 warnings.
+- No presentation layer changes — visual regression suite not required.
+
+### Open Advisories (carried forward)
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 14 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 14 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 14 |
+| ADV-P10-01 | DEFERRED | `crc32.h` in `game/` used by `connectivity/` — move to `utils/` pending ADR. | Phase 14 |
+| ADV-P12-01 | ADVISORY | Rule 8: `hal_epaper` and `hal_flash` exist at HAL layer only; `screen_mgr.c` (presentation) wiring deferred — blocked on hardware bring-up. | Phase 14 |

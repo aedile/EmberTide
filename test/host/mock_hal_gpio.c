@@ -73,12 +73,19 @@ uint8_t hal_gpio_is_pressed(hal_btn_id_t btn_id)
 /**
  * mock_gpio_simulate_press — Inject a button press event.
  *
+ * B2 guard: returns immediately if the mock has not been initialised via
+ * hal_gpio_init().  This mirrors the real driver's behaviour where no ISR
+ * is registered until init runs.
+ *
  * Sets the transient pressed latch, increments the press counter, and
  * calls the registered callback (if init was called).  Out-of-range
  * btn_id values are silently ignored.
  */
 void mock_gpio_simulate_press(hal_btn_id_t btn_id)
 {
+    if (!s_mock_initialized) {
+        return;
+    }
     if ((uint32_t)btn_id >= (uint32_t)HAL_BTN_COUNT) {
         return;
     }

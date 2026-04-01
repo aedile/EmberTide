@@ -11,6 +11,8 @@
  *   - mock_audio_reset clears all state
  *   - deinit is safe, re-init is safe
  *   - last_freq and last_duration_ms hold the most recent values
+ *   - post-deinit state inspection: last_freq and last_duration_ms persist
+ *     across deinit (A5)
  */
 
 #include "hal_audio.h"
@@ -112,5 +114,23 @@ int main(void)
 
     hal_audio_deinit();
     ASSERT_TRUE("final_deinit_safe", 1);
+
+    /* ------------------------------------------------------------------
+     * 8. A5: Post-deinit state inspection.
+     *    init → play(750, 200) → deinit.
+     *    The mock preserves last_freq and last_duration_ms across deinit
+     *    so callers can inspect the final played tone after shutdown.
+     * ------------------------------------------------------------------ */
+    mock_audio_reset();
+    hal_audio_init();
+    ASSERT_EQ("a5_play_750hz_ok",
+              (uint32_t)HAL_AUDIO_OK,
+              (uint32_t)hal_audio_play(750u, 200u));
+    hal_audio_deinit();
+    ASSERT_EQ("a5_last_freq_persists_750",     750u,
+              (uint32_t)mock_audio_get_last_freq());
+    ASSERT_EQ("a5_last_duration_persists_200", 200u,
+              (uint32_t)mock_audio_get_last_duration_ms());
+
     return 0;
 }
