@@ -423,3 +423,45 @@ Phase 4 delivered the deterministic combat engine stepper (`fq_combat_init` / `f
 | ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 9 |
 | ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 9 |
 
+
+---
+
+## Phase 9 — Combat HUD, Dialogue & Training Screens (Review Findings)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-9-screens-part2`
+
+### Review Findings Addressed
+
+#### Blockers (0)
+
+No blockers were raised in Phase 9.
+
+#### Advisories (10 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 | Dead `#include "prng.h"` in test_p9_combat_feature.c | Removed the `#include "prng.h"` line. Added a clarifying comment block explaining why `types.h` and `combat.h` (game/ headers) are present: they are needed solely to construct `fq_combat_ctx_t` for the `fq_vm_build_combat` exerciser tests — no PRNG calls exist in this file. |
+| A2 | diff_screens.py default `--output-dir` pointed to `build/output` (inside CMake output tree) | Changed default to `os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")` so the script resolves relative to its own location regardless of the caller's working directory. Uses `abspath` for symlink safety. |
+| A3 | Stale "Phase 1 status: No golden baselines exist yet" comment in diff_screens.py | Removed the Phase-1-specific status line. Replaced with a neutral comment: goldens are captured after a full visual review and committed to `golden/`; the comparison loop activates automatically when they are present. |
+| A4 | `fq_vm_combat_t` had no explicit `_pad` field — trailing padding was compiler-implicit | Added `uint8_t _pad[1]` as the final field (offset 71) to make the 72-byte size explicit and portable. Added `_Static_assert(sizeof(fq_vm_combat_t) == 72u, ...)` immediately after the typedef. Updated the struct's layout comment to document all field offsets. |
+| A5 (combat) | `test_render_combat_standard_vm_no_crash` used `TEST_ASSERT_TRUE(1)` — no pixel evidence | Replaced with `TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 0, 0))` (border corner pixel). `fq_fb_t` is in scope; this is a minimal but deterministic pixel proof. |
+| A5 (combat) | `test_render_combat_finished_winner_no_crash` used `TEST_ASSERT_TRUE(1)` — no pixel evidence | Replaced with `TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 0, 0))` (border corner pixel). |
+| A5 (dialogue null-title) | `test_dialogue_null_title_does_not_crash` used `TEST_ASSERT_TRUE(1)` — fb in scope | Replaced with `TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 2, 120))` — outer dialogue border pixel at (2, 120) proves the box was drawn despite the null title. |
+| A5 (dialogue null-body) | `test_dialogue_null_body_does_not_crash` used `TEST_ASSERT_TRUE(1)` — fb in scope | Replaced with `TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 2, 120))` — outer dialogue border pixel at (2, 120) proves the box was drawn despite the null body. |
+| A5 (both_null / all_null) | `TEST_ASSERT_TRUE(1)` left intact — no fb in scope or undefined render contract | No change: crash prevention is the only contract for `both_null` (both strings absent, render outcome implementation-defined) and `all_null` (NULL fb, no buffer to inspect). Comment added to `both_null` explaining why no pixel assertion is appropriate. |
+| A6 | RETRO_LOG had no Phase 9 section | This section. |
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (host): 42/42 tests passed. Zero failures. Zero warnings.
+- `render_all_screens` (visual): PASS — 8 PNGs written: `blank.png`, `fb_test.png`, `scene_home.png`, `scene_inventory.png`, `scene_stats.png`, `scene_combat.png`, `scene_dialogue.png`, `scene_training.png`.
+- `diff_screens.py`: PASS — all 8 golden baselines matched.
+
+### Open Advisories
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 10 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 10 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 10 |

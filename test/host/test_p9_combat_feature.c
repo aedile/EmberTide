@@ -15,6 +15,11 @@
  *
  * Architecture: presentation/ + main/vm_builder — no direct game/ combat calls.
  * Constitution Priority 0: no float, no malloc, no PRNG.
+ *
+ * Includes from game/ (types.h, combat.h) are required solely to construct the
+ * fq_combat_ctx_t passed to fq_vm_build_combat in test_vm_build_combat_*.
+ * These headers are never called from presentation/ — only from this test's
+ * vm_builder exerciser.
  */
 
 #include <inttypes.h>
@@ -27,7 +32,7 @@
 #include "vm_builder.h"
 #include "types.h"
 #include "combat.h"
-#include "prng.h"
+/* prng.h removed: no PRNG calls exist in this test file. */
 
 /* ---------------------------------------------------------------------------
  * Helper: count set pixels in row y
@@ -76,7 +81,8 @@ static void test_render_combat_standard_vm_no_crash(void)
     vm.f2_class_id = 1u;
 
     fq_render_combat(&fb, &vm);
-    TEST_ASSERT_TRUE(1);
+    /* Border must have been drawn: corner pixel (0,0) is the minimal proof. */
+    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 0, 0));
 }
 
 /* ---------------------------------------------------------------------------
@@ -210,7 +216,8 @@ static void test_render_combat_finished_winner_no_crash(void)
     vm.winner    = 2u;
 
     fq_render_combat(&fb, &vm);
-    TEST_ASSERT_TRUE(1);
+    /* Border must have been drawn: corner pixel (0,0) is the minimal proof. */
+    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 0, 0));
 }
 
 /* ---------------------------------------------------------------------------

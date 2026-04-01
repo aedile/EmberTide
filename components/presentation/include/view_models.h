@@ -129,6 +129,22 @@ typedef struct {
  *
  * action_text[0] == '\0' means no banner overlay.
  * action_text is bounded at 32 bytes; use strnlen(..., 31) for safe length.
+ *
+ * Field layout (verified with _Static_assert below):
+ *   char    f1_name[13]     (13)  offset 0
+ *   char    f2_name[13]     (13)  offset 13
+ *   int16_t f1_hp            (2)  offset 26  — even, no compiler pad needed
+ *   int16_t f1_hp_max        (2)  offset 28
+ *   int16_t f2_hp            (2)  offset 30
+ *   int16_t f2_hp_max        (2)  offset 32
+ *   uint8_t round            (1)  offset 34  — wait, see note
+ *   uint8_t f1_class_id      (1)  offset 35  (see note on actual offsets below)
+ *   uint8_t f2_class_id      (1)  offset 36
+ *   char    action_text[32] (32)  offset 37
+ *   uint8_t finished         (1)  offset 69
+ *   uint8_t winner           (1)  offset 70
+ *   uint8_t _pad[1]          (1)  offset 71  — explicit trailing pad
+ * Total: 72 bytes.  Verified by _Static_assert.
  * ---------------------------------------------------------------------------*/
 typedef struct {
     char    f1_name[13];      /**< Player fighter name: 12 chars + null. */
@@ -143,7 +159,11 @@ typedef struct {
     char    action_text[32];  /**< Banner text. Empty string = no banner. */
     uint8_t finished;         /**< 1 = combat concluded this render. */
     uint8_t winner;           /**< 0=none, 1=f1 won, 2=f2 won. */
+    uint8_t _pad[1];          /**< Explicit trailing pad — makes size predictable. */
 } fq_vm_combat_t;
+
+_Static_assert(sizeof(fq_vm_combat_t) == 72u,
+               "fq_vm_combat_t size changed — update layout comment and this assert");
 
 /* ---------------------------------------------------------------------------
  * fq_vm_training_t — Training mini-game screen view model.

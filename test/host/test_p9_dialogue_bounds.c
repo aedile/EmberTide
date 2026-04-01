@@ -32,29 +32,34 @@ static void test_dialogue_null_fb_does_not_crash(void)
 }
 
 /* ---------------------------------------------------------------------------
- * N9: NULL title — safe, treated as empty
+ * N9: NULL title — safe, treated as empty; border must still be drawn
  * ---------------------------------------------------------------------------*/
 static void test_dialogue_null_title_does_not_crash(void)
 {
     fq_fb_t fb;
     fq_fb_clear(&fb);
     fq_render_dialogue(&fb, NULL, "Some body text", 0u);
-    TEST_ASSERT_TRUE(1);
+    /* Outer dialogue border pixel at (2, 120) proves the box was drawn. */
+    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 2, 120));
 }
 
 /* ---------------------------------------------------------------------------
- * N9: NULL body — safe, treated as empty
+ * N9: NULL body — safe, treated as empty; border must still be drawn
  * ---------------------------------------------------------------------------*/
 static void test_dialogue_null_body_does_not_crash(void)
 {
     fq_fb_t fb;
     fq_fb_clear(&fb);
     fq_render_dialogue(&fb, "TITLE", NULL, 0u);
-    TEST_ASSERT_TRUE(1);
+    /* Outer dialogue border pixel at (2, 120) proves the box was drawn. */
+    TEST_ASSERT_EQUAL_UINT8(1u, fq_fb_get_pixel(&fb, 2, 120));
 }
 
 /* ---------------------------------------------------------------------------
  * Both NULL title and NULL body — safe
+ * (No fb assertions: behaviour when both strings are absent is implementation-
+ * defined — the border may or may not be drawn. Crash prevention is the only
+ * contract here.)
  * ---------------------------------------------------------------------------*/
 static void test_dialogue_both_null_does_not_crash(void)
 {
@@ -66,6 +71,7 @@ static void test_dialogue_both_null_does_not_crash(void)
 
 /* ---------------------------------------------------------------------------
  * All three NULL — no crash
+ * (NULL fb means no framebuffer is in scope; crash prevention only.)
  * ---------------------------------------------------------------------------*/
 static void test_dialogue_all_null_does_not_crash(void)
 {
