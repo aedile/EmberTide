@@ -643,3 +643,7 @@ add_hal_test(test_p16_hal_epaper_feature
 add_hal_test(test_p16_hal_flash_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_flash_feature.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_flash.c")
+
+add_hal_test(test_p16_hal_gpio_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p16_hal_gpio_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_gpio.c")

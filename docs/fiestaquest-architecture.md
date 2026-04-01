@@ -1575,9 +1575,9 @@ inventory and host test coverage at v1.0 release.
 | **presentation/** | Screen: Home | `screen_home.h` | `screen_home.c` | DONE |
 | **presentation/** | Screen: Combat | `screen_combat.h` | `screen_combat.c` | DONE |
 | **presentation/** | Screen: Training | `screen_training.h` | `screen_training.c` | DONE |
-| **hal/** | E-Paper | `hal_epaper.h` | `hal_epaper.c` | STUB |
-| **hal/** | Flash | `hal_flash.h` | `hal_flash.c` | STUB |
-| **hal/** | GPIO | `hal_gpio.h` | `hal_gpio.c` | STUB |
+| **hal/** | E-Paper | `hal_epaper.h` | `hal_epaper.c` | LIVE |
+| **hal/** | Flash | `hal_flash.h` | `hal_flash.c` | LIVE |
+| **hal/** | GPIO | `hal_gpio.h` | `hal_gpio.c` | LIVE |
 | **hal/** | Audio | `hal_audio.h` | `hal_audio.c` | STUB |
 | **hal/** | Sleep | `hal_sleep.h` | `hal_sleep.c` | STUB |
 | **hal/** | BLE | `hal_ble.h` | `hal_ble.c` | STUB |
@@ -1590,6 +1590,10 @@ inventory and host test coverage at v1.0 release.
 
 **STUB** = Public API + host-compilable target stub implemented. Real ESP-IDF
 hardware driver sequences deferred to physical bring-up (blocked on hardware).
+
+**LIVE** = Public API + host-compilable target stub implemented AND failure-injection
+bounds/feature tests fully passing. Phase 16 hardware bring-up validation tests
+cover this module (hal_epaper, hal_flash, hal_gpio).
 
 **FROZEN** = API and wire-format locked. Changes require both devices to be
 reflashed simultaneously. Covered by determinism pin tests in `test_combat_determinism.c`.
