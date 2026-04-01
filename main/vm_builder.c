@@ -28,24 +28,24 @@
 /* ---------------------------------------------------------------------------
  * Internal helper: hp_percent formula.
  *
- * hp_percent = min(100u, (hp_current * 100u) / hp_max)
+ * hp_percent = min(100u, hp_clamped * 100u / hp_max)
+ *
+ * Overflow guard: if hp_current > hp_max we clamp BEFORE multiplying so
+ * that hp_clamped <= hp_max and hp_clamped * 100u <= UINT32_MAX for any
+ * hp_max representable in uint16_t (max 65535 * 100 = 6,553,500 < 2^32).
  *
  * Guards:
- *   - hp_max == 0 → return 0 (no divide-by-zero).
- *   - Result > 100 → clamp to 100 (hp_current > hp_max edge case).
- *
- * Uses uint32_t arithmetic to prevent overflow when hp_current is large.
+ *   - hp_max == 0 → return 0 (divide-by-zero protection).
+ *   - hp_current > hp_max → clamp to hp_max before multiply.
  * ---------------------------------------------------------------------------*/
 static uint8_t calc_hp_percent(uint32_t hp_current, uint32_t hp_max)
 {
     if (hp_max == 0u) {
         return 0u;
     }
-    uint32_t pct = (hp_current * 100u) / hp_max;
-    if (pct > 100u) {
-        pct = 100u;
-    }
-    return (uint8_t)pct;
+    /* Clamp-before-multiply: eliminates overflow for arbitrarily large input. */
+    uint32_t clamped = (hp_current > hp_max) ? hp_max : hp_current;
+    return (uint8_t)(clamped * 100u / hp_max);
 }
 
 /* ---------------------------------------------------------------------------
@@ -92,11 +92,9 @@ void fq_vm_build_inventory(fq_vm_inventory_t *vm, const fq_inventory_t *inv)
         return;
     }
 
-    /* Clamp count to the view model capacity. */
-    uint8_t count = inv->count;
-    if (count > 32u) {
-        count = 32u;
-    }
+    /* Clamp count to the view model capacity (32 slots). */
+    uint8_t count = (inv->count > 32u) ? 32u : inv->count;
+
     vm->item_count    = count;
     vm->cursor_index  = 0u;
     vm->scroll_offset = 0u;
@@ -106,19 +104,19 @@ void fq_vm_build_inventory(fq_vm_inventory_t *vm, const fq_inventory_t *inv)
         const fq_item_def_t *def = fq_item_lookup(inv->items[i]);
         if (def != NULL) {
             strncpy(vm->item_names[i], def->name, 15u);
-            vm->item_names[i][15]  = '\0';
-            vm->item_rarities[i]   = def->rarity;
+            vm->item_names[i][15] = '\0';
+            vm->item_rarities[i]  = def->rarity;
         } else {
-            /* Unknown item: empty name, rarity 0. */
-            vm->item_names[i][0]  = '\0';
-            vm->item_rarities[i]  = 0u;
+            /* Unknown or null item → empty name, rarity 0. */
+            vm->item_names[i][0] = '\0';
+            vm->item_rarities[i] = 0u;
         }
     }
 
-    /* Zero out remaining slots. */
+    /* Zero out remaining (unused) slots. */
     for (uint8_t i = count; i < 32u; i++) {
-        vm->item_names[i][0]  = '\0';
-        vm->item_rarities[i]  = 0u;
+        vm->item_names[i][0] = '\0';
+        vm->item_rarities[i] = 0u;
     }
 }
 
@@ -134,15 +132,15 @@ void fq_vm_build_stats(fq_vm_stats_t *vm, const fq_character_t *ch)
     strncpy(vm->name, ch->name, 12u);
     vm->name[12] = '\0';
 
-    vm->level        = ch->level;
-    vm->strength     = ch->strength;
-    vm->speed        = ch->speed;
-    vm->precision    = ch->precision;
-    vm->intelligence = ch->intelligence;
-    vm->hp_max       = ch->hp_max;
-    vm->xp           = ch->xp;
+    vm->level         = ch->level;
+    vm->strength      = ch->strength;
+    vm->speed         = ch->speed;
+    vm->precision     = ch->precision;
+    vm->intelligence  = ch->intelligence;
+    vm->hp_max        = ch->hp_max;
+    vm->xp            = ch->xp;
     vm->rebirth_count = ch->rebirth_count;
 
-    /* Compute XP required to reach next level using the frozen formula. */
+    /* Compute XP required to reach next level (frozen formula, pure function). */
     vm->xp_to_next = fq_calc_xp_to_next(ch->level);
 }
