@@ -122,22 +122,19 @@ game_err_t fq_app_dispatch(fq_app_ctx_t      *ctx,
 /* ---------------------------------------------------------------------------
  * A4 (Architecture P11): fq_app_ctx_t layout invariant pinned at compile time.
  *
- * Layout (host x86-64 / Xtensa LP64-equivalent with 8-byte pointer alignment):
- *   [0..3]    fq_app_state_t  state          (4 bytes, enum-as-int)
- *   [4..135]  fq_event_bus_t  bus            (132 bytes)
- *   [136..139] uint32_t       tick_count     (4 bytes)
- *   [140..143] padding                       (4 bytes, pointer alignment)
- *   [144..151] fq_character_t *player        (8 bytes, pointer)
- *   [152..159] fq_inventory_t *inventory     (8 bytes, pointer)
- *   [160..223] fq_combat_ctx_t combat        (64 bytes)
- *   [224]      uint8_t         combat_active (1 byte)
- *   [225..231] padding                       (7 bytes, struct end alignment)
- *   total = 232 bytes
+ * Layout varies by pointer width:
+ *   Host (x86-64, 8-byte pointers): 232 bytes
+ *   Target (Xtensa ESP32-S3, 4-byte pointers): 216 bytes
  *
- * If fq_combat_ctx_t, fq_event_bus_t, or pointer width changes, this assert
- * will fire. Update the layout comment and pinned value together.
+ * The struct contains two pointers (player, inventory) whose size differs
+ * between host and target. Both sizes are pinned below.
  * ---------------------------------------------------------------------------*/
+#if __SIZEOF_POINTER__ == 8
 _Static_assert(sizeof(fq_app_ctx_t) == 232u,
-    "fq_app_ctx_t layout changed — update A4 static assert and this comment");
+    "fq_app_ctx_t layout changed (64-bit host)");
+#elif __SIZEOF_POINTER__ == 4
+_Static_assert(sizeof(fq_app_ctx_t) == 216u,
+    "fq_app_ctx_t layout changed (32-bit target)");
+#endif
 
 #endif /* FIESTAQUEST_MAIN_APP_FSM_H */
