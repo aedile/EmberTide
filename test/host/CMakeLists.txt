@@ -572,3 +572,30 @@ add_hal_test(test_p13_hal_audio_feature
 add_hal_test(test_p13_hal_sleep_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p13_hal_sleep_feature.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_sleep.c")
+
+# ---------------------------------------------------------------------------
+# Phase-14: HAL BLE GATT + WiFi Captive Portal (host mocks)
+#
+# Same add_hal_test() pattern as Phase-12/13. Each test executable links its
+# corresponding mock .c file which replaces the target stub at link time.
+# HAL_INCLUDE is already set above — no game/ or presentation/ paths added,
+# preserving the bottom-layer isolation boundary.
+# ---------------------------------------------------------------------------
+
+# Phase-14 Bound tests (Rule 22 Phase A — BOUND RED)
+add_hal_test(test_p14_hal_ble_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p14_hal_ble_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_ble.c")
+
+add_hal_test(test_p14_hal_wifi_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p14_hal_wifi_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_wifi.c")
+
+# Phase-14 Feature tests (Rule 22 Phase B — FEATURE RED)
+add_hal_test(test_p14_hal_ble_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p14_hal_ble_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_ble.c")
+
+add_hal_test(test_p14_hal_wifi_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p14_hal_wifi_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_wifi.c")
