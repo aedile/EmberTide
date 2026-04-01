@@ -1,59 +1,42 @@
-# FIESTAMON — Documentation Index
+# Documentation Index
 
-Platform: **Waveshare ESP32-S3-ePaper-1.54**  
-Framework: **ESP-IDF** (≥ 4.1.0 required; v5.x recommended)  
-Wiki: https://www.waveshare.com/wiki/ESP32-S3-ePaper-1.54
+## Game Design
 
----
+| Document | Description |
+|----------|-------------|
+| [fiestaquest-design-doc.md](fiestaquest-design-doc.md) | Complete game design: data model, combat mechanics, items, training, rebirth, legacy tree |
+| [fiestaquest-architecture.md](fiestaquest-architecture.md) | Technical architecture: layer diagram, module contracts, API signatures, visual test harness |
+| [sprite-map.md](sprite-map.md) | Sprite atlas: pixel coordinates for all 168 character frames, items, tiles, icons |
+| [CREDITS.md](CREDITS.md) | Asset attribution |
 
-## Documents
+## Hardware
 
-| File | Description |
-|------|-------------|
-| [platform-overview.md](platform-overview.md) | MCU specs, peripherals, e-paper specs, hardware revisions |
-| [pin-definitions.md](pin-definitions.md) | Full GPIO pinout with `user_config.h` macros |
-| [esp-idf-setup.md](esp-idf-setup.md) | Toolchain install, sdkconfig, IDF Component Manager, build & flash |
-| [code-patterns.md](code-patterns.md) | `app_main`, power, EPD driver, I2C, FreeRTOS tasks, LVGL v8 boilerplate, deep sleep |
-| [component-reference.md](component-reference.md) | BSP component APIs: `epaper_driver_bsp`, `board_power_bsp`, `button_bsp`, `SensorLib`, `ui_bsp`, `user_app` |
+| Document | Description |
+|----------|-------------|
+| [platform-overview.md](platform-overview.md) | ESP32-S3-ePaper-1.54 specs, peripherals, hardware revisions |
+| [pin-definitions.md](pin-definitions.md) | Full GPIO pinout with macro definitions |
+| [esp-idf-setup.md](esp-idf-setup.md) | Toolchain install, sdkconfig, build and flash |
+| [HARDWARE_QA_CHECKLIST.md](HARDWARE_QA_CHECKLIST.md) | Physical device validation checklist |
 
----
+## Development
 
-## Quick Reference
+| Document | Description |
+|----------|-------------|
+| [code-patterns.md](code-patterns.md) | ESP-IDF patterns: app_main, power, EPD driver, FreeRTOS tasks, deep sleep |
+| [component-reference.md](component-reference.md) | BSP component APIs |
+| [RETRO_LOG.md](RETRO_LOG.md) | Phase retrospectives, advisory tracking, review findings |
+| [backlog/BACKLOG.md](backlog/BACKLOG.md) | 15-phase development backlog (all phases complete) |
 
-### Key Hardware Facts
-- **MCU:** ESP32-S3-PICO-1-N8R8 — 240 MHz dual-core LX7, 8 MB Flash, 8 MB OPI PSRAM
-- **Display:** 1.54" e-paper, 200×200 B&W, SPI2_HOST (`full_refresh = 1` required)
-- **RTC:** PCF85063 on I2C (GPIO47/48), addr 0x51
-- **Sensor:** SHTC3 temp/humidity on I2C, addr 0x70
-- **Audio:** ES8311 codec + MEMS mic + speaker header
-- **Storage:** TF/SD card (SPI), GPIO39/40/41
-- **Power:** USB-C + optional Li-battery with onboard charge management
-- **Variants:** V1 and V2 hardware revisions — match firmware/examples to board label
+## Quick Build Reference
 
-### sdkconfig Key Settings (quick copy)
-```
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
-CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_USB_CDC_ENABLED=y
-```
-
-### Minimal Entry Point
-```cpp
-#include "user_config.h"
-#include "user_app.h"
-
-extern "C" void app_main(void)
-{
-    user_app_init();   // power on, EPD init, buttons
-    // your code here
-}
-```
-
-### Build & Flash
 ```bash
-idf.py set-target esp32s3
-idf.py build
-idf.py -p /dev/tty.usbmodem* flash monitor
+# Host tests (no hardware)
+cd test/host && cmake -B build && cmake --build build && ctest --output-on-failure
+
+# Visual regression
+cd test/visual && cmake -B build && cmake --build build
+./build/render_all_screens && python3 diff_screens.py
+
+# ESP32 target
+. ~/esp/esp-idf/export.sh && idf.py build
 ```
