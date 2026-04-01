@@ -138,9 +138,15 @@ static void test_sizeof_fq_character(void)
 {
     size_t sz = sizeof(fq_character_t);
     printf("[INFO] sizeof(fq_character_t) = %zu\n", sz);
-    /* Must be nonzero and fit within 512 bytes total for the save file */
-    TEST_ASSERT_TRUE(sz > 0u);
-    TEST_ASSERT_TRUE(sz < 512u);
+    /*
+     * Pin the exact size. The _Static_assert in types.h enforces this at
+     * compile time; this test confirms it at runtime (Constitution Priority 4:
+     * specific value assertion required).
+     * Layout: 3xu32(12) + hp_max+wins+losses+equipped[5](16) + name[12](12)
+     *   + 11 uint8s + cosmetic[4] + title+equipped_count+wildcard+_pad[2](5)
+     *   + rival_log[8]*12(96) = 156 bytes.
+     */
+    TEST_ASSERT_EQUAL_UINT32(156u, (uint32_t)sz);
 }
 
 /* -------------------------------------------------------------------------
