@@ -4,6 +4,8 @@
 **Storage:** 8MB flash (LittleFS data partition, no SD card)
 **Architecture:** Fully standalone. No companion app. No external dependencies.
 
+**v5.1 amendment (Phase 6 review):** Section 4.1 rebirth formulas corrected. Stat penalty changed from raw `stat / 2` to percentage-of-gains-above-base: `new_stat = class_base + floor((stat - class_base) * retention_rate / 100)` where retention_rate is 50% default, 60% with Soft Landing, 75% with Phoenix Flame (max of applicable perks). Token formula changed from flat `+1` to `(level / 10) + (wins / 100)`, saturated at uint8_t 255.
+
 ---
 
 ## 1. Core Data Model
@@ -334,12 +336,18 @@ Instant. No timer.
 on_death:
   character.is_dead = true
   character.rebirth_count += 1
-  character.legacy_points += 1
+  // Token formula (v5.1 amendment):
+  //   tokens = (level / 10) + (wins / 100), saturated at uint8_t 255
+  character.legacy_points = sat8_add(legacy_points, tokens)
 
-  // Stat penalty: stats halved, but never below class base values
-  for each stat in [strength, speed, precision, intelligence]:
-    new_val = stat / 2
-    stat = max(new_val, CLASS_BASE[class][stat])
+  // Stat penalty (v5.1 amendment): percentage retained above class base,
+  //   not raw stat halving. retention_rate = max of applicable perks:
+  //     50% default, 60% with Soft Landing, 75% with Phoenix Flame.
+  // new_stat = class_base + floor((stat - class_base) * retention_rate / 100)
+  // stat = max(new_stat, CLASS_BASE[class][stat])
+  //
+  // v5.1 amendment: Retention formula changed to preserve class identity —
+  // percentage applies to gains above base, not raw stat.
 
   // Items, loadout, XP preserved.
   // Training/combat blocked until rebirth.

@@ -1,8 +1,10 @@
 /**
- * progression.c — FiestaQuest Effective Stat Curve implementation.
+ * progression.c — FiestaQuest Progression System implementation.
  *
- * Frozen 256-entry lookup table. No floating-point at runtime.
- * See progression.h for formula, pinned values, and contract.
+ * Section 1: Frozen 256-entry lookup table for fq_effective_stat().
+ * Section 2: XP curve (fq_calc_xp_to_next) and level-up logic (fq_level_up).
+ *
+ * Constitution Priority 0: No floating point. No <time.h>. No external entropy.
  *
  * Table generation (offline Python, not compiled):
  *   import math
@@ -10,6 +12,11 @@
  */
 
 #include "progression.h"
+#include "game_math.h"
+
+/* ---------------------------------------------------------------------------
+ * Section 1: Effective stat lookup table.
+ * ---------------------------------------------------------------------------*/
 
 /**
  * k_effective_stat_table — Frozen logarithmic stat scaling table.
@@ -45,4 +52,80 @@ _Static_assert(sizeof(k_effective_stat_table) == 256u,
 uint8_t fq_effective_stat(uint8_t raw)
 {
     return k_effective_stat_table[raw];
+}
+
+/* ---------------------------------------------------------------------------
+ * Section 2: XP curve and level-up.
+ * ---------------------------------------------------------------------------*/
+
+/**
+ * k_class_stat_gains — Per-class stat gain table for one level-up.
+ *
+ * Layout: [FQ_CLASS_COUNT][4]  where indices are {STR, SPD, PRC, INT}.
+ * Total 3 points per level per class.
+ *
+ * | Class     | STR | SPD | PRC | INT |
+ * |-----------|-----|-----|-----|-----|
+ * | Bruiser   |  2  |  1  |  0  |  0  |
+ * | Trickster |  0  |  2  |  1  |  0  |
+ * | Hex       |  0  |  0  |  1  |  2  |
+ * | Warden    |  1  |  1  |  0  |  1  |
+ * | Wildcard  |  1  |  1  |  1  |  0  |
+ */
+static const uint8_t k_class_stat_gains[FQ_CLASS_COUNT][4] = {
+    /* FQ_CLASS_BRUISER   */ { 2u, 1u, 0u, 0u },
+    /* FQ_CLASS_TRICKSTER */ { 0u, 2u, 1u, 0u },
+    /* FQ_CLASS_HEX       */ { 0u, 0u, 1u, 2u },
+    /* FQ_CLASS_WARDEN    */ { 1u, 1u, 0u, 1u },
+    /* FQ_CLASS_WILDCARD  */ { 1u, 1u, 1u, 0u }
+};
+
+uint32_t fq_calc_xp_to_next(uint8_t current_level)
+{
+    /* Sentinel: level 99 is max — no more leveling. */
+    if (current_level >= 99u) {
+        return 0u;
+    }
+    /* Formula: 50 * level * level.
+     * Level 0 gives 50 * 0 * 0 = 0 — but spec defines floor as 50. */
+    if (current_level == 0u) {
+        return 50u;
+    }
+    return 50u * (uint32_t)current_level * (uint32_t)current_level;
+}
+
+game_err_t fq_level_up(fq_character_t *ch)
+{
+    if (ch == NULL) {
+        return GAME_ERR_NULL_PTR;
+    }
+    /* Cap check: already at max level. */
+    if (ch->level >= 99u) {
+        return GAME_ERR_INVALID;
+    }
+
+    uint32_t xp_needed = fq_calc_xp_to_next(ch->level);
+
+    /* Insufficient XP check. */
+    if (ch->xp < xp_needed) {
+        return GAME_ERR_INVALID;
+    }
+
+    /* Subtract XP cost and increment level. */
+    ch->xp -= xp_needed;
+    ch->level++;
+
+    /* Apply class-biased stat gains (saturating at 255). */
+    uint8_t cls = ch->class_id;
+    if (cls >= (uint8_t)FQ_CLASS_COUNT) {
+        /* Unknown class — apply zero gains defensively. */
+        return GAME_OK;
+    }
+
+    ch->strength     = fq_sat8_add(ch->strength,     k_class_stat_gains[cls][0]);
+    ch->speed        = fq_sat8_add(ch->speed,         k_class_stat_gains[cls][1]);
+    ch->precision    = fq_sat8_add(ch->precision,     k_class_stat_gains[cls][2]);
+    ch->intelligence = fq_sat8_add(ch->intelligence,  k_class_stat_gains[cls][3]);
+
+    return GAME_OK;
 }
