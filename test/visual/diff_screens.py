@@ -5,9 +5,8 @@ diff_screens.py — Visual regression diff for FiestaQuest screen PNGs.
 Compares PNGs in output/ (rendered by render_all_screens) against golden
 baselines in golden/.
 
-Phase 1 status: No golden baselines exist yet. Script exits 0 and prints a
-notice. Phase 7 will populate golden/ with reference PNGs and activate the
-pixel-level comparison logic below.
+Golden baselines were first populated in Phase 7.  The pixel-level comparison
+loop below is active whenever golden/ contains at least one .png file.
 
 Usage:
     python diff_screens.py [--output-dir OUTPUT_DIR] [--golden-dir GOLDEN_DIR]
@@ -29,12 +28,12 @@ def parse_args():
     )
     parser.add_argument(
         "--output-dir",
-        default=os.path.join(os.path.dirname(__file__), "build", "output"),
-        help="Directory containing rendered PNG files (default: build/output/)",
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"),
+        help="Directory containing rendered PNG files (default: output/ relative to this script)",
     )
     parser.add_argument(
         "--golden-dir",
-        default=os.path.join(os.path.dirname(__file__), "golden"),
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden"),
         help="Directory containing golden baseline PNGs (default: golden/)",
     )
     return parser.parse_args()
@@ -54,15 +53,15 @@ def main():
     golden_pngs = collect_pngs(args.golden_dir)
 
     # ---------------------------------------------------------------------------
-    # Phase 1: No golden baselines yet — skip comparison and exit 0.
+    # No golden baselines present — skip comparison and exit 0.
     #
-    # Phase 7 will populate golden/ with reference PNGs captured after the
-    # first full visual review. Once baselines exist, remove the early-return
-    # block below and activate the pixel-level comparison loop.
+    # Goldens are captured after a full visual review and committed to golden/.
+    # Once baselines exist the pixel-level comparison loop below activates
+    # automatically on the next run.
     # ---------------------------------------------------------------------------
     if not golden_pngs:
         print(
-            "diff_screens.py: No golden baselines yet — skipping diff.\n"
+            "diff_screens.py: No golden baselines found — skipping diff.\n"
             "  golden dir : {}\n"
             "  output dir : {}\n"
             "To activate visual regression, add reference PNGs to golden/.".format(
@@ -72,7 +71,7 @@ def main():
         return 0
 
     # ---------------------------------------------------------------------------
-    # Phase 7+: Pixel-level comparison (activated once golden/ is populated).
+    # Pixel-level comparison (active once golden/ is populated).
     #
     # Requires Pillow: pip install Pillow
     # ---------------------------------------------------------------------------

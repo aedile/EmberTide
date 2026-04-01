@@ -4,9 +4,12 @@ idf_component_register(
         "src/fq_framebuffer.c"
         "src/fq_sprite.c"
         "src/fq_text.c"
+        "src/ui_widgets.c"
         "src/screens/screen_home.c"
         "src/screens/screen_inventory.c"
         "src/screens/screen_stats.c"
+        "src/screens/screen_combat.c"
+        "src/screens/screen_training.c"
     INCLUDE_DIRS
         "include"
     # presentation/ does NOT depend on game/ — view model construction happens

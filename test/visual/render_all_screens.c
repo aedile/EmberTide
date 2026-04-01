@@ -1,7 +1,9 @@
 /**
  * render_all_screens.c
  *
- * Visual regression harness — Phase 7 updated version.
+ * Visual regression harness — Phase 9 updated version.
+ *
+ * Phase 9 additions: scene_combat.png, scene_dialogue.png, scene_training.png.
  *
  * B1 (review): Replaced raw uint8_t framebuffer[5000] with fq_fb_t from
  * fq_framebuffer.h. Uses fq_fb_clear/fq_fb_fill instead of raw memset.
@@ -31,6 +33,9 @@
 #include "screens/screen_home.h"
 #include "screens/screen_inventory.h"
 #include "screens/screen_stats.h"
+#include "screens/screen_combat.h"
+#include "screens/screen_training.h"
+#include "ui_widgets.h"
 #include "vm_builder.h"
 #include "types.h"
 
@@ -302,6 +307,79 @@ int main(void)
             return EXIT_FAILURE;
         }
         printf("render_all_screens: output/scene_stats.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 6: scene_combat.png — Round 3, Ember 75/100 HP vs Shadow 40/80.
+     * action_text = "Cleave! -15"
+     * ----------------------------------------------------------------------- */
+    {
+        fq_vm_combat_t vm_combat;
+        memset(&vm_combat, 0, sizeof(vm_combat));
+
+        strncpy(vm_combat.f1_name, "Ember",  sizeof(vm_combat.f1_name)  - 1u);
+        strncpy(vm_combat.f2_name, "Shadow", sizeof(vm_combat.f2_name)  - 1u);
+        vm_combat.f1_hp     = 75;
+        vm_combat.f1_hp_max = 100;
+        vm_combat.f2_hp     = 40;
+        vm_combat.f2_hp_max = 80;
+        vm_combat.round     = 3u;
+        vm_combat.f1_class_id = 0u;  /* BRUISER */
+        vm_combat.f2_class_id = 1u;  /* TRICKSTER */
+        strncpy(vm_combat.action_text, "Cleave! -15",
+                sizeof(vm_combat.action_text) - 1u);
+
+        fq_render_combat(&framebuffer, &vm_combat);
+
+        printf("render_all_screens: writing output/scene_combat.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_combat.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_combat.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 7: scene_dialogue.png — REBIRTH dialogue with YES/NO buttons.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_fb_clear(&framebuffer);
+        /* Draw a simple background first (home screen geometry) so the
+         * dialogue overlay has content beneath it. */
+        fq_fb_draw_rect(&framebuffer, 0, 0,
+                        (int16_t)FQ_FB_WIDTH, (int16_t)FQ_FB_HEIGHT, 1u);
+
+        fq_render_dialogue(&framebuffer, "REBIRTH",
+                           "Your character has fallen. "
+                           "Would you like to be reborn?",
+                           1u);
+
+        printf("render_all_screens: writing output/scene_dialogue.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_dialogue.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_dialogue.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 8: scene_training.png — Speed game, score=70, state=2 (done).
+     * ----------------------------------------------------------------------- */
+    {
+        fq_vm_training_t vm_training;
+        memset(&vm_training, 0, sizeof(vm_training));
+
+        strncpy(vm_training.game_name, "Speed",
+                sizeof(vm_training.game_name) - 1u);
+        vm_training.score      = 70u;
+        vm_training.difficulty = 3u;
+        vm_training.state      = 2u;  /* done */
+
+        fq_render_training(&framebuffer, &vm_training);
+
+        printf("render_all_screens: writing output/scene_training.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_training.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_training.png written successfully\n");
     }
 
     printf("render_all_screens: ALL SCREENS OK\n");

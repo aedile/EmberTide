@@ -3,7 +3,7 @@
  *
  * Translates raw game state (fq_character_t, fq_inventory_t) into
  * presentation-ready view model structs (fq_vm_home_t, fq_vm_inventory_t,
- * fq_vm_stats_t).
+ * fq_vm_stats_t, fq_vm_combat_t).
  *
  * Architecture placement: main/ (application layer).
  *   - This is the ONLY module that includes BOTH game/types.h AND
@@ -15,6 +15,8 @@
  * No floating point. No malloc. Integer-only HP formula with div-zero guard.
  *
  * Host-compilable: no hal_*.h included.
+ *
+ * Phase-9 additions: fq_vm_build_combat().
  */
 
 #ifndef FIESTAQUEST_MAIN_VM_BUILDER_H
@@ -23,6 +25,7 @@
 #include <stdint.h>
 #include "types.h"
 #include "view_models.h"
+#include "combat.h"
 
 /* ---------------------------------------------------------------------------
  * fq_vm_build_home() — Build the home screen view model from a character.
@@ -77,5 +80,27 @@ void fq_vm_build_inventory(fq_vm_inventory_t *vm, const fq_inventory_t *inv);
  * @param ch  Source character. NULL-safe.
  * ---------------------------------------------------------------------------*/
 void fq_vm_build_stats(fq_vm_stats_t *vm, const fq_character_t *ch);
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_build_combat() — Build the combat HUD view model from combat context.
+ *
+ * Extracts HP values from ctx->f1/f2, round from ctx->current_round,
+ * finished/winner from ctx->finished/winner. Fighter names and class IDs
+ * are copied from c1 and c2 respectively.
+ *
+ * action_text is zeroed — the caller fills this after calling this function
+ * (e.g., from the last round result event text).
+ *
+ * NULL-safe: returns immediately if any pointer is NULL.
+ *
+ * @param vm   Output view model. NULL-safe.
+ * @param ctx  Source combat context. NULL-safe.
+ * @param c1   Fighter 1 character (player). NULL-safe.
+ * @param c2   Fighter 2 character (enemy). NULL-safe.
+ * ---------------------------------------------------------------------------*/
+void fq_vm_build_combat(fq_vm_combat_t        *vm,
+                        const fq_combat_ctx_t *ctx,
+                        const fq_character_t  *c1,
+                        const fq_character_t  *c2);
 
 #endif /* FIESTAQUEST_MAIN_VM_BUILDER_H */
