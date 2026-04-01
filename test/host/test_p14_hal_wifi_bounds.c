@@ -46,19 +46,26 @@ const char *mock_wifi_get_last_ssid(void);
         printf("PASS [%s]\n", (label));                                 \
     } while (0)
 
+/*
+ * long_ssid_32: exactly HAL_WIFI_SSID_MAX (32) printable chars + NUL.
+ * strlen == 32 >= HAL_WIFI_SSID_MAX, so the driver must reject it.
+ */
+static const char k_long_ssid_32[33] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+
+/*
+ * long_ssid_250: 250 'X' chars + NUL.  Well over the limit.
+ * Populated via memset at test start — avoids GCC-only range initialiser.
+ */
+static char k_long_ssid_250[251];
+
 int main(void)
 {
-    /*
-     * long_ssid: 32 printable chars (exactly HAL_WIFI_SSID_MAX).
-     * This is >= HAL_WIFI_SSID_MAX when including the NUL, so it must be
-     * rejected. The ESP32 WiFi driver requires ssid < 32 usable chars.
-     */
-    static const char long_ssid_32[33]  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"; /* 32 chars */
-    static const char long_ssid_250[251] = {
-        [0 ... 249] = 'X', [250] = '\0'
-    };
     static const char valid_ssid[] = "FiestaQuest-AP";
     static const char valid_pass[] = "secret123";
+
+    /* Populate 250-char SSID without GCC range-initialiser extension. */
+    memset(k_long_ssid_250, 'X', 250);
+    k_long_ssid_250[250] = '\0';
 
     mock_wifi_reset();
 
@@ -115,14 +122,14 @@ int main(void)
      * ------------------------------------------------------------------ */
     ASSERT_EQ("start_ap_ssid_32_chars_rejected",
               HAL_WIFI_ERR_SSID_TOO_LONG,
-              hal_wifi_start_ap(long_ssid_32));
+              hal_wifi_start_ap(k_long_ssid_32));
 
     /* ------------------------------------------------------------------
      * SSID 250 chars → ERR_SSID_TOO_LONG.
      * ------------------------------------------------------------------ */
     ASSERT_EQ("start_ap_ssid_250_chars_rejected",
               HAL_WIFI_ERR_SSID_TOO_LONG,
-              hal_wifi_start_ap(long_ssid_250));
+              hal_wifi_start_ap(k_long_ssid_250));
 
     /* ------------------------------------------------------------------
      * connect_sta() before init() → ERR_INIT.
@@ -153,7 +160,7 @@ int main(void)
      * ------------------------------------------------------------------ */
     ASSERT_EQ("connect_sta_ssid_too_long",
               HAL_WIFI_ERR_SSID_TOO_LONG,
-              hal_wifi_connect_sta(long_ssid_32, valid_pass));
+              hal_wifi_connect_sta(k_long_ssid_32, valid_pass));
 
     /* ------------------------------------------------------------------
      * Double deinit is safe — no crash, no undefined behaviour.
