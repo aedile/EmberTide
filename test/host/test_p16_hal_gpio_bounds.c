@@ -19,15 +19,16 @@
 #include "hal_gpio.h"
 #include "mock_hal_gpio.h"
 #include <stdint.h>
+#include <stdio.h>
 
 static int g_failures = 0;
 
-#define ASSERT_EQ(actual, expected, label)               \
-    do {                                                 \
-        if ((actual) != (expected)) {                    \
-            g_failures++;                                \
-        }                                                \
-    } while (0)
+#define ASSERT_EQ(label, expected, actual) do { \
+    if ((int)(actual) != (int)(expected)) { \
+        fprintf(stderr, "[FAIL] %s: expected %d, got %d\n", (label), (int)(expected), (int)(actual)); \
+        g_failures++; \
+    } \
+} while (0)
 
 /* Test callbacks — just track call count. */
 static uint32_t s_cb1_count = 0u;
@@ -46,25 +47,25 @@ int main(void)
      * ----------------------------------------------------------------------- */
     mock_gpio_reset();
     err = hal_gpio_init((hal_btn_callback_t)0);
-    ASSERT_EQ(err, HAL_GPIO_ERR_NULL, "B1 NULL callback");
+    ASSERT_EQ("B1 NULL callback", HAL_GPIO_ERR_NULL, err);
 
     /* -----------------------------------------------------------------------
      * B2: is_pressed before init returns 0.
      * ----------------------------------------------------------------------- */
     mock_gpio_reset();
-    ASSERT_EQ(hal_gpio_is_pressed(HAL_BTN_A), 0u, "B2 is_pressed before init");
+    ASSERT_EQ("B2 is_pressed before init", 0u, hal_gpio_is_pressed(HAL_BTN_A));
 
     /* -----------------------------------------------------------------------
      * B3: is_pressed with sentinel value returns 0.
      * ----------------------------------------------------------------------- */
     mock_gpio_reset();
     hal_gpio_init(callback1);
-    ASSERT_EQ(hal_gpio_is_pressed(HAL_BTN_COUNT), 0u, "B3 OOB sentinel");
+    ASSERT_EQ("B3 OOB sentinel", 0u, hal_gpio_is_pressed(HAL_BTN_COUNT));
 
     /* -----------------------------------------------------------------------
      * B4: is_pressed with 255 (far OOB) returns 0.
      * ----------------------------------------------------------------------- */
-    ASSERT_EQ(hal_gpio_is_pressed((hal_btn_id_t)255u), 0u, "B4 OOB 255");
+    ASSERT_EQ("B4 OOB 255", 0u, hal_gpio_is_pressed((hal_btn_id_t)255u));
 
     /* -----------------------------------------------------------------------
      * B5: simulate_press before init is a safe no-op.
@@ -72,8 +73,8 @@ int main(void)
     mock_gpio_reset();
     s_cb1_count = 0u;
     mock_gpio_simulate_press(HAL_BTN_A);  /* must not crash or call callback */
-    ASSERT_EQ(s_cb1_count, 0u, "B5 simulate before init is no-op");
-    ASSERT_EQ(mock_gpio_get_press_count(HAL_BTN_A), 0u, "B5 count still 0");
+    ASSERT_EQ("B5 simulate before init is no-op", 0u, s_cb1_count);
+    ASSERT_EQ("B5 count still 0", 0u, mock_gpio_get_press_count(HAL_BTN_A));
 
     /* -----------------------------------------------------------------------
      * B6: 100 rapid presses all counted (no debounce in mock).
@@ -84,15 +85,15 @@ int main(void)
     for (i = 0u; i < 100u; i++) {
         mock_gpio_simulate_press(HAL_BTN_A);
     }
-    ASSERT_EQ(mock_gpio_get_press_count(HAL_BTN_A), 100u, "B6 100 presses counted");
-    ASSERT_EQ(s_cb1_count, 100u, "B6 callback called 100 times");
+    ASSERT_EQ("B6 100 presses counted",     100u, mock_gpio_get_press_count(HAL_BTN_A));
+    ASSERT_EQ("B6 callback called 100 times", 100u, s_cb1_count);
 
     /* -----------------------------------------------------------------------
      * B7: deinit before init returns OK (no crash).
      * ----------------------------------------------------------------------- */
     mock_gpio_reset();
     err = hal_gpio_deinit();
-    ASSERT_EQ(err, HAL_GPIO_OK, "B7 deinit before init OK");
+    ASSERT_EQ("B7 deinit before init OK", HAL_GPIO_OK, err);
 
     /* -----------------------------------------------------------------------
      * B8: Double init — second callback replaces first.
@@ -103,15 +104,15 @@ int main(void)
     hal_gpio_init(callback1);
     hal_gpio_init(callback2);
     mock_gpio_simulate_press(HAL_BTN_B);
-    ASSERT_EQ(s_cb2_count, 1u, "B8 second callback used after reinit");
-    ASSERT_EQ(s_cb1_count, 0u, "B8 first callback not called after reinit");
+    ASSERT_EQ("B8 second callback used after reinit", 1u, s_cb2_count);
+    ASSERT_EQ("B8 first callback not called after reinit", 0u, s_cb1_count);
 
     /* -----------------------------------------------------------------------
      * B9: get_press_count with OOB id returns 0.
      * ----------------------------------------------------------------------- */
     mock_gpio_reset();
-    ASSERT_EQ(mock_gpio_get_press_count(HAL_BTN_COUNT), 0u, "B9 count OOB safe");
-    ASSERT_EQ(mock_gpio_get_press_count((hal_btn_id_t)255u), 0u, "B9 count 255 safe");
+    ASSERT_EQ("B9 count OOB safe",    0u, mock_gpio_get_press_count(HAL_BTN_COUNT));
+    ASSERT_EQ("B9 count 255 safe",    0u, mock_gpio_get_press_count((hal_btn_id_t)255u));
 
     return g_failures;
 }

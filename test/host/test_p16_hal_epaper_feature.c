@@ -21,16 +21,17 @@
 #include "hal_epaper.h"
 #include "mock_hal_epaper.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 static int g_failures = 0;
 
-#define ASSERT_EQ(actual, expected, label)               \
-    do {                                                 \
-        if ((uint32_t)(actual) != (uint32_t)(expected)) { \
-            g_failures++;                                \
-        }                                                \
-    } while (0)
+#define ASSERT_EQ(label, expected, actual) do { \
+    if ((int)(actual) != (int)(expected)) { \
+        fprintf(stderr, "[FAIL] %s: expected %d, got %d\n", (label), (int)(expected), (int)(actual)); \
+        g_failures++; \
+    } \
+} while (0)
 
 int main(void)
 {
@@ -43,23 +44,23 @@ int main(void)
      * ----------------------------------------------------------------------- */
     mock_epaper_reset();
     err = hal_epaper_init();
-    ASSERT_EQ(err, HAL_EPAPER_OK, "F1 init OK");
-    ASSERT_EQ(mock_epaper_get_flush_count(), 0u, "F1 flush_count starts 0");
+    ASSERT_EQ("F1 init OK", HAL_EPAPER_OK, err);
+    ASSERT_EQ("F1 flush_count starts 0", 0u, mock_epaper_get_flush_count());
 
     /* -----------------------------------------------------------------------
      * F2 + F3: flush returns OK and increments count.
      * ----------------------------------------------------------------------- */
     memset(fb, 0xAB, sizeof(fb));
     err = hal_epaper_flush(fb, HAL_EPAPER_FB_SIZE);
-    ASSERT_EQ(err, HAL_EPAPER_OK, "F2 flush OK");
-    ASSERT_EQ(mock_epaper_get_flush_count(), 1u, "F3 flush_count == 1");
+    ASSERT_EQ("F2 flush OK", HAL_EPAPER_OK, err);
+    ASSERT_EQ("F3 flush_count == 1", 1u, mock_epaper_get_flush_count());
 
     /* -----------------------------------------------------------------------
      * F4: Pixel fidelity — specific bytes preserved in capture buffer.
      * ----------------------------------------------------------------------- */
     captured = mock_epaper_get_buffer();
-    ASSERT_EQ(captured[0],    0xABu, "F4 byte[0] captured");
-    ASSERT_EQ(captured[4999], 0xABu, "F4 last byte captured");
+    ASSERT_EQ("F4 byte[0] captured",    0xABu, captured[0]);
+    ASSERT_EQ("F4 last byte captured",  0xABu, captured[4999]);
 
     /* -----------------------------------------------------------------------
      * F5: Second flush overwrites buffer.
@@ -68,15 +69,15 @@ int main(void)
     fb[100] = 0xCCu;
     hal_epaper_flush(fb, HAL_EPAPER_FB_SIZE);
     captured = mock_epaper_get_buffer();
-    ASSERT_EQ(captured[100], 0xCCu, "F5 overwrite byte[100]");
-    ASSERT_EQ(captured[0],   0x55u, "F5 overwrite byte[0]");
-    ASSERT_EQ(mock_epaper_get_flush_count(), 2u, "F5 flush_count == 2");
+    ASSERT_EQ("F5 overwrite byte[100]", 0xCCu, captured[100]);
+    ASSERT_EQ("F5 overwrite byte[0]",   0x55u, captured[0]);
+    ASSERT_EQ("F5 flush_count == 2",    2u,    mock_epaper_get_flush_count());
 
     /* -----------------------------------------------------------------------
      * F6: sleep() returns OK.
      * ----------------------------------------------------------------------- */
     err = hal_epaper_sleep();
-    ASSERT_EQ(err, HAL_EPAPER_OK, "F6 sleep OK");
+    ASSERT_EQ("F6 sleep OK", HAL_EPAPER_OK, err);
 
     /* -----------------------------------------------------------------------
      * F7: deinit clears initialized state.
@@ -84,17 +85,17 @@ int main(void)
     hal_epaper_deinit();
     memset(fb, 0, sizeof(fb));
     err = hal_epaper_flush(fb, HAL_EPAPER_FB_SIZE);
-    ASSERT_EQ(err, HAL_EPAPER_ERR_INIT, "F7 flush after deinit ERR_INIT");
+    ASSERT_EQ("F7 flush after deinit ERR_INIT", HAL_EPAPER_ERR_INIT, err);
 
     /* -----------------------------------------------------------------------
      * F8: Reinit after deinit restores capability.
      * ----------------------------------------------------------------------- */
     err = hal_epaper_init();
-    ASSERT_EQ(err, HAL_EPAPER_OK, "F8 reinit OK");
-    ASSERT_EQ(mock_epaper_get_flush_count(), 0u, "F8 flush_count reset on init");
+    ASSERT_EQ("F8 reinit OK", HAL_EPAPER_OK, err);
+    ASSERT_EQ("F8 flush_count reset on init", 0u, mock_epaper_get_flush_count());
     memset(fb, 0x77, sizeof(fb));
     err = hal_epaper_flush(fb, HAL_EPAPER_FB_SIZE);
-    ASSERT_EQ(err, HAL_EPAPER_OK, "F8 flush after reinit OK");
+    ASSERT_EQ("F8 flush after reinit OK", HAL_EPAPER_OK, err);
 
     /* -----------------------------------------------------------------------
      * F9: SPI injection — flush_count does not increment.
@@ -104,7 +105,7 @@ int main(void)
     mock_epaper_inject_spi_error();
     uint32_t count_before = mock_epaper_get_flush_count();
     hal_epaper_flush(fb, HAL_EPAPER_FB_SIZE);
-    ASSERT_EQ(mock_epaper_get_flush_count(), count_before, "F9 SPI err no count");
+    ASSERT_EQ("F9 SPI err no count", (int)count_before, (int)mock_epaper_get_flush_count());
 
     /* -----------------------------------------------------------------------
      * F10: Busy timeout — flush_count does not increment.
@@ -114,7 +115,7 @@ int main(void)
     mock_epaper_inject_busy_timeout();
     count_before = mock_epaper_get_flush_count();
     hal_epaper_flush(fb, HAL_EPAPER_FB_SIZE);
-    ASSERT_EQ(mock_epaper_get_flush_count(), count_before, "F10 busy timeout no count");
+    ASSERT_EQ("F10 busy timeout no count", (int)count_before, (int)mock_epaper_get_flush_count());
 
     return g_failures;
 }

@@ -22,16 +22,17 @@
 #include "hal_flash.h"
 #include "mock_hal_flash.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 static int g_failures = 0;
 
-#define ASSERT_EQ(actual, expected, label)               \
-    do {                                                 \
-        if ((int32_t)(actual) != (int32_t)(expected)) {  \
-            g_failures++;                                \
-        }                                                \
-    } while (0)
+#define ASSERT_EQ(label, expected, actual) do { \
+    if ((int)(actual) != (int)(expected)) { \
+        fprintf(stderr, "[FAIL] %s: expected %d, got %d\n", (label), (int)(expected), (int)(actual)); \
+        g_failures++; \
+    } \
+} while (0)
 
 int main(void)
 {
@@ -46,15 +47,15 @@ int main(void)
      * ----------------------------------------------------------------------- */
     mock_flash_reset();
     err = hal_flash_init();
-    ASSERT_EQ(err, HAL_FLASH_OK, "F1 init OK");
+    ASSERT_EQ("F1 init OK", HAL_FLASH_OK, err);
 
     /* -----------------------------------------------------------------------
      * F2: read before write — first boot returns ERR_NOT_FOUND.
      * ----------------------------------------------------------------------- */
     bytes_read = 99u;
     err = hal_flash_read_save(read_buf, sizeof(read_buf), &bytes_read);
-    ASSERT_EQ(err, HAL_FLASH_ERR_NOT_FOUND, "F2 not found on first boot");
-    ASSERT_EQ(bytes_read, 0u, "F11 bytes_read set 0 on NOT_FOUND");
+    ASSERT_EQ("F2 not found on first boot", HAL_FLASH_ERR_NOT_FOUND, err);
+    ASSERT_EQ("F11 bytes_read set 0 on NOT_FOUND", 0u, (uint32_t)bytes_read);
 
     /* -----------------------------------------------------------------------
      * F3: write small payload.
@@ -64,7 +65,7 @@ int main(void)
     write_buf[2] = 0xBE;
     write_buf[3] = 0xEF;
     err = hal_flash_write_save(write_buf, 4u);
-    ASSERT_EQ(err, HAL_FLASH_OK, "F3 write 4 bytes OK");
+    ASSERT_EQ("F3 write 4 bytes OK", HAL_FLASH_OK, err);
 
     /* -----------------------------------------------------------------------
      * F4 + F5: read returns correct count and bytes.
@@ -72,12 +73,12 @@ int main(void)
     memset(read_buf, 0, sizeof(read_buf));
     bytes_read = 0u;
     err = hal_flash_read_save(read_buf, sizeof(read_buf), &bytes_read);
-    ASSERT_EQ(err, HAL_FLASH_OK, "F4 read OK");
-    ASSERT_EQ(bytes_read, 4u, "F4 bytes_read == 4");
-    ASSERT_EQ(read_buf[0], 0xDEu, "F5 byte[0] preserved");
-    ASSERT_EQ(read_buf[1], 0xADu, "F5 byte[1] preserved");
-    ASSERT_EQ(read_buf[2], 0xBEu, "F5 byte[2] preserved");
-    ASSERT_EQ(read_buf[3], 0xEFu, "F5 byte[3] preserved");
+    ASSERT_EQ("F4 read OK", HAL_FLASH_OK, err);
+    ASSERT_EQ("F4 bytes_read == 4", 4u, (uint32_t)bytes_read);
+    ASSERT_EQ("F5 byte[0] preserved", 0xDEu, read_buf[0]);
+    ASSERT_EQ("F5 byte[1] preserved", 0xADu, read_buf[1]);
+    ASSERT_EQ("F5 byte[2] preserved", 0xBEu, read_buf[2]);
+    ASSERT_EQ("F5 byte[3] preserved", 0xEFu, read_buf[3]);
 
     /* -----------------------------------------------------------------------
      * F6: Second write overwrites first.
@@ -88,22 +89,22 @@ int main(void)
     memset(read_buf, 0, sizeof(read_buf));
     bytes_read = 0u;
     hal_flash_read_save(read_buf, sizeof(read_buf), &bytes_read);
-    ASSERT_EQ(bytes_read, 2u, "F6 overwrite size 2");
-    ASSERT_EQ(read_buf[0], 0x11u, "F6 overwrite byte[0]");
-    ASSERT_EQ(read_buf[1], 0x22u, "F6 overwrite byte[1]");
+    ASSERT_EQ("F6 overwrite size 2",   2u,    (uint32_t)bytes_read);
+    ASSERT_EQ("F6 overwrite byte[0]",  0x11u, read_buf[0]);
+    ASSERT_EQ("F6 overwrite byte[1]",  0x22u, read_buf[1]);
 
     /* -----------------------------------------------------------------------
      * F7: Persistence across deinit + reinit.
      * ----------------------------------------------------------------------- */
     hal_flash_deinit();
     err = hal_flash_init();
-    ASSERT_EQ(err, HAL_FLASH_OK, "F7 reinit OK");
+    ASSERT_EQ("F7 reinit OK", HAL_FLASH_OK, err);
     memset(read_buf, 0, sizeof(read_buf));
     bytes_read = 0u;
     err = hal_flash_read_save(read_buf, sizeof(read_buf), &bytes_read);
-    ASSERT_EQ(err, HAL_FLASH_OK, "F7 data persists across reinit");
-    ASSERT_EQ(bytes_read, 2u, "F7 bytes_read preserved");
-    ASSERT_EQ(read_buf[0], 0x11u, "F7 byte[0] persists");
+    ASSERT_EQ("F7 data persists across reinit",  HAL_FLASH_OK, err);
+    ASSERT_EQ("F7 bytes_read preserved",         2u, (uint32_t)bytes_read);
+    ASSERT_EQ("F7 byte[0] persists",             0x11u, read_buf[0]);
 
     /* -----------------------------------------------------------------------
      * F8: deinit then reinit is idempotent.
@@ -111,7 +112,7 @@ int main(void)
     hal_flash_deinit();
     hal_flash_deinit();  /* double deinit safe */
     err = hal_flash_init();
-    ASSERT_EQ(err, HAL_FLASH_OK, "F8 reinit after double deinit OK");
+    ASSERT_EQ("F8 reinit after double deinit OK", HAL_FLASH_OK, err);
 
     /* -----------------------------------------------------------------------
      * F9: Write error — prior data intact.
@@ -127,14 +128,14 @@ int main(void)
     mock_flash_inject_write_error();
     memset(write_buf, 0xFF, sizeof(write_buf));
     err = hal_flash_write_save(write_buf, 8u);
-    ASSERT_EQ(err, HAL_FLASH_ERR_WRITE, "F9 injected write error");
+    ASSERT_EQ("F9 injected write error", HAL_FLASH_ERR_WRITE, err);
     /* Confirm original data is still readable. */
     memset(read_buf, 0, sizeof(read_buf));
     bytes_read = 0u;
     hal_flash_read_save(read_buf, sizeof(read_buf), &bytes_read);
-    ASSERT_EQ(bytes_read, 8u, "F9 prior data bytes intact");
-    ASSERT_EQ(read_buf[0], 0xA0u, "F9 prior data byte[0] intact");
-    ASSERT_EQ(read_buf[7], 0xA7u, "F9 prior data byte[7] intact");
+    ASSERT_EQ("F9 prior data bytes intact",   8u,    (uint32_t)bytes_read);
+    ASSERT_EQ("F9 prior data byte[0] intact", 0xA0u, read_buf[0]);
+    ASSERT_EQ("F9 prior data byte[7] intact", 0xA7u, read_buf[7]);
 
     /* -----------------------------------------------------------------------
      * F10: Mount error injection — one-shot.
@@ -142,10 +143,10 @@ int main(void)
     mock_flash_reset();
     mock_flash_inject_mount_error();
     err = hal_flash_init();
-    ASSERT_EQ(err, HAL_FLASH_ERR_MOUNT, "F10 mount error injection");
+    ASSERT_EQ("F10 mount error injection", HAL_FLASH_ERR_MOUNT, err);
     /* Second init succeeds (one-shot). */
     err = hal_flash_init();
-    ASSERT_EQ(err, HAL_FLASH_OK, "F10 second init OK after one-shot");
+    ASSERT_EQ("F10 second init OK after one-shot", HAL_FLASH_OK, err);
 
     return g_failures;
 }

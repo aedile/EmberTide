@@ -182,7 +182,7 @@ static hal_epaper_err_t epd_wait_busy(void)
 {
     int64_t deadline = esp_timer_get_time() + (int64_t)EPD_BUSY_TIMEOUT_US;
     while (gpio_get_level(EPD_BUSY_PIN) == 1) {
-        if (esp_timer_get_time() > deadline) {
+        if (esp_timer_get_time() >= deadline) {
             ESP_LOGE(TAG, "BUSY pin timeout");
             return HAL_EPAPER_ERR_BUSY_TIMEOUT;
         }
@@ -470,6 +470,8 @@ hal_epaper_err_t hal_epaper_flush(const uint8_t *fb_pixels, uint32_t size)
 
 hal_epaper_err_t hal_epaper_sleep(void)
 {
+    if (!s_initialized) return HAL_EPAPER_OK;
+
     hal_epaper_err_t err;
 
     /* Deep sleep mode 1: retain RAM, ~5 µA. */
