@@ -162,3 +162,68 @@ None. All Phase 1 advisory items resolved inline per PM directive.
 | ADVISORY-ARCH-P3-02 | RESOLVED | `fq_save_result_t` renamed to `fq_save_err_t` with added `FQ_SAVE_ERR_NULL_PTR` variant. Architecture doc amended (v2.2). | Resolved Phase 3 |
 
 ---
+
+## Phase 4 — Combat Engine (Formula Rework)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-4-combat-engine`
+
+### What Was Reworked
+
+Phase 4 delivered the deterministic combat engine stepper (`fq_combat_init` / `fq_combat_step`). A post-delivery review identified 6 blockers and 12 advisories where the implementation diverged from the design doc (Sections 2.1–2.8 and Appendix A). This commit resolves all findings.
+
+### Blocker Fixes Resolved
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| B1 | Initiative formula wrong: d100+eff_speed instead of d6+eff_speed/3 | Changed `fq_combat_init` to use `fq_prng_range(1,6) + eff_speed/3`. State after init unchanged (still 2 PRNG calls → 0x652A09AF for seed=12345). |
+| B2 | Missing precision-tier lookup table for attack rolls | Added `static const uint8_t PRECISION_TABLE[4][6]` in combat.c. Tiers 0–3 with tightening distributions. Applied before damage, after raw d6 roll. |
+| B3 | Dodge upper clamp wrong: 75 instead of 40 | Changed `if (dc > 75) dc = 75` to `if (dc > 40) dc = 40` in both attack resolutions. |
+| B4 | Crit system wrong: separate d100 PRNG call with eff_precision*5 threshold | Removed crit PRNG call entirely. Crit is now `raw_roll >= (6 - tier/2)`. Reduces PRNG calls per attack by 1 when hit occurs. |
+| B5 | Missing defensive reroll | Added B5: after second attacker rolls, first attacker (defending) may defensively reroll if `second_raw >= 5 AND charges > 0`, keeping the lower value. PRNG order: self-rr → def-rr → dodge. |
+| B6 | No round overflow bound test | Added `test_nb6_round_overflow_bound`: verifies `current_round <= FQ_MAX_ROUNDS+1` at all times. |
+
+### Advisory Fixes Resolved
+
+| ID | Finding | Resolution |
+|----|---------|-----------|
+| A1 | Lucky Star d100 → d20 | Changed `consume_lucky_star` from `fq_prng_range(1,100)` to `fq_prng_range(1,20)`. Trigger threshold for Phase 5 is `roll == 1` (5%). |
+| A2 | Missing `_Static_assert` for `fq_round_result_t` | Added `_Static_assert(sizeof(fq_round_result_t) == 18u, ...)` in combat.h. |
+| A3–A7 | Weak `TEST_ASSERT_TRUE(1)` in test_combat_bounds.c | Replaced all loose assertions with exact `TEST_ASSERT_EQUAL_*` and range checks as appropriate. |
+| A8 | Architecture doc divergence in Section 5.1 | Updated `docs/fiestaquest-architecture.md` v2.3: Section 5.1 now reflects actual Phase 4 API contract and formula spec. BLOCKER advisory for Phase 5 item-aware signature added. |
+| A9 | RETRO_LOG missing Phase 4 section | This section. |
+
+### Frozen PRNG Sequences (seed=12345, symmetric fighters str/spd/prec/int=50, hp=100)
+
+**Initiative (2 d6 calls):**
+- F1: d6=3, total=3+(16/3)=3+5=8
+- F2: d6=4, total=4+5=9 → **first_attacker=2 (F2)**
+- PRNG state after init: `0x652A09AF`
+
+**Round 1 (7 PRNG calls: d6, dodge, d6, def-rr-d6, dodge, ls-d20, ls-d20):**
+- F2 atk: raw=5, adj=5, crit(5>=5), dodge=43>24, hit, dmg=13→19. F1 hp→81.
+- F1 atk: raw=6. F2 def-rr→1 (keeps lower). adj=3, not-crit, dodge=69>24, hit, dmg=11. F2 hp→89.
+- LS: d20=1, d20=13.
+- PRNG state after round 1: `0x8CA71E78`
+
+**Full fight outcome:** F2 wins round 10. Final: F1 hp=0, F2 hp=4 (after round-9 overtime).
+
+### sizeof(fq_round_result_t)
+
+**18 bytes.** Layout: 2×int16_t (hp fields) + 14×uint8_t/int8_t (damage, flags) = 18 bytes, no padding.
+
+### Quality Gate Results
+
+- `ctest --output-on-failure`: **21/21 tests passed**
+- `test_combat_bounds`: PASS (19 tests including N_B6 round overflow bound)
+- `test_combat_engine`: PASS (17 tests, all frozen PRNG values updated)
+- All prior phases unaffected (tests 1–19 all PASS)
+
+### Open Advisories
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-ARCH-P4-01 | BLOCKER | Phase 5 item engine must wire item-aware `fq_combat_fighter_t` (equipped_items[], has_lucky_star) into `fq_combat_init`. Current API accepts raw `fq_character_t *`. | Phase 5 |
+| ADV-P4-01 | ADVISORY | `consume_lucky_star` stubs both d20 rolls. Phase 5 must check perk ownership and apply bonus attack (`raw == 1` triggers). | Phase 5 |
+
+---
