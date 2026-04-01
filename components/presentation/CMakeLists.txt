@@ -3,6 +3,7 @@ idf_component_register(
         "src/fq_framebuffer.c"
         "src/fq_sprite.c"
         "src/fq_text.c"
+        "src/asset_data.c"
         "src/ui_widgets.c"
         "src/screens/screen_home.c"
         "src/screens/screen_inventory.c"
@@ -22,4 +23,8 @@ idf_component_register(
     #
     # D-01: renderer.c and renderer.h were empty placeholders with no
     # declarations or implementation. Removed in fix/comprehensive-audit-remediation.
+    #
+    # Phase-18: asset_data.c is the SINGLE TU that includes the generated
+    # sprite/font headers. No other screen .c file may include those headers
+    # directly — all access goes through asset_data.h accessor functions.
 )
