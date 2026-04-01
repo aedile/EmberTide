@@ -11,15 +11,16 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 # ---------------------------------------------------------------------------
-# N5: NO ESP-IDF headers allowed in the host test include paths.
-# This comment is the explicit assertion required by spec-challenger N5.
-# The include_directories() below list ONLY the game component sources.
-# ESP-IDF paths are never added here. Any accidental ESP-IDF include will
-# cause a compile error, not a silent build success.
+# N5: NO ESP-IDF headers in host test include paths.
+#
+# The include_directories() calls below list ONLY the game component sources.
+# ESP-IDF headers are never added here. Any accidental #include of an
+# ESP-IDF header causes a compile error, not a silent build success. This
+# proves that host tests are genuinely isolated from device SDK code.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# N6: Compiler flags — -Wall -Werror mandatory on both host test suites.
+# N6: -Wall -Werror on all host test targets (directory-wide default).
 # ---------------------------------------------------------------------------
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -34,109 +35,88 @@ set(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(GAME_INCLUDE  "${PROJECT_ROOT}/components/game/include")
 set(GAME_SRC_DIR  "${PROJECT_ROOT}/components/game/src")
 
-# Collect game component sources (all .c files under game/src/).
+# Collect all game component .c sources for host linkage.
 file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
 
 # ---------------------------------------------------------------------------
-# Helper macro: add a normal passing host test.
+# add_host_test(<target> <source>)
+#
+# Builds a single-source test executable that links the game component.
+# Adds a CTest entry that expects exit 0.
 # ---------------------------------------------------------------------------
 function(add_host_test target source)
-    cmake_parse_arguments(ARG "NO_GAME_INCLUDES" "" "" ${ARGN})
-
     add_executable(${target} ${source})
-    target_compile_options(${target} PRIVATE -Wall -Werror)
-
-    if(NOT ARG_NO_GAME_INCLUDES)
-        target_include_directories(${target} PRIVATE "${GAME_INCLUDE}")
-        if(GAME_SOURCES)
-            target_sources(${target} PRIVATE ${GAME_SOURCES})
-        endif()
+    target_include_directories(${target} PRIVATE "${GAME_INCLUDE}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
     endif()
-
     add_test(NAME ${target} COMMAND ${target})
 endfunction()
 
 # ---------------------------------------------------------------------------
-# Boundary violation tests (E1, N1a, N1b, N1c)
+# Boundary violation checks (E1, N1a, N1b, N1c)
 #
-# Architecture requires:
-#   - game/      must NOT include hal_*.h        (E1)
-#   - presentation/ must NOT include hal_*.h     (N1a)
-#   - game/      must NOT include presentation   (N1b)
-#   - connectivity/ must NOT include game/       (N1c)
+# Architecture rules enforced here:
+#   E1  : game/      MUST NOT include hal_*.h
+#   N1a : presentation/ MUST NOT include hal_*.h
+#   N1b : game/      MUST NOT include presentation headers
+#   N1c : connectivity/ MUST NOT include game/ headers
 #
-# Strategy: use CMake's try_compile() at configure time to attempt to compile
-# each boundary-violating source with NO relevant include path. Each attempt
-# MUST fail to compile (result = FALSE). If try_compile succeeds, a hard
-# FATAL_ERROR is raised — the boundary is broken.
-#
-# This provides the WILL_FAIL semantics without polluting the build targets.
+# Each check uses try_compile() at CMake configure time with NO include paths
+# for the forbidden header. A compile failure (expected) means the boundary
+# holds. A compile success triggers a FATAL_ERROR and stops the build.
 # ---------------------------------------------------------------------------
-
-# Scratch directory for try_compile artefacts.
 set(BOUNDARY_TMP "${CMAKE_BINARY_DIR}/boundary_checks")
 
-macro(check_boundary_violation label source_file)
-    message(STATUS "Checking boundary violation: ${label}")
+macro(assert_compile_fails label source_file)
+    message(STATUS "Checking boundary: ${label}")
     try_compile(
         _${label}_compiled
         "${BOUNDARY_TMP}/${label}"
         "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}"
-        CMAKE_FLAGS
-            "-DCMAKE_C_STANDARD=11"
+        CMAKE_FLAGS "-DCMAKE_C_STANDARD=11"
     )
     if(_${label}_compiled)
         message(FATAL_ERROR
-            "BOUNDARY VIOLATION DETECTED: ${label}\n"
-            "The file '${source_file}' compiled successfully — "
-            "this means a forbidden header is reachable. "
-            "Fix the CMake include paths to restore the architecture boundary.")
+            "BOUNDARY VIOLATION: ${label}\n"
+            "  '${source_file}' compiled successfully — a forbidden header "
+            "is reachable. Fix the CMake include paths to restore the boundary.")
     else()
-        message(STATUS "  ${label}: OK — compile failed as expected (boundary holds)")
+        message(STATUS "  ${label}: OK (compile failed as expected)")
     endif()
 endmacro()
 
-# E1: game/ must not include hal_*.h
-check_boundary_violation(E1_game_no_hal
-    "bound_e1_game_includes_hal.c")
-
-# N1a: presentation/ must not include hal_*.h
-check_boundary_violation(N1a_presentation_no_hal
-    "bound_n1a_presentation_includes_hal.c")
-
-# N1b: game/ must not include presentation headers
-check_boundary_violation(N1b_game_no_presentation
-    "bound_n1b_game_includes_presentation.c")
-
-# N1c: connectivity/ must not include game/ headers
-check_boundary_violation(N1c_connectivity_no_game
-    "bound_n1c_connectivity_includes_game.c")
+assert_compile_fails(E1_game_no_hal      "bound_e1_game_includes_hal.c")
+assert_compile_fails(N1a_pres_no_hal     "bound_n1a_presentation_includes_hal.c")
+assert_compile_fails(N1b_game_no_pres    "bound_n1b_game_includes_presentation.c")
+assert_compile_fails(N1c_conn_no_game    "bound_n1c_connectivity_includes_game.c")
 
 # ---------------------------------------------------------------------------
-# E2: CTest failure escalation — proves ctest returns non-zero on failure.
-# This is a runtime test (not compile-time) marked WILL_FAIL TRUE.
+# E2: CTest failure escalation
+#
+# This test MUST exit non-zero. WILL_FAIL TRUE tells ctest to report it as
+# "Passed" only when the executable returns non-zero. Proves that the CI
+# pipeline correctly detects failures and does not generate false greens.
 # ---------------------------------------------------------------------------
 add_executable(bound_e2_always_fails
     "${CMAKE_CURRENT_SOURCE_DIR}/bound_e2_always_fails.c")
-target_compile_options(bound_e2_always_fails PRIVATE -Wall -Werror)
 add_test(NAME bound_e2_always_fails COMMAND bound_e2_always_fails)
 set_tests_properties(bound_e2_always_fails PROPERTIES WILL_FAIL TRUE)
 
 # ---------------------------------------------------------------------------
-# N4: Partition arithmetic validation.
-# PARTITIONS_CSV_PATH is injected as a compile-time macro.
+# N4: Partition arithmetic validation
+#
+# PARTITIONS_CSV_PATH injected at compile time. Validates:
+#   - No partition end address exceeds 0x800000 (8 MiB flash).
+#   - No two partitions overlap.
+#   - Total partition sizes fit within 8 MiB.
 # ---------------------------------------------------------------------------
-set(PARTITIONS_CSV "${PROJECT_ROOT}/partitions.csv")
 add_executable(test_partitions "${CMAKE_CURRENT_SOURCE_DIR}/test_partitions.c")
-target_compile_options(test_partitions PRIVATE -Wall -Werror)
 target_compile_definitions(test_partitions PRIVATE
-    PARTITIONS_CSV_PATH="${PARTITIONS_CSV}")
+    PARTITIONS_CSV_PATH="${PROJECT_ROOT}/partitions.csv")
 add_test(NAME test_partitions COMMAND test_partitions)
 
 # ---------------------------------------------------------------------------
-# PHASE B — FEATURE TESTS (happy-path)
+# Feature tests (happy-path)
 # ---------------------------------------------------------------------------
-
-# Sanity test: 1 == 1.
-add_host_test(test_sanity
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sanity.c")
+add_host_test(test_sanity "${CMAKE_CURRENT_SOURCE_DIR}/test_sanity.c")

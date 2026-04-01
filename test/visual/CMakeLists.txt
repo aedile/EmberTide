@@ -11,7 +11,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 # ---------------------------------------------------------------------------
-# N6: -Wall -Werror mandatory on all host test executables.
+# N6: -Wall -Werror on all visual test targets (directory-wide default).
 # ---------------------------------------------------------------------------
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -28,15 +28,21 @@ set(GAME_SRC_DIR   "${PROJECT_ROOT}/components/game/src")
 set(PRES_INCLUDE   "${PROJECT_ROOT}/components/presentation/include")
 set(PRES_SRC_DIR   "${PROJECT_ROOT}/components/presentation/src")
 
-# Collect sources (game + presentation, minus screen_mgr which is device-only).
+# Collect sources. screen_mgr.c is device-only (calls hal_epaper) —
+# excluded here to keep the visual harness host-compilable.
 file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
 file(GLOB PRES_SOURCES "${PRES_SRC_DIR}/*.c")
-
-# Exclude screen_mgr.c — it calls hal_epaper (device only, not host-compilable).
 list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\\.c$")
 
 # ---------------------------------------------------------------------------
-# render_all_screens executable
+# render_all_screens
+#
+# Renders every screen to an in-memory 1-bit framebuffer and writes PNGs
+# to output/ for visual regression review. Phase 1: blank.png only.
+#
+# Compile flags note: stb_image_write.h triggers -Wsign-conversion and
+# -Wunused-function in some compiler versions — suppressed for stb only.
+# All project-authored code is still compiled at full -Wall -Werror.
 # ---------------------------------------------------------------------------
 add_executable(render_all_screens
     "${CMAKE_CURRENT_SOURCE_DIR}/render_all_screens.c"
@@ -45,23 +51,19 @@ add_executable(render_all_screens
 )
 
 target_include_directories(render_all_screens PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}"        # for vendors/stb_image_write.h
+    "${CMAKE_CURRENT_SOURCE_DIR}"   # resolves vendors/stb_image_write.h
     "${GAME_INCLUDE}"
     "${PRES_INCLUDE}"
 )
 
 target_compile_options(render_all_screens PRIVATE
     -Wall -Werror
-    # stb_image_write uses some patterns that trigger -Wsign-conversion and
-    # -Wunused-function in some GCC versions. Suppress only those two.
     -Wno-sign-conversion
     -Wno-unused-function
 )
 
-# ---------------------------------------------------------------------------
-# CTest: running render_all_screens must exit 0.
-# The test changes directory to the build root so output/ is written there.
-# ---------------------------------------------------------------------------
+# CTest: render_all_screens must exit 0 and write output/blank.png.
+# Working directory is the build root so output/ lands inside build/.
 add_test(NAME render_all_screens
          COMMAND render_all_screens
          WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
