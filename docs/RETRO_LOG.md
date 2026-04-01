@@ -517,3 +517,51 @@ This value is frozen in `KNOWN_HASH_PINNED` inside `test_p10_combat_sync.c`. Any
 
 - `ctest --output-on-failure` (Gate #2 pre-merge): **45/45 tests passed** — 0 failures, 0 warnings.
 - No presentation layer changes — visual regression suite not required.
+
+---
+
+## Phase 11 — Application Event Loop (Review Advisory Resolution)
+
+**Date:** 2026-03-31
+**Branch:** `feat/phase-11-event-loop`
+
+### What Was Built (Phase 11 original delivery)
+
+- `main/event_bus.h` / `main/event_bus.c` — statically-allocated 16-slot ring-buffer event bus. `overflow_count` saturates at UINT8_MAX. NULL-safe API. No heap, no globals.
+- `main/app_fsm.h` / `main/app_fsm.c` — root application state machine with 11 states (BOOT through SETTINGS). `fq_app_dispatch()` processes one event per call. PRNG isolation contract: `combat.rng` only touched inside `FQ_STATE_BATTLE` with `combat_active==1`.
+- `test/host/test_p11_bus_bounds.c` — bound tests for event bus (NULL guards, overflow drop, ring wraparound, double-init).
+- `test/host/test_p11_fsm_bounds.c` — bound tests for FSM (NULL ctx/evt, BOOT isolation, ghost events, PRNG isolation, N-unhandled-event persistence).
+- `test/host/test_p11_bus_feature.c` — feature tests for bus (full round-trip FIFO, pending count, init clear).
+- `test/host/test_p11_fsm_feature.c` — feature tests for all 12 defined state transitions.
+
+### Review Advisories Addressed (this commit)
+
+| ID | Tag | Finding | Resolution |
+|----|-----|---------|-----------|
+| QA-P11-01 | ADVISORY | `overflow_count` saturation at UINT8_MAX not tested — 256 posts to full queue could expose a wrap-to-0 regression | Added `A1 (QA P11-01)` test block to `test_p11_bus_bounds.c`: fills queue (16 events), posts 256 more, asserts `overflow_count == 255` (UINT8_MAX, not 0), asserts `pending == 16` (queue unchanged). Uses `uint16_t` loop counter to reach 256 iterations safely. |
+| QA-P11-02 | ADVISORY | `tick_count` not incremented — `fq_app_dispatch` had no `FQ_EVT_TIMER_TICK` handler; header contract said it fires in ALL states | Added `TIMER_TICK` pre-switch guard in `fq_app_dispatch()`: `if (evt->id == FQ_EVT_TIMER_TICK) { ctx->tick_count++; }` placed before the state switch. Added test `A2 (QA P11-02)` to `test_p11_fsm_feature.c`: init ctx (TITLE state), dispatch TIMER_TICK twice, assert `tick_count == 2`. |
+| QA-P11-03 | ADVISORY | `combat_active=0` guard path in `FQ_STATE_BATTLE` not directly tested — could silently pass even if the guard were removed | Added `A3 (QA P11-03)` test block to `test_p11_fsm_bounds.c`: navigates to BATTLE state (combat_active=1), forces combat_active=0, dispatches COMBAT_ROUND_COMPLETE, asserts state stays BATTLE, combat_active stays 0, PRNG state unchanged. |
+| ARCH-P11-04 | ADVISORY | No compile-time size pins on `fq_event_t`, `fq_event_bus_t`, or `fq_app_ctx_t` — silent layout changes could corrupt the wire format or NVS | Added `_Static_assert(sizeof(fq_event_t) == 8u, ...)` and `_Static_assert(sizeof(fq_event_bus_t) == 132u, ...)` to `main/event_bus.h`. Added `_Static_assert(sizeof(fq_app_ctx_t) == 232u, ...)` to `main/app_fsm.h`. Each assert has a layout comment documenting all field offsets. Sizes measured on host (x86-64 / AppleClang 17) and verified to match Xtensa LP64-equivalent layout. |
+| DOCS-P11-05 | ADVISORY | `docs/RETRO_LOG.md` had no Phase 11 section | This section. |
+
+### Pinned Struct Sizes
+
+| Type | Size (bytes) | Key fields |
+|------|-------------|------------|
+| `fq_event_t` | 8 | `fq_event_id_t id` (4) + `uint32_t data` (4) |
+| `fq_event_bus_t` | 132 | `events[16]` (128) + head/tail/count/overflow_count (4×1) |
+| `fq_app_ctx_t` | 232 | `state` (4) + `bus` (132) + `tick_count` (4) + pad (4) + 2 ptrs (16) + `combat` (64) + `combat_active` (1) + pad (7) |
+
+### Quality Gate Results
+
+- `ctest --output-on-failure` (Gate #2 pre-merge): **49/49 tests passed** — 0 failures, 0 warnings.
+- No presentation layer changes — visual regression suite not required for this advisory-resolution commit.
+
+### Open Advisories (carried forward)
+
+| ID | Tag | Description | TTL |
+|----|-----|-------------|-----|
+| ADVISORY-BAL-P5-01 | ADVISORY | Vampire Fang heal (+5 HP on kill) dead in 1v1. Full utility deferred to multi-fight mode. | Phase 12 |
+| ADVISORY-ARCH-P5-01 | DEFERRED | Duplicate item guard not enforced. Deferred to inventory system phase. | Phase 12 |
+| ADVISORY-BAL-001 | ADVISORY | Effective stat curve granularity — 10K-fight Monte Carlo validation deferred. | Phase 12 |
+| ADV-P10-01 | DEFERRED | `crc32.h` in `game/` used by `connectivity/` — move to `utils/` pending ADR. | Phase 12 |

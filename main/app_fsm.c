@@ -57,6 +57,13 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         return GAME_ERR_NULL_PTR;
     }
 
+    /* QA P11-02: TIMER_TICK increments tick_count in ALL states.
+     * This runs before the state switch so it fires regardless of current state.
+     * Constitution Priority 0: no PRNG touched here. */
+    if (evt->id == FQ_EVT_TIMER_TICK) {
+        ctx->tick_count++;
+    }
+
     switch (ctx->state) {
 
         /* -------------------------------------------------------------------

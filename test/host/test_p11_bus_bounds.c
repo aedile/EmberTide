@@ -159,6 +159,37 @@ int main(void)
     TEST_ASSERT_EQUAL_UINT8(0u, reinit_bus.head);
     TEST_ASSERT_EQUAL_UINT8(0u, reinit_bus.tail);
 
+    /* -----------------------------------------------------------------------
+     * A1 (QA P11-01): overflow_count saturation at UINT8_MAX.
+     *
+     * Strategy:
+     *   1. Fill the queue with 16 events.
+     *   2. Post 256 more events — each must be dropped and overflow_count
+     *      must saturate at 255 (UINT8_MAX), not wrap back to 0.
+     *   3. Assert pending is still 16 (no slots consumed by overflow posts).
+     * ----------------------------------------------------------------------- */
+    fq_event_bus_t sat_bus;
+    fq_event_bus_init(&sat_bus);
+
+    /* Step 1: Fill queue completely */
+    for (uint8_t i = 0u; i < FQ_EVENT_QUEUE_SIZE; i++) {
+        uint8_t rc = fq_event_bus_post(&sat_bus, FQ_EVT_TIMER_TICK, (uint32_t)i);
+        TEST_ASSERT_EQUAL_UINT8(1u, rc);
+    }
+    TEST_ASSERT_EQUAL_UINT8(FQ_EVENT_QUEUE_SIZE, fq_event_bus_pending(&sat_bus));
+    TEST_ASSERT_EQUAL_UINT8(0u, sat_bus.overflow_count);
+
+    /* Step 2: Post 256 overflow events — overflow_count must saturate at 255 */
+    for (uint16_t i = 0u; i < 256u; i++) {
+        uint8_t rc = fq_event_bus_post(&sat_bus, FQ_EVT_BTN_A_PRESS, (uint32_t)i);
+        TEST_ASSERT_EQUAL_UINT8(0u, rc);  /* all must be dropped */
+    }
+    /* Saturation: must be UINT8_MAX (255), not 0 (wrap) */
+    TEST_ASSERT_EQUAL_UINT8(255u, sat_bus.overflow_count);
+
+    /* Step 3: Queue still holds only the original 16 events */
+    TEST_ASSERT_EQUAL_UINT8(FQ_EVENT_QUEUE_SIZE, fq_event_bus_pending(&sat_bus));
+
     printf("test_p11_bus_bounds: PASS\n");
     return 0;
 }

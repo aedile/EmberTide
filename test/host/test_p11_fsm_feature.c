@@ -250,6 +250,32 @@ int main(void)
     TEST_ASSERT_EQUAL_INT(10, (int)FQ_STATE_SETTINGS);
     TEST_ASSERT_EQUAL_INT(11, (int)FQ_STATE_COUNT);
 
+    /* -----------------------------------------------------------------------
+     * A2 (QA P11-02): tick_count increments on TIMER_TICK in ALL states.
+     *
+     * Init ctx, dispatch TIMER_TICK twice, assert tick_count == 2.
+     * Fires in TITLE state to verify the ALL-STATES contract from the header.
+     * ----------------------------------------------------------------------- */
+    fq_app_ctx_t tick_ctx;
+    fq_character_t tick_player;
+    fq_inventory_t tick_inv;
+    memset(&tick_player, 0, sizeof(tick_player));
+    memset(&tick_inv,    0, sizeof(tick_inv));
+    fq_app_init(&tick_ctx, &tick_player, &tick_inv);
+    /* After init we are in TITLE, tick_count == 0 */
+    TEST_ASSERT_EQUAL_UINT32(0u, tick_ctx.tick_count);
+
+    fq_event_t tick_evt = { FQ_EVT_TIMER_TICK, 0u };
+    game_err_t tick_err;
+
+    tick_err = fq_app_dispatch(&tick_ctx, &tick_evt);
+    TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)tick_err);
+    TEST_ASSERT_EQUAL_UINT32(1u, tick_ctx.tick_count);
+
+    tick_err = fq_app_dispatch(&tick_ctx, &tick_evt);
+    TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)tick_err);
+    TEST_ASSERT_EQUAL_UINT32(2u, tick_ctx.tick_count);
+
     printf("test_p11_fsm_feature: PASS\n");
     return 0;
 }

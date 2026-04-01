@@ -140,4 +140,28 @@ uint8_t fq_event_bus_pop(fq_event_bus_t *bus, fq_event_t *out);
  */
 uint8_t fq_event_bus_pending(const fq_event_bus_t *bus);
 
+/* ---------------------------------------------------------------------------
+ * A4 (Architecture P11): Layout invariants pinned at compile time.
+ *
+ * fq_event_t:
+ *   [0..3] fq_event_id_t id  (4 bytes, enum stored as int)
+ *   [4..7] uint32_t data     (4 bytes)
+ *   total = 8 bytes
+ *
+ * fq_event_bus_t:
+ *   [0..127]  fq_event_t events[16]  (16 * 8 = 128 bytes)
+ *   [128]     uint8_t head           (1 byte)
+ *   [129]     uint8_t tail           (1 byte)
+ *   [130]     uint8_t count          (1 byte)
+ *   [131]     uint8_t overflow_count (1 byte)
+ *   total = 132 bytes
+ *
+ * Any compiler-layout change breaks these asserts — update the comment and
+ * the pinned values together if the struct ever changes intentionally.
+ * ---------------------------------------------------------------------------*/
+_Static_assert(sizeof(fq_event_t)     ==   8u,
+    "fq_event_t layout changed — update A4 static assert and this comment");
+_Static_assert(sizeof(fq_event_bus_t) == 132u,
+    "fq_event_bus_t layout changed — update A4 static assert and this comment");
+
 #endif /* FIESTAQUEST_MAIN_EVENT_BUS_H */

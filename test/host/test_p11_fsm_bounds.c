@@ -152,6 +152,47 @@ int main(void)
         TEST_ASSERT_EQUAL_INT((int)FQ_STATE_INVENTORY, (int)persistent_ctx.state);
     }
 
+    /* -----------------------------------------------------------------------
+     * A3 (QA P11-03): combat_active=0 guard — COMBAT_ROUND_COMPLETE in
+     * BATTLE state with combat_active=0 must NOT transition state.
+     *
+     * Expectation:
+     *   - state stays FQ_STATE_BATTLE
+     *   - combat_active stays 0
+     *   - PRNG state (combat.rng.state) is unchanged
+     * ----------------------------------------------------------------------- */
+    fq_app_ctx_t guard_ctx;
+    fq_character_t guard_player;
+    fq_inventory_t guard_inv;
+    memset(&guard_player, 0, sizeof(guard_player));
+    memset(&guard_inv,    0, sizeof(guard_inv));
+    fq_app_init(&guard_ctx, &guard_player, &guard_inv);
+
+    /* Navigate: TITLE → HOME → BATTLE_SETUP → BATTLE */
+    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BTN_A_PRESS,   0u });
+    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BTN_B_PRESS,   0u });
+    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BLE_CONNECTED, 0u });
+    TEST_ASSERT_EQUAL_INT((int)FQ_STATE_BATTLE, (int)guard_ctx.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, guard_ctx.combat_active);
+
+    /* Force combat_active = 0 to simulate the guard condition */
+    guard_ctx.combat_active = 0u;
+
+    /* Record PRNG state before the guarded dispatch */
+    uint32_t rng_before = guard_ctx.combat.rng.state;
+
+    /* Dispatch COMBAT_ROUND_COMPLETE — must be a no-op when combat_active==0 */
+    fq_event_t round_done = { FQ_EVT_COMBAT_ROUND_COMPLETE, 0u };
+    err = fq_app_dispatch(&guard_ctx, &round_done);
+    TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)err);
+
+    /* State must remain BATTLE */
+    TEST_ASSERT_EQUAL_INT((int)FQ_STATE_BATTLE, (int)guard_ctx.state);
+    /* combat_active must remain 0 */
+    TEST_ASSERT_EQUAL_UINT8(0u, guard_ctx.combat_active);
+    /* PRNG state must be unchanged — no combat logic ran */
+    TEST_ASSERT_EQUAL_UINT32(rng_before, guard_ctx.combat.rng.state);
+
     printf("test_p11_fsm_bounds: PASS\n");
     return 0;
 }
