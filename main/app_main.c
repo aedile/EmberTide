@@ -80,24 +80,28 @@ static void button_callback(hal_btn_id_t btn_id)
 }
 
 /* -------------------------------------------------------------------------
- * render_title_screen — Draw the FiestaQuest title screen.
+ * render_title_screen — Draw the EmberTide title screen.
  *
  * Layout (200x200 px, 1-bit e-paper):
  *   y=0..3    4-px thick outer border (filled rects on all four edges)
  *   y=8       1-px inner decorative border (draw_rect, inset 8px)
- *   y=20      "FiestaQuest" centered, normal text
+ *   y=20      "EmberTide" centered, script font (FONT_SCRIPT_24)
  *   y=52      horizontal separator line
  *   y=60      Dark Knight sprite (32x32) blitted at 2x -> 64x64, centered
  *   y=130     horizontal separator line
- *   y=145     "Press BOOT" centered, normal text
+ *   y=145     "Press [PWR]" centered, small font (FONT_REGS_12)
  *   y=192     bottom of inner border
  *   y=196..199 bottom 4-px thick border
+ *
+ * Button note: [PWR] refers to GPIO0 (the ⏻ power icon button on the case),
+ * which is the button closest to the USB-C port. This is HAL_BTN_A.
  * -------------------------------------------------------------------------
  */
 static void render_title_screen(fq_fb_t *fb)
 {
-    const fq_font_t   *font  = fq_get_font_small();
-    const fq_sprite_t *spr   = fq_get_char_sprite(0u, 0u); /* Dark Knight, frame 0 */
+    const fq_font_t   *font_title = fq_get_font_title();
+    const fq_font_t   *font_small = fq_get_font_small();
+    const fq_sprite_t *spr        = fq_get_char_sprite(0u, 0u); /* Dark Knight, frame 0 */
 
     /* -- Outer 4-px thick border ------------------------------------------ */
     /* Top band */
@@ -112,12 +116,12 @@ static void render_title_screen(fq_fb_t *fb)
     /* -- Inner 1-px decorative border (inset 8px from outer border) --------- */
     fq_fb_draw_rect(fb, 8, 8, 184, 184, 1u);
 
-    /* -- "FiestaQuest" centered at y=20 ------------------------------------- */
+    /* -- "EmberTide" centered at y=20, script font -------------------------- */
     {
-        static const char title_str[] = "FiestaQuest";
-        int16_t w = fq_text_width(font, title_str);
+        static const char title_str[] = "EmberTide";
+        int16_t w = fq_text_width(font_title, title_str);
         int16_t x = (int16_t)((200 - w) / 2);
-        fq_draw_text(fb, font, x, 20, title_str);
+        fq_draw_text(fb, font_title, x, 20, title_str);
     }
 
     /* -- Horizontal separator below title, y=52 ----------------------------- */
@@ -132,12 +136,12 @@ static void render_title_screen(fq_fb_t *fb)
     /* -- Horizontal separator above footer, y=130 --------------------------- */
     fq_fb_draw_line(fb, 12, 130, 187, 130, 1u);
 
-    /* -- "Press BOOT" centered at y=145 ------------------------------------- */
+    /* -- "Press [PWR]" centered at y=145, small font ------------------------ */
     {
-        static const char prompt_str[] = "Press BOOT";
-        int16_t w = fq_text_width(font, prompt_str);
+        static const char prompt_str[] = "Press [PWR]";
+        int16_t w = fq_text_width(font_small, prompt_str);
         int16_t x = (int16_t)((200 - w) / 2);
-        fq_draw_text(fb, font, x, 145, prompt_str);
+        fq_draw_text(fb, font_small, x, 145, prompt_str);
     }
 }
 

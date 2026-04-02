@@ -23,6 +23,7 @@
 #include "sprites/sprite_chars.h"
 #include "sprites/sprite_items.h"
 #include "fonts/font_regs_12.h"
+#include "fonts/font_script_24.h"
 
 /* ── Sprite table sizes (derived from generated data) ─────────────────────── */
 
@@ -39,6 +40,13 @@
 const fq_font_t *fq_get_font_small(void)
 {
     return &FONT_REGS_12_FONT;
+}
+
+/* ── fq_get_font_title ────────────────────────────────────────────────────── */
+
+const fq_font_t *fq_get_font_title(void)
+{
+    return &FONT_SCRIPT_24_FONT;
 }
 
 /* ── fq_get_char_sprite ───────────────────────────────────────────────────── */

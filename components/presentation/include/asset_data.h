@@ -37,6 +37,17 @@
  */
 const fq_font_t *fq_get_font_small(void);
 
+/**
+ * fq_get_font_title — Return a pointer to the FONT_SCRIPT_24 font descriptor.
+ *
+ * Jacquard 12 script font at 24 px, used for decorative title text.
+ * Glyphs are 30 px tall in 30×30 cells with variable advance widths.
+ * The returned pointer is always non-NULL (points to a static const struct).
+ *
+ * @return  Pointer to the FONT_SCRIPT_24_FONT fq_font_t descriptor.
+ */
+const fq_font_t *fq_get_font_title(void);
+
 /* ── Sprite accessors ─────────────────────────────────────────────────────── */
 
 /**
