@@ -82,6 +82,10 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         case FQ_STATE_TITLE:
             switch (evt->id) {
                 case FQ_EVT_BTN_A_PRESS:
+                case FQ_EVT_BTN_B_PRESS:
+                    /* Either button advances past the title screen.
+                     * The SUN button (GPIO18, BTN_B) and the PWR button
+                     * (GPIO0, BTN_A) both work — any press is intentional. */
                     ctx->state = FQ_STATE_HOME;
                     break;
                 default:

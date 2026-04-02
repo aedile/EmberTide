@@ -161,14 +161,18 @@ static int write_framebuffer_png(const fq_fb_t *fb,
  * Layout (200x200 px, 1-bit e-paper):
  *   y=0..3    4-px thick outer border
  *   y=8       1-px inner decorative border (inset 8px)
- *   y=20      "EmberTide" centered, script font (FONT_SCRIPT_24)
+ *   y=20      "EmberTide" centered, script font (FONT_SCRIPT_36, ~142px wide)
  *   y=52      horizontal separator
  *   y=60      Dark Knight 2x sprite (64x64), centered
  *   y=130     horizontal separator
- *   y=145     "Press [PWR]" centered, small font (FONT_REGS_12)
+ *   y=145     "Press Any Button" centered, small font (FONT_REGS_12, ~167px)
  *   y=196..199 bottom 4-px thick border
  *
- * Button note: [PWR] = GPIO0 (⏻ power icon, closest to USB-C) = HAL_BTN_A.
+ * Single-line title: fq_text_width("EmberTide", FONT_SCRIPT_36) = ~142px,
+ * which is within the 180px limit, so no line-split is needed.
+ *
+ * Button note: either button (SUN/GPIO18 = BTN_B, PWR/GPIO0 = BTN_A)
+ * advances the title screen.  The prompt says "Press Any Button".
  * ---------------------------------------------------------------------------
  */
 static void render_title_screen(fq_fb_t *fb)
@@ -186,7 +190,7 @@ static void render_title_screen(fq_fb_t *fb)
     /* Inner 1-px decorative border, inset 8px */
     fq_fb_draw_rect(fb, 8, 8, 184, 184, 1u);
 
-    /* "EmberTide" centered at y=20, script font */
+    /* "EmberTide" centered at y=20, script font (single line, ~142px wide) */
     {
         static const char title_str[] = "EmberTide";
         int16_t w = fq_text_width(font_title, title_str);
@@ -206,9 +210,9 @@ static void render_title_screen(fq_fb_t *fb)
     /* Horizontal separator at y=130 */
     fq_fb_draw_line(fb, 12, 130, 187, 130, 1u);
 
-    /* "Press [PWR]" centered at y=145, small font */
+    /* "Press Any Button" centered at y=145, small font */
     {
-        static const char prompt_str[] = "Press [PWR]";
+        static const char prompt_str[] = "Press Any Button";
         int16_t w = fq_text_width(font_small, prompt_str);
         int16_t x = (int16_t)((200 - w) / 2);
         fq_draw_text(fb, font_small, x, 145, prompt_str);
