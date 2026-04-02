@@ -676,3 +676,17 @@ add_vm_test(test_p18_screen_text_bounds
 # ---------------------------------------------------------------------------
 add_vm_test(test_p18_screen_text_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p18_screen_text_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-17 patch: Title Screen Fix (font swap + BTN_B on TITLE + prompt text)
+#
+# Bound tests: BTN_B in TITLE must now advance to HOME; ghost events must
+# leave state unchanged; PRNG must be untouched.
+# Feature tests: both buttons advance TITLE; font-title returns FONT_SCRIPT_36;
+# two-line layout width invariants.
+# ---------------------------------------------------------------------------
+add_app_test(test_p17_title_fix_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_title_fix_bounds.c")
+
+add_app_test(test_p17_title_fix_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_title_fix_feature.c")
