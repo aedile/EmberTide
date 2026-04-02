@@ -8,6 +8,12 @@
  *   block). A 32x32 sprite becomes 64x64 on screen. Used to make character
  *   sprites the visual focus on the 200x200 e-paper display.
  *
+ * fq_draw_text_2x:
+ *   Renders a string at 2x magnification. Each source glyph pixel becomes a
+ *   2x2 block on the framebuffer. The cursor advances by advance_width * 2
+ *   after each character. Useful for decorative title text at larger apparent
+ *   size without requiring a separate larger font asset.
+ *
  * fq_draw_text_inverted:
  *   Renders a string using CLEAR-blit instead of OR-blit: glyph pixels
  *   CLEAR (set to 0 / white) the corresponding framebuffer pixel, leaving
@@ -53,6 +59,33 @@ void fq_blit_sprite_2x(fq_fb_t *fb,
                        int16_t x,
                        int16_t y,
                        const fq_sprite_t *spr);
+
+/**
+ * fq_draw_text_2x — Render text at 2x pixel scale.
+ *
+ * Identical layout logic to fq_draw_text but each glyph source pixel is
+ * expanded to a 2x2 block (same technique as fq_blit_sprite_2x). The cursor
+ * advances by advance_width * 2 after each character, so the rendered string
+ * occupies 2x the horizontal space. Vertical height is also doubled.
+ *
+ * Clipping: pixels outside the framebuffer bounds are silently skipped via
+ * fq_fb_set_pixel's built-in bounds check. No allocation.
+ *
+ * Rendering stops when cursor >= FQ_FB_WIDTH * 2 would be needed for the
+ * NEXT glyph start — in practice, clipping on the right edge is graceful.
+ *
+ * @param fb    Target framebuffer. NULL-safe.
+ * @param font  Font descriptor. NULL-safe.
+ * @param x     Starting X cursor position.
+ * @param y     Starting Y cursor position.
+ * @param str   Null-terminated string. NULL-safe.
+ * @return      Final cursor X position after rendering all characters.
+ */
+int16_t fq_draw_text_2x(fq_fb_t         *fb,
+                        const fq_font_t *font,
+                        int16_t          x,
+                        int16_t          y,
+                        const char      *str);
 
 /**
  * fq_draw_text_inverted — Render text by CLEARING pixels (white on black).

@@ -160,16 +160,18 @@ static int write_framebuffer_png(const fq_fb_t *fb,
  *
  * Layout (200x200 px, 1-bit e-paper):
  *   y=0..3    4-px thick outer border
- *   y=8       1-px inner decorative border (inset 8px)
- *   y=20      "EmberTide" centered, script font (FONT_SCRIPT_36, ~142px wide)
+ *   y=4..51   Solid black title band (48px tall) with "EmberTide" as white
+ *             inverted text, centered — FONT_SCRIPT_36 with corrected advance
+ *             widths renders "EmberTide" in ~160px (was ~99px broken kerning).
  *   y=52      horizontal separator
  *   y=60      Dark Knight 2x sprite (64x64), centered
  *   y=130     horizontal separator
- *   y=145     "Press Any Button" centered, small font (FONT_REGS_12, ~167px)
+ *   y=145     "Press Any Button" centered, small font (FONT_REGS_12)
  *   y=196..199 bottom 4-px thick border
  *
- * Single-line title: fq_text_width("EmberTide", FONT_SCRIPT_36) = ~142px,
- * which is within the 180px limit, so no line-split is needed.
+ * Title design: solid black band at top with white script text — maximum
+ * visual contrast on e-paper. Corrected advance widths eliminate inter-
+ * character gaps by zeroing off_x and using w+2 as advance.
  *
  * Button note: either button (SUN/GPIO18 = BTN_B, PWR/GPIO0 = BTN_A)
  * advances the title screen.  The prompt says "Press Any Button".
@@ -187,15 +189,17 @@ static void render_title_screen(fq_fb_t *fb)
     fq_fb_fill_rect(fb,   0,   4,   4, 192, 1u); /* left   */
     fq_fb_fill_rect(fb, 196,   4,   4, 192, 1u); /* right  */
 
-    /* Inner 1-px decorative border, inset 8px */
-    fq_fb_draw_rect(fb, 8, 8, 184, 184, 1u);
-
-    /* "EmberTide" centered at y=20, script font (single line, ~142px wide) */
+    /* Solid black title band y=4..51 (48px tall).
+     * "EmberTide" rendered as white inverted text, vertically centered in band.
+     * FONT_SCRIPT_36: glyph_h=30, so vertical center = (48-30)/2 = 9px margin.
+     * Render at y=4+9=13.
+     * Width = 160px (corrected advances); center at x=(200-160)/2=20. */
+    fq_fb_fill_rect(fb, 4, 4, 192, 48, 1u);
     {
         static const char title_str[] = "EmberTide";
         int16_t w = fq_text_width(font_title, title_str);
         int16_t x = (int16_t)((200 - w) / 2);
-        fq_draw_text(fb, font_title, x, 20, title_str);
+        fq_draw_text_inverted(fb, font_title, x, 13, title_str);
     }
 
     /* Horizontal separator at y=52 */

@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>
 
 #include "test_assert.h"
 #include "fq_framebuffer.h"
@@ -74,9 +75,18 @@ static void init_ftest_font(fq_font_t *font)
 
 int main(void)
 {
-    static fq_fb_t fb;
-    fq_font_t      font;
-    int16_t        result;
+    /* All declarations at top of scope (C99 strict). */
+    static fq_fb_t      fb;
+    fq_font_t           font;
+    int16_t             result;
+    uint32_t            found;
+    int16_t             scan_x;
+    int16_t             scan_y;
+    const fq_font_t    *font_title;
+    int16_t             w_ember;
+    int16_t             w_tide;
+    int16_t             w_total;
+    int16_t             start_x;
 
     init_ftest_font(&font);
 
@@ -88,11 +98,10 @@ int main(void)
     TEST_ASSERT_TRUE(result > 0);
 
     /* Verify at least one pixel was set. */
-    uint32_t found = 0u;
-    int16_t  x, y;
-    for (y = 0; y < (int16_t)FQ_FB_HEIGHT && found == 0u; y++) {
-        for (x = 0; x < (int16_t)FQ_FB_WIDTH; x++) {
-            if (fq_fb_get_pixel(&fb, x, y) != 0u) {
+    found = 0u;
+    for (scan_y = 0; scan_y < (int16_t)FQ_FB_HEIGHT && found == 0u; scan_y++) {
+        for (scan_x = 0; scan_x < (int16_t)FQ_FB_WIDTH; scan_x++) {
+            if (fq_fb_get_pixel(&fb, scan_x, scan_y) != 0u) {
                 found = 1u;
                 break;
             }
@@ -142,36 +151,36 @@ int main(void)
 
     /* -------------------------------------------------------------------
      * F4: Corrected FONT_SCRIPT_36 "Ember" must be >= 80px wide.
-     *     With fixed advance (dx+w), Ember = ~123px.
+     *     With fixed advance (w+2, off_x=0), Ember = ~93px.
      *     Old broken widths: ~58px.
      * ------------------------------------------------------------------- */
-    const fq_font_t *font_title = fq_get_font_title();
+    font_title = fq_get_font_title();
     TEST_ASSERT_TRUE(font_title != NULL);
 
-    int16_t w_ember = fq_text_width(font_title, "Ember");
+    w_ember = fq_text_width(font_title, "Ember");
     TEST_ASSERT_TRUE(w_ember >= 80);
     TEST_ASSERT_TRUE(w_ember <= 180);
 
     /* -------------------------------------------------------------------
      * F5: Corrected FONT_SCRIPT_36 "Tide" must be >= 60px wide.
-     *     With fixed advance, Tide = ~96px.
+     *     With fixed advance, Tide = ~67px.
      * ------------------------------------------------------------------- */
-    int16_t w_tide = fq_text_width(font_title, "Tide");
+    w_tide = fq_text_width(font_title, "Tide");
     TEST_ASSERT_TRUE(w_tide >= 60);
     TEST_ASSERT_TRUE(w_tide <= 160);
 
     /* -------------------------------------------------------------------
      * F6: "EmberTide" total must exceed 100px (was ~99px with broken advances).
-     *     With fixed advance widths, EmberTide > 150px.
+     *     With fixed advance widths, EmberTide = ~160px.
      * ------------------------------------------------------------------- */
-    int16_t w_total = fq_text_width(font_title, "EmberTide");
+    w_total = fq_text_width(font_title, "EmberTide");
     TEST_ASSERT_TRUE(w_total > 100);
 
     /* -------------------------------------------------------------------
      * F7: fq_draw_text_2x returns final cursor > start x after drawing "A".
      * ------------------------------------------------------------------- */
     fq_fb_clear(&fb);
-    int16_t start_x = 5;
+    start_x = 5;
     result = fq_draw_text_2x(&fb, &font, start_x, 10, "A");
     TEST_ASSERT_TRUE(result > start_x);
 

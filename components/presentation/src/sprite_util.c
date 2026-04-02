@@ -1,8 +1,9 @@
 /**
  * sprite_util.c — FiestaQuest Presentation Layer: Sprite & Text Utilities
  *
- * Implements 2x-scaled sprite blitting, inverted-text rendering, and the
- * header/footer bar helpers shared by all screen renderers.
+ * Implements 2x-scaled sprite blitting, 2x-scaled text rendering,
+ * inverted-text rendering, and the header/footer bar helpers shared by all
+ * screen renderers.
  *
  * Constitution Priority 0: no float, no malloc, no PRNG calls.
  * HOST-COMPILABLE — no hal_*.h, no game/ headers.
@@ -41,6 +42,83 @@ void fq_blit_sprite_2x(fq_fb_t *fb,
             }
         }
     }
+}
+
+/* ── fq_draw_text_2x ─────────────────────────────────────────────────────── */
+/*
+ * Renders each glyph at 2x scale: each source pixel becomes a 2x2 block on
+ * the framebuffer. The cursor advances by advance_width * 2 after each glyph.
+ *
+ * Implementation notes:
+ *   - glyph bitmap indexing is identical to fq_draw_text (g * glyph_h * row_bytes).
+ *   - For each source (col, row) where the bit is SET, write 2x2 block at
+ *     (blit_x + col*2, blit_y + row*2) on the framebuffer.
+ *   - fq_fb_set_pixel handles all clipping — no explicit bounds check needed here.
+ *   - The cursor is int16_t; multiplying uint8_t advance_width by 2 never
+ *     overflows: max advance = 255, 255*2 = 510 < INT16_MAX (32767).
+ */
+int16_t fq_draw_text_2x(fq_fb_t         *fb,
+                        const fq_font_t *font,
+                        int16_t          x,
+                        int16_t          y,
+                        const char      *str)
+{
+    if (fb == NULL || font == NULL || str == NULL) { return x; }
+
+    uint32_t    row_bytes = ((uint32_t)font->glyph_max_w + 7u) / 8u;
+    int16_t     cursor    = x;
+    const char *p         = str;
+
+    while (*p != '\0') {
+        unsigned char ch = (unsigned char)*p;
+
+        /* Skip non-printable characters. */
+        if (ch < 0x20u || ch > 0x7Eu) {
+            p++;
+            continue;
+        }
+
+        uint8_t glyph_idx = (uint8_t)(ch - 0x20u);
+        uint8_t adv_width = font->widths[glyph_idx];
+        int8_t  off_x     = font->offsets_x[glyph_idx];
+        int8_t  off_y     = font->offsets_y[glyph_idx];
+
+        uint32_t glyph_offset = (uint32_t)glyph_idx
+                                 * (uint32_t)font->glyph_h
+                                 * row_bytes;
+
+        /* Render start (2x y-offset: off_y scaled down since dy is already
+         * in source-pixel units, but we scale the glyph itself 2x).
+         * Per the render contract: off_y is applied once to baseline, then
+         * each row expands 2x from that baseline. */
+        int16_t blit_x = (int16_t)(cursor + (int16_t)off_x);
+        int16_t blit_y = (int16_t)(y      + (int16_t)off_y);
+
+        /* Blit each glyph pixel as a 2x2 block. */
+        for (uint8_t gy = 0u; gy < font->glyph_h; gy++) {
+            for (uint8_t gx = 0u; gx < font->glyph_max_w; gx++) {
+                uint32_t bidx = glyph_offset
+                                + (uint32_t)gy * row_bytes
+                                + gx / 8u;
+                uint8_t gbit  = (uint8_t)((font->bitmap[bidx] >> (7u - (gx % 8u))) & 1u);
+                if (gbit != 0u) {
+                    int16_t px = (int16_t)(blit_x + (int16_t)((uint16_t)gx * 2u));
+                    int16_t py = (int16_t)(blit_y + (int16_t)((uint16_t)gy * 2u));
+                    fq_fb_set_pixel(fb, px,                    py,                    1u);
+                    fq_fb_set_pixel(fb, (int16_t)(px + 1),    py,                    1u);
+                    fq_fb_set_pixel(fb, px,                    (int16_t)(py + 1),    1u);
+                    fq_fb_set_pixel(fb, (int16_t)(px + 1),    (int16_t)(py + 1),    1u);
+                }
+            }
+        }
+
+        /* Advance cursor by 2 * advance_width. */
+        cursor = (int16_t)(cursor + (int16_t)((uint16_t)adv_width * 2u));
+
+        p++;
+    }
+
+    return cursor;
 }
 
 /* ── fq_draw_text_inverted ───────────────────────────────────────────────── */
