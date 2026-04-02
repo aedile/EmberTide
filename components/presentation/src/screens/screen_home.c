@@ -10,16 +10,22 @@
  *   y=86..99  : HP bar — "HP" label + proportional fill + border
  *   y=100..113: W/L record — "W:N  L:N" centered
  *   y=114     : Separator line
- *   y=116..197: Navigation menu — 4 rows, each 18px tall, with cursor ">"
+ *   y=116..179: Navigation menu — 4 rows, each 16px tall, with cursor "> " prefix
  *               ☀ BTN_B cycles, ⏻ BTN_A selects
+ *   y=178     : Nav hint y parameter — "[SUN] Move  [PWR] Select" visible ~y=187-199
  *
- * Menu layout:
+ * Menu layout (row_h=16, 4 rows from y=116 to y=180):
  *   Row 0 (y=116): TRAIN
- *   Row 1 (y=134): BATTLE
- *   Row 2 (y=152): ITEMS
- *   Row 3 (y=170): STATS
- *   Highlighted row: black fill_rect + white (inverted) text + ">" cursor
- *   Normal rows: plain black text
+ *   Row 1 (y=132): BATTLE
+ *   Row 2 (y=148): ITEMS
+ *   Row 3 (y=164): STATS
+ *   Highlighted row: black fill_rect extending 1px above row baseline
+ *                    + white (inverted) text with extra left indent + ">  " cursor
+ *   Normal rows: plain black text with same indent
+ *
+ * Font note: FONT_REGS_12 has glyph_h=30 but off_y=9 for most glyphs,
+ * so visible content appears at (y + 9) to (y + 21) — 12px of visible text.
+ * All y coordinates in this file follow that convention.
  *
  * HP bar formula (integer-only, no float):
  *   fill_w = hp_percent (0-100) * HOME_HP_FILL_MAX_W / 100
@@ -56,14 +62,36 @@
 /** Separator before menu. */
 #define HOME_SEP_Y          114
 
-/** Menu geometry: 4 rows of 18px each starting at y=116. */
-#define HOME_MENU_ORIGIN_Y  116
-#define HOME_MENU_ROW_H      18
+/**
+ * Menu geometry: 4 rows of 16px each starting at y=116.
+ * 4 × 16 = 64px → menu occupies y=116..180.
+ * Row spacing reduced from 18→16 to free up room for the nav hint below.
+ */
+#define HOME_MENU_ORIGIN_Y  102
+#define HOME_MENU_ROW_H      16
 #define HOME_MENU_ITEM_COUNT  4
 
-/** Menu text indentation. */
+/**
+ * Menu text indentation.
+ * cursor_x: left edge of the ">  " cursor arrow.
+ * text_x  : left edge of the item label (extra 4px vs previous 16px baseline).
+ */
 #define HOME_MENU_CURSOR_X    4   /**< ">" cursor left edge. */
-#define HOME_MENU_TEXT_X     16   /**< Item label left edge. */
+#define HOME_MENU_TEXT_X     20   /**< Item label left edge — 4px extra indent. */
+
+/**
+ * Highlight bar padding: extends 1px above the row baseline for visual breathing
+ * room.  Total highlight height = HOME_MENU_ROW_H + HOME_MENU_HL_EXTRA.
+ */
+#define HOME_MENU_HL_EXTRA    1   /**< Extra pixels above row_y for highlight. */
+
+/**
+ * Nav hint y parameter.
+ * FONT_REGS_12 has off_y=9, so visible content appears at y+9.
+ * y=178 → visible glyph at y=187..199 — fully within the 200px display.
+ * Last menu row (STATS) text visible at y=173..185, leaving a 2px gap.
+ */
+#define HOME_NAV_HINT_Y     178
 
 /*
  * Win/loss/level buffer sizes.
@@ -141,37 +169,45 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
                     24, HOME_HP_BAR_H - 2, 0u);
     fq_draw_text(fb, font, HOME_HP_BAR_X + 2, HOME_HP_BAR_Y + 1, "HP");
 
-    /* ── W/L record centered ─────────────────────────────────────────────── */
-    {
-        char wl_buf[HOME_WL_BUF_SIZE];
-        snprintf(wl_buf, sizeof(wl_buf), "W:%-5u L:%u",
-                 (unsigned)vm->wins, (unsigned)vm->losses);
-        int16_t wl_w = fq_text_width(font, wl_buf);
-        int16_t wl_x = (int16_t)((FQ_FB_WIDTH - wl_w) / 2);
-        if (wl_x < 0) { wl_x = 0; }
-        fq_draw_text(fb, font, wl_x, HOME_WL_Y, wl_buf);
-    }
-
     /* ── Separator before menu ───────────────────────────────────────────── */
-    fq_fb_draw_line(fb, 0, HOME_SEP_Y,
-                    (int16_t)(FQ_FB_WIDTH - 1u), HOME_SEP_Y, 1u);
+    fq_fb_draw_line(fb, 0, (int16_t)(HOME_HP_BAR_Y + HOME_HP_BAR_H + 4),
+                    (int16_t)(FQ_FB_WIDTH - 1u),
+                    (int16_t)(HOME_HP_BAR_Y + HOME_HP_BAR_H + 4), 1u);
 
     /* ── Navigation menu ─────────────────────────────────────────────────── */
     for (uint8_t i = 0u; i < (uint8_t)HOME_MENU_ITEM_COUNT; i++) {
         int16_t row_y = (int16_t)(HOME_MENU_ORIGIN_Y + (int16_t)i * HOME_MENU_ROW_H);
 
         if (i == sel) {
-            /* Highlighted row: black background, white text + ">" cursor. */
-            fq_fb_fill_rect(fb, 2, row_y,
-                            (int16_t)(FQ_FB_WIDTH - 4u), HOME_MENU_ROW_H - 2, 1u);
-            fq_draw_text_inverted(fb, font, HOME_MENU_CURSOR_X, row_y + 1,
-                                  ">");
-            fq_draw_text_inverted(fb, font, HOME_MENU_TEXT_X, row_y + 1,
-                                  s_menu_labels[i]);
+            /* Highlighted row: ">" cursor + label, with a thick border box
+             * around the entire row for clear visual selection. */
+            fq_draw_text(fb, font, HOME_MENU_CURSOR_X, row_y, ">");
+            fq_draw_text(fb, font, HOME_MENU_TEXT_X, row_y,
+                         s_menu_labels[i]);
+            /* Thick selection box around this row. */
+            int16_t box_y = (int16_t)(row_y - 1);
+            int16_t box_h = (int16_t)(HOME_MENU_ROW_H + 2);
+            fq_fb_draw_rect(fb, 2, box_y,
+                            (int16_t)(FQ_FB_WIDTH - 4u), box_h, 1u);
+            fq_fb_draw_rect(fb, 3, (int16_t)(box_y + 1),
+                            (int16_t)(FQ_FB_WIDTH - 6u), (int16_t)(box_h - 2), 1u);
         } else {
-            /* Normal row: plain black text. */
-            fq_draw_text(fb, font, HOME_MENU_TEXT_X, row_y + 1,
+            /* Normal row: plain black text with matching indent. */
+            fq_draw_text(fb, font, HOME_MENU_TEXT_X, row_y,
                          s_menu_labels[i]);
         }
+    }
+
+    /* ── Nav hint below menu: tells user what buttons do ────────────────── */
+    /*
+     * Rendered at HOME_NAV_HINT_Y=178.  With FONT_REGS_12 off_y=9, the
+     * visible glyph content appears at y=187..199 — fully within the display.
+     */
+    {
+        static const char s_nav_hint[] = "SUN Move  PWR OK";
+        int16_t hint_w = fq_text_width(font, s_nav_hint);
+        int16_t hint_x = (int16_t)((FQ_FB_WIDTH - hint_w) / 2);
+        if (hint_x < 0) { hint_x = 0; }
+        fq_draw_text(fb, font, hint_x, HOME_NAV_HINT_Y, s_nav_hint);
     }
 }

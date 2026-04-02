@@ -13,8 +13,13 @@
  *   y=104..117: HP bar
  *   y=120     : Separator line
  *   y=124..137: XP bar
- *   y=140..169: XP numeric text ("XP: NNNN/NNNN") — glyph_h=30
- *   y=166..199: Black footer bar — white "Deaths: N"
+ *   y=140     : XP numeric text param — visible at y≈149..161 (font off_y=9)
+ *   y=153     : Deaths text param — visible at y≈162..174 (font off_y=9)
+ *   y=182..199: Black footer bar — white "[PWR] Back" only (no Deaths collision)
+ *
+ * Font note: FONT_REGS_12 has glyph_h=30 with off_y=9, so visible glyph
+ * content appears at (y_param + 9) to (y_param + 21).  All text y coordinates
+ * in this file follow that convention.
  *
  * Bar fill formula (integer-only):
  *   stat fill = (uint32_t)stat_val * BAR_FILL_W / 255u
@@ -33,7 +38,7 @@
 
 /* ── Layout constants ────────────────────────────────────────────────────── */
 
-#define STATS_BAR_H           34  /**< Header / footer bar height. */
+#define STATS_HDR_H           34  /**< Header bar height. */
 
 /** Stat bar geometry — label left of bar, bar spans right portion. */
 #define STATS_LABEL_X          5
@@ -54,8 +59,27 @@
 #define STATS_SEP2_Y         120
 #define STATS_XP_Y           124
 
-/** Footer y. */
-#define STATS_FOOTER_Y       166
+/**
+ * XP numbers y parameter — drawn at (STATS_XP_Y + STATS_BAR_ROW_H + 2) = 140.
+ * Visible glyph content at y=149..161 (font off_y=9, 12px visible height).
+ */
+#define STATS_XP_NUM_Y  (STATS_XP_Y + STATS_BAR_ROW_H + 2)  /* = 140 */
+
+/**
+ * Deaths text y parameter — in the content area, below XP numbers.
+ * y=153: visible glyph at y=162..174 (off_y=9 → 153+9=162).
+ * XP text visible ends at y=161 → 1px gap before Deaths visible starts.
+ * Footer starts at y=182 → 8px gap after Deaths visible ends (y=174).
+ */
+#define STATS_DEATHS_Y       153
+
+/**
+ * Footer y — shows nav hint only; Deaths is in the content area above.
+ * Smaller bar height (18px) to fit within remaining display space.
+ * y=182 + h=18 → exactly fills to y=200 (display bottom).
+ */
+#define STATS_FOOTER_Y       176
+#define STATS_FOOTER_H        24
 
 /* ── Internal: draw a labeled stat bar ──────────────────────────────────── */
 
@@ -106,7 +130,7 @@ void fq_render_stats(fq_fb_t *fb, const fq_vm_stats_t *vm)
     {
         char lv_buf[8];
         snprintf(lv_buf, sizeof(lv_buf), "Lv.%u", (unsigned)vm->level);
-        fq_draw_header_bar2(fb, font, 0, STATS_BAR_H, vm->name, lv_buf);
+        fq_draw_header_bar2(fb, font, 0, STATS_HDR_H, vm->name, lv_buf);
     }
 
     /* ── Four core stat bars ────────────────────────────────────────────── */
@@ -151,21 +175,25 @@ void fq_render_stats(fq_fb_t *fb, const fq_vm_stats_t *vm)
     }
 
     /* ── XP numbers ─────────────────────────────────────────────────────── */
+    /* y_param=140: visible glyph at y≈149..161 (FONT_REGS_12 off_y=9). */
     {
         char xp_buf[24];
         snprintf(xp_buf, sizeof(xp_buf), "%lu/%lu",
                  (unsigned long)vm->xp,
                  (unsigned long)vm->xp_to_next);
-        /* Draw below XP bar — text starts at bar bottom + 2px gap. */
-        fq_draw_text(fb, font, STATS_LABEL_X,
-                     (int16_t)(STATS_XP_Y + STATS_BAR_ROW_H + 2), xp_buf);
+        fq_draw_text(fb, font, STATS_LABEL_X, STATS_XP_NUM_Y, xp_buf);
     }
 
-    /* ── Footer bar: Deaths count + navigation hint ─────────────────────── */
+    /* ── Deaths count — in content area, NOT in the footer bar ──────────── */
+    /* y_param=153: visible glyph at y≈162..174 (off_y=9).                  */
+    /* Sits between XP text (visible end y≈161) and footer (y=182).         */
     {
         char d_buf[16];
         snprintf(d_buf, sizeof(d_buf), "Deaths: %u", (unsigned)vm->rebirth_count);
-        fq_draw_header_bar2(fb, font, STATS_FOOTER_Y, STATS_BAR_H,
-                            d_buf, "[PWR] Back");
+        fq_draw_text(fb, font, STATS_LABEL_X, STATS_DEATHS_Y, d_buf);
     }
+
+    /* ── Footer bar: nav hint ONLY — Deaths is in content area above ────── */
+    /* Footer height=18px fits glyph_h=12 visible content with margins.     */
+    fq_draw_header_bar(fb, font, STATS_FOOTER_Y, STATS_FOOTER_H, "[PWR] Back");
 }

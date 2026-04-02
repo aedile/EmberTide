@@ -4,17 +4,24 @@
  * Renders a 4-column item grid onto the 200x200 1-bit framebuffer.
  *
  * Layout (200x200 e-paper):
- *   y=0..33  : Black header bar — white "INVENTORY" text
- *   y=35..154: Item grid — 4 columns × 3 visible rows, each cell 50×40px
- *              Item sprites (24×24) centred in each cell at (+13, +8)
- *              Cursor cell drawn with thick (double) border
- *   y=155    : Separator line
- *   y=166..199: Black footer bar — white selected-item name text
+ *   y=0..33   : Black header bar — white "INVENTORY" text
+ *   y=35..145 : Item grid — 4 columns × 3 visible rows, each cell 50×37px
+ *               Item sprites (24×24) centred in each cell at (+13, +6)
+ *               Cursor cell drawn with thick (double) border
+ *   y=146     : Grid bottom separator line
+ *   y=148..171: Bordered tooltip panel — selected item name in content area
+ *               Text y_param=149: visible at y≈158..170 (font off_y=9)
+ *   y=174     : Footer separator line
+ *   y=177..199: Black footer bar — white "[PWR] Back" only
+ *               Text at y=179: visible at y≈188..200 (font off_y=9)
  *
  * Cell geometry:
  *   Width  : 50px (4 × 50 = 200px, flush to display edges)
- *   Height : 40px (3 × 40 = 120px for the grid zone)
- *   Sprite : 24×24, blitted at (cx + 13, cy + 8) — centre in cell
+ *   Height : 37px (3 × 37 = 111px for the grid zone)
+ *   Sprite : 24×24, blitted at (cx + 13, cy + 6) — centre in cell
+ *
+ * Font note: FONT_REGS_12 has glyph_h=30 with off_y=9, so visible glyph
+ * content appears at (y_param + 9) to (y_param + 21).
  *
  * NULL-safe: fq_render_inventory(NULL, ...) is a silent no-op.
  * Constitution Priority 0: no float, no malloc, no PRNG.
@@ -28,20 +35,41 @@
 
 /* ── Grid geometry constants ─────────────────────────────────────────────── */
 
-#define INV_BAR_H          34  /**< Header / footer bar height. */
+#define INV_HDR_H          34  /**< Header bar height. */
 
 #define INV_GRID_ORIGIN_Y  35  /**< Grid top-left y. */
 #define INV_CELL_W         50  /**< Cell width (4 × 50 = 200). */
-#define INV_CELL_H         40  /**< Cell height. */
+#define INV_CELL_H         37  /**< Cell height (3 × 37 = 111px grid zone). */
 #define INV_GRID_COLS       4
-#define INV_VISIBLE_ROWS    3  /**< 3 rows × 40 = 120px grid zone. */
+#define INV_VISIBLE_ROWS    3  /**< 3 rows × 37 = 111px grid zone. */
 
-/** Item sprite blit offset within cell (centres 24×24 sprite in 50×40 cell). */
+/** Item sprite blit offset within cell (centres 24×24 sprite in 50×37 cell). */
 #define INV_SPRITE_OFFSET_X  13
-#define INV_SPRITE_OFFSET_Y   8
+#define INV_SPRITE_OFFSET_Y   6
 
-/** Footer y — item name tooltip. */
-#define INV_FOOTER_Y  166
+/**
+ * Grid bottom separator — immediately below the grid zone.
+ * y = INV_GRID_ORIGIN_Y + INV_VISIBLE_ROWS * INV_CELL_H = 35 + 111 = 146.
+ */
+#define INV_GRID_SEP_Y     146
+
+/**
+ * Tooltip bordered panel: selected item name displayed in the content area.
+ * Panel top y=148, height=24px → panel bottom y=171.
+ * Text y_param=149: visible at y=158..170 (off_y=9), fits inside panel.
+ */
+#define INV_TOOLTIP_Y      148  /**< Panel top. */
+#define INV_TOOLTIP_H       24  /**< Panel height — contains 12px visible text. */
+#define INV_TOOLTIP_TEXT_Y  149 /**< Text y_param inside the tooltip box. */
+
+/**
+ * Footer separator and bar.
+ * Separator at y=174, footer at y=177 (height=23 fills to y=200).
+ * Footer text at y=179: visible at y=188..200, fully within display.
+ */
+#define INV_FOOTER_SEP_Y   174  /**< Separator line above footer. */
+#define INV_FOOTER_Y       177  /**< Footer bar top. */
+#define INV_FOOTER_H        23  /**< Footer bar height — fills y=177..199. */
 
 /* ── fq_render_inventory ─────────────────────────────────────────────────── */
 
@@ -61,17 +89,23 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
                     (int16_t)FQ_FB_WIDTH, (int16_t)FQ_FB_HEIGHT, 1u);
 
     /* ── Header bar: "INVENTORY" ────────────────────────────────────────── */
-    fq_draw_header_bar(fb, font, 0, INV_BAR_H, "INVENTORY");
+    fq_draw_header_bar(fb, font, 0, INV_HDR_H, "INVENTORY");
 
     /* ── Empty inventory guard ──────────────────────────────────────────── */
     if (vm->item_count == 0u) {
         /* Centred "empty" indicator lines in the grid zone. */
-        int16_t mid_y = (int16_t)(INV_GRID_ORIGIN_Y + INV_CELL_H * INV_VISIBLE_ROWS / 2);
+        int16_t mid_y = (int16_t)(INV_GRID_ORIGIN_Y
+                                   + INV_CELL_H * INV_VISIBLE_ROWS / 2);
         fq_fb_draw_line(fb, 5, (int16_t)(mid_y - 1),
                         (int16_t)(FQ_FB_WIDTH - 5u), (int16_t)(mid_y - 1), 1u);
         fq_fb_draw_line(fb, 5, (int16_t)(mid_y + 1),
                         (int16_t)(FQ_FB_WIDTH - 5u), (int16_t)(mid_y + 1), 1u);
-        fq_draw_header_bar2(fb, font, INV_FOOTER_Y, INV_BAR_H, "Empty", "[PWR] Back");
+        /* Tooltip: "Empty" */
+        fq_fb_draw_rect(fb, 4, INV_TOOLTIP_Y,
+                        (int16_t)(FQ_FB_WIDTH - 8u), INV_TOOLTIP_H, 1u);
+        fq_draw_text(fb, font, 8, INV_TOOLTIP_TEXT_Y, "Empty");
+        /* Footer: nav hint only */
+        fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_FOOTER_H, "[PWR] Back");
         return;
     }
 
@@ -141,17 +175,23 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
         }
     }
 
-    /* ── Separator above footer ──────────────────────────────────────────── */
-    fq_fb_draw_line(fb, 0, (int16_t)(INV_FOOTER_Y - 1),
-                    (int16_t)(FQ_FB_WIDTH - 1u), (int16_t)(INV_FOOTER_Y - 1), 1u);
+    /* ── Grid bottom separator ───────────────────────────────────────────── */
+    fq_fb_draw_line(fb, 0, INV_GRID_SEP_Y,
+                    (int16_t)(FQ_FB_WIDTH - 1u), INV_GRID_SEP_Y, 1u);
 
-    /* ── Footer bar: selected item name + navigation hint ──────────────── */
-    /* "[PWR] Back" hint is always shown on the right side of the footer.    */
+    /* ── Tooltip panel: selected item name in content area ──────────────── */
+    /* Bordered rectangle. Text at y_param=149: visible glyph at y=158..170. */
+    fq_fb_draw_rect(fb, 4, INV_TOOLTIP_Y,
+                    (int16_t)(FQ_FB_WIDTH - 8u), INV_TOOLTIP_H, 1u);
     if (clamped_cursor < vm->item_count) {
-        fq_draw_header_bar2(fb, font, INV_FOOTER_Y, INV_BAR_H,
-                            vm->item_names[clamped_cursor], "[PWR] Back");
-    } else {
-        fq_draw_header_bar2(fb, font, INV_FOOTER_Y, INV_BAR_H,
-                            "Empty", "[PWR] Back");
+        fq_draw_text(fb, font, 8, INV_TOOLTIP_TEXT_Y,
+                     vm->item_names[clamped_cursor]);
     }
+
+    /* ── Footer separator ────────────────────────────────────────────────── */
+    fq_fb_draw_line(fb, 0, INV_FOOTER_SEP_Y,
+                    (int16_t)(FQ_FB_WIDTH - 1u), INV_FOOTER_SEP_Y, 1u);
+
+    /* ── Footer bar: nav hint ONLY — no item name collision ─────────────── */
+    fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_FOOTER_H, "[PWR] Back");
 }

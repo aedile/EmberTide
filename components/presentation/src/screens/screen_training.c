@@ -9,7 +9,9 @@
  *               State visual: single line (WAIT), two lines (ACTIVE), fill (DONE)
  *   y=118..131: Score bar — "SCR" label left, full-width bar x=55..189 (135px)
  *   y=152..159: Difficulty dots — 10 squares (8x8), filled=active level
- *   y=166..199: Black footer bar — white state text ("READY"/"GO!"/"DONE")
+ *   y=166..199: Black footer bar — nav hint only (no state label collision)
+ *               Active  (state=1): "[SUN] Hit  [PWR] Exit"
+ *               Other   (state=0/2): "[PWR] Back"
  *
  * Score bar (integer-only, no float):
  *   fill_w = clamp(score, 0, 100) * TRAINING_SCORE_FILL_W / 100
@@ -53,15 +55,8 @@
 #define TRAINING_DIFF_DOT_GAP   15
 #define TRAINING_DIFF_MAX       10
 
-/** Footer y. */
+/** Footer y — nav hint only; the state is visible from the activity content. */
 #define TRAINING_FOOTER_Y      166
-
-/* ── State label strings ─────────────────────────────────────────────────── */
-static const char * const s_state_labels[3] = {
-    "READY",   /* state 0 */
-    "GO!",     /* state 1 */
-    "DONE",    /* state 2 */
-};
 
 /* ── fq_render_training ───────────────────────────────────────────────────── */
 
@@ -180,13 +175,11 @@ void fq_render_training(fq_fb_t *fb, const fq_vm_training_t *vm)
         }
     }
 
-    /* ── Footer bar: state label + navigation hint ──────────────────────── */
-    /* Active state: "[SUN] Hit  [PWR] Exit"; waiting/done: "[PWR] Back".   */
+    /* ── Footer bar: nav hint ONLY — avoids state-label vs hint collision ── */
+    /* Active state shows both buttons; waiting/done shows just [PWR] Back.  */
     {
-        const char *state_str = (vm->state < 3u) ? s_state_labels[vm->state] : "?";
-        const char *hint_str  = (vm->state == 1u) ? "[SUN]Hit [PWR]Exit"
-                                                   : "[PWR] Back";
-        fq_draw_header_bar2(fb, font, TRAINING_FOOTER_Y, TRAINING_BAR_H,
-                            state_str, hint_str);
+        const char *hint_str = (vm->state == 1u) ? "[SUN] Hit  [PWR] Exit"
+                                                  : "[PWR] Back";
+        fq_draw_header_bar(fb, font, TRAINING_FOOTER_Y, TRAINING_BAR_H, hint_str);
     }
 }
