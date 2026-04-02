@@ -690,3 +690,18 @@ add_app_test(test_p17_title_fix_bounds
 
 add_app_test(test_p17_title_fix_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_title_fix_feature.c")
+
+# ---------------------------------------------------------------------------
+# Kerning fix: fq_draw_text_2x + corrected advance widths
+#
+# Bound tests: NULL guards on draw_text_2x, cursor overflow safety, 2x block
+# pixel address arithmetic, empty-string idempotency.
+# Feature tests: 2x pixel rendering, corrected FONT_SCRIPT_36 advance widths,
+# two-line layout width invariants.
+# Uses add_pres_test to link sprite_util.c and asset_data.c.
+# ---------------------------------------------------------------------------
+add_pres_test(test_kerning_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_kerning_bounds.c")
+
+add_pres_test(test_kerning_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_kerning_feature.c")
