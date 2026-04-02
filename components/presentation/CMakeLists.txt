@@ -4,6 +4,7 @@ idf_component_register(
         "src/fq_sprite.c"
         "src/fq_text.c"
         "src/asset_data.c"
+        "src/sprite_util.c"
         "src/ui_widgets.c"
         "src/screens/screen_home.c"
         "src/screens/screen_inventory.c"
@@ -27,4 +28,7 @@ idf_component_register(
     # Phase-18: asset_data.c is the SINGLE TU that includes the generated
     # sprite/font headers. No other screen .c file may include those headers
     # directly — all access goes through asset_data.h accessor functions.
+    #
+    # sprite_util.c: 2x sprite blitter, inverted-text renderer, and
+    # header/footer bar helpers shared by all screen renderers.
 )

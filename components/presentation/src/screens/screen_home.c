@@ -2,40 +2,53 @@
  * screen_home.c — FiestaQuest Presentation: Home Screen Renderer
  *
  * Renders the home/dashboard screen onto the 200x200 1-bit framebuffer.
- * Phase 18: replaced all placeholder geometry with real text and sprite calls.
  *
- * Layout (200x200 e-paper, all coordinates inclusive top-left):
- *   - Full display border:  (0,0) w=200 h=200
- *   - Name text:            fq_draw_text at (5, 3)
- *   - Level text "Lv.XX":   fq_draw_text at (130, 3)
- *   - Separator line:       y=34 (below glyph_h=30 + 1px gap)
- *   - Character sprite:     fq_blit_sprite at (84, 37) — 32×32 px
- *   - HP bar outline:       (10, 75) w=180 h=12
- *   - HP bar fill:          (11, 76) proportional, inner w=178 max
- *   - "HP" label:           fq_draw_text at (12, 76) over the bar
- *   - Separator line:       y=93
- *   - Wins text "W:XXX":    fq_draw_text at (10, 96)
- *   - Losses text "L:XXX":  fq_draw_text at (105, 96)
- *   - Separator line:       y=130
+ * Layout (200x200 e-paper):
+ *   y=0..33   : Black header bar — white text "NAME" left + "Lv.N" right
+ *   y=34      : Separator line
+ *   y=36..99  : 2x-scaled character sprite (64x64), centered at x=68
+ *   y=102..115: HP bar (outline + proportional fill) + "HP" label
+ *   y=118     : Separator line
+ *   y=120..133: Win/Loss stats text "W:N  L:N"
+ *   y=166..199: Black footer bar — white text "W:N" left + "L:N" right
+ *
+ * HP bar formula (integer-only, no float):
+ *   fill_w = hp_percent (0-100) * HOME_HP_FILL_MAX_W / 100
+ *   Clamped to [0, HOME_HP_FILL_MAX_W].
  *
  * Constitution Priority 0: no float, no malloc, no PRNG calls.
  */
 
 #include "screens/screen_home.h"
 #include "asset_data.h"
+#include "sprite_util.h"
 #include <stddef.h>
 #include <stdio.h>
 
-/* HP bar geometry constants. */
-#define HOME_HP_BAR_X       10
-#define HOME_HP_BAR_Y       75
-#define HOME_HP_BAR_W      180
-#define HOME_HP_BAR_H       12
-#define HOME_HP_FILL_MAX_W 178u  /**< Inner fill width at 100%. */
+/* ── Layout constants ────────────────────────────────────────────────────── */
 
-/* ---------------------------------------------------------------------------
- * fq_render_home
- * ---------------------------------------------------------------------------*/
+/** Header and footer bar height (fits glyph_h=30 with 2px top pad). */
+#define HOME_BAR_H           34
+
+/** Sprite destination: 2x-scaled 32x32 = 64x64, centered horizontally. */
+#define HOME_SPRITE_X        68   /* (200 - 64) / 2 = 68 */
+#define HOME_SPRITE_Y        36
+
+/** HP bar geometry. */
+#define HOME_HP_BAR_X        10
+#define HOME_HP_BAR_Y       102
+#define HOME_HP_BAR_W       180
+#define HOME_HP_BAR_H        14
+#define HOME_HP_FILL_MAX_W  178u  /**< Inner fill pixels at 100% HP. */
+
+/** Stats text row. */
+#define HOME_STATS_Y        120
+
+/** Footer bar top y. */
+#define HOME_FOOTER_Y       166
+
+/* ── fq_render_home ──────────────────────────────────────────────────────── */
+
 void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
 {
     if (fb == NULL || vm == NULL) {
@@ -51,41 +64,35 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
     fq_fb_draw_rect(fb, 0, 0,
                     (int16_t)FQ_FB_WIDTH, (int16_t)FQ_FB_HEIGHT, 1u);
 
-    /* ── Character name ─────────────────────────────────────────────────── */
-    fq_draw_text(fb, font, 5, 3, vm->name);
-
-    /* ── Level "Lv.XX" ──────────────────────────────────────────────────── */
+    /* ── Header bar: black fill, white text ─────────────────────────────── */
     {
         char lv_buf[8];
         snprintf(lv_buf, sizeof(lv_buf), "Lv.%u", (unsigned)vm->level);
-        fq_draw_text(fb, font, 130, 3, lv_buf);
+        fq_draw_header_bar2(fb, font, 0, HOME_BAR_H, vm->name, lv_buf);
     }
 
     /* ── Separator under header ─────────────────────────────────────────── */
-    fq_fb_draw_line(fb, 5, 34, 194, 34, 1u);
+    fq_fb_draw_line(fb, 1, HOME_BAR_H, (int16_t)(FQ_FB_WIDTH - 1u), HOME_BAR_H, 1u);
 
-    /* ── Character sprite ───────────────────────────────────────────────── */
+    /* ── 2x-scaled character sprite ─────────────────────────────────────── */
     {
         const fq_sprite_t *sp = fq_get_char_sprite(vm->sprite_base, 0u);
         if (sp != NULL) {
-            fq_blit_sprite(fb, 84, 37, sp);
+            fq_blit_sprite_2x(fb, HOME_SPRITE_X, HOME_SPRITE_Y, sp);
         }
     }
 
-    /* ── HP bar outline ─────────────────────────────────────────────────── */
+    /* ── HP bar (bordered panel) ────────────────────────────────────────── */
+    /* Outline. */
     fq_fb_draw_rect(fb,
                     HOME_HP_BAR_X, HOME_HP_BAR_Y,
                     HOME_HP_BAR_W, HOME_HP_BAR_H, 1u);
 
-    /* Fill proportional to hp_percent (integer-only, no float).
-     * hp_percent is 0-100.  Clamp to 100 before multiplying to prevent
-     * overflow when caller supplies out-of-range values (e.g. 255). */
+    /* Proportional fill (integer math, no float). */
     {
-        uint32_t pct_clamped = (vm->hp_percent > 100u) ? 100u : (uint32_t)vm->hp_percent;
-        uint32_t fill_w = pct_clamped * HOME_HP_FILL_MAX_W / 100u;
-        if (fill_w > HOME_HP_FILL_MAX_W) {
-            fill_w = HOME_HP_FILL_MAX_W;
-        }
+        uint32_t pct = (vm->hp_percent > 100u) ? 100u : (uint32_t)vm->hp_percent;
+        uint32_t fill_w = pct * HOME_HP_FILL_MAX_W / 100u;
+        if (fill_w > HOME_HP_FILL_MAX_W) { fill_w = HOME_HP_FILL_MAX_W; }
         if (fill_w > 0u) {
             fq_fb_fill_rect(fb,
                             HOME_HP_BAR_X + 1, HOME_HP_BAR_Y + 1,
@@ -93,32 +100,32 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
         }
     }
 
-    /* ── "HP" label (drawn last so it renders over the fill) ─────────────── */
-    /* Invert a small region so "HP" text is visible on the filled bar.
-     * We draw white text by using a fill_rect to clear that zone first,
-     * then draw the label text. */
+    /* "HP" label — white patch then text. */
     fq_fb_fill_rect(fb,
                     HOME_HP_BAR_X + 1, HOME_HP_BAR_Y + 1,
-                    26, HOME_HP_BAR_H - 2, 0u);  /* white patch */
+                    28, HOME_HP_BAR_H - 2, 0u);
     fq_draw_text(fb, font, HOME_HP_BAR_X + 2, HOME_HP_BAR_Y + 1, "HP");
 
     /* ── Separator ──────────────────────────────────────────────────────── */
-    fq_fb_draw_line(fb, 5, 93, 194, 93, 1u);
+    fq_fb_draw_line(fb, 1, HOME_STATS_Y - 2,
+                    (int16_t)(FQ_FB_WIDTH - 1u), HOME_STATS_Y - 2, 1u);
 
-    /* ── Wins text "W:XXX" ──────────────────────────────────────────────── */
+    /* ── Win / Loss stats text ──────────────────────────────────────────── */
     {
         char w_buf[8];
-        snprintf(w_buf, sizeof(w_buf), "W:%u", (unsigned)vm->wins);
-        fq_draw_text(fb, font, 10, 96, w_buf);
-    }
-
-    /* ── Losses text "L:XXX" ────────────────────────────────────────────── */
-    {
         char l_buf[8];
-        snprintf(l_buf, sizeof(l_buf), "L:%u", (unsigned)vm->losses);
-        fq_draw_text(fb, font, 105, 96, l_buf);
+        snprintf(w_buf, sizeof(w_buf), "W: %u", (unsigned)vm->wins);
+        snprintf(l_buf, sizeof(l_buf), "L: %u", (unsigned)vm->losses);
+        fq_draw_text(fb, font, 10, HOME_STATS_Y, w_buf);
+        fq_draw_text(fb, font, 110, HOME_STATS_Y, l_buf);
     }
 
-    /* ── Bottom separator ───────────────────────────────────────────────── */
-    fq_fb_draw_line(fb, 5, 130, 194, 130, 1u);
+    /* ── Footer bar: black fill, white text ─────────────────────────────── */
+    {
+        char w_buf[8];
+        char l_buf[8];
+        snprintf(w_buf, sizeof(w_buf), "W: %u", (unsigned)vm->wins);
+        snprintf(l_buf, sizeof(l_buf), "L: %u", (unsigned)vm->losses);
+        fq_draw_header_bar2(fb, font, HOME_FOOTER_Y, HOME_BAR_H, w_buf, l_buf);
+    }
 }
