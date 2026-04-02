@@ -30,6 +30,7 @@
 #include "vendors/stb_image_write.h"
 
 #include "fq_framebuffer.h"
+#include "fq_text.h"
 #include "screens/screen_home.h"
 #include "screens/screen_inventory.h"
 #include "screens/screen_stats.h"
@@ -38,6 +39,8 @@
 #include "ui_widgets.h"
 #include "vm_builder.h"
 #include "types.h"
+#include "asset_data.h"
+#include "sprite_util.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -150,6 +153,66 @@ static int write_framebuffer_png(const fq_fb_t *fb,
 }
 
 /* ---------------------------------------------------------------------------
+ * render_title_screen
+ *
+ * Mirrors the title screen layout from app_main.c render_title_screen().
+ * Called here so the visual harness can produce scene_title.png for review.
+ *
+ * Layout (200x200 px, 1-bit e-paper):
+ *   y=0..3    4-px thick outer border
+ *   y=8       1-px inner decorative border (inset 8px)
+ *   y=20      "FiestaQuest" centered
+ *   y=52      horizontal separator
+ *   y=60      Dark Knight 2x sprite (64x64), centered
+ *   y=130     horizontal separator
+ *   y=145     "Press BOOT" centered
+ *   y=196..199 bottom 4-px thick border
+ * ---------------------------------------------------------------------------
+ */
+static void render_title_screen(fq_fb_t *fb)
+{
+    const fq_font_t   *font = fq_get_font_small();
+    const fq_sprite_t *spr  = fq_get_char_sprite(0u, 0u); /* Dark Knight, frame 0 */
+
+    /* Outer 4-px thick border */
+    fq_fb_fill_rect(fb,   0,   0, 200,   4, 1u); /* top    */
+    fq_fb_fill_rect(fb,   0, 196, 200,   4, 1u); /* bottom */
+    fq_fb_fill_rect(fb,   0,   4,   4, 192, 1u); /* left   */
+    fq_fb_fill_rect(fb, 196,   4,   4, 192, 1u); /* right  */
+
+    /* Inner 1-px decorative border, inset 8px */
+    fq_fb_draw_rect(fb, 8, 8, 184, 184, 1u);
+
+    /* "FiestaQuest" centered at y=20 */
+    {
+        static const char title_str[] = "FiestaQuest";
+        int16_t w = fq_text_width(font, title_str);
+        int16_t x = (int16_t)((200 - w) / 2);
+        fq_draw_text(fb, font, x, 20, title_str);
+    }
+
+    /* Horizontal separator at y=52 */
+    fq_fb_draw_line(fb, 12, 52, 187, 52, 1u);
+
+    /* Dark Knight sprite 2x (64x64), centered at x=68, top at y=60 */
+    if (spr != NULL) {
+        int16_t sprite_x = (int16_t)((200 - 64) / 2);
+        fq_blit_sprite_2x(fb, sprite_x, 60, spr);
+    }
+
+    /* Horizontal separator at y=130 */
+    fq_fb_draw_line(fb, 12, 130, 187, 130, 1u);
+
+    /* "Press BOOT" centered at y=145 */
+    {
+        static const char prompt_str[] = "Press BOOT";
+        int16_t w = fq_text_width(font, prompt_str);
+        int16_t x = (int16_t)((200 - w) / 2);
+        fq_draw_text(fb, font, x, 145, prompt_str);
+    }
+}
+
+/* ---------------------------------------------------------------------------
  * main
  * ---------------------------------------------------------------------------
  */
@@ -228,7 +291,19 @@ int main(void)
     printf("render_all_screens: stbi_write_png correctly returned 0 for NULL filepath\n");
 
     /* -----------------------------------------------------------------------
-     * Screen 3: scene_home.png — home screen with Ember, level 7.
+     * Screen 3: scene_title.png — FiestaQuest title screen.
+     * ----------------------------------------------------------------------- */
+    fq_fb_clear(&framebuffer);
+    render_title_screen(&framebuffer);
+
+    printf("render_all_screens: writing output/scene_title.png ...\n");
+    if (write_framebuffer_png(&framebuffer, "output/scene_title.png") != 0) {
+        return EXIT_FAILURE;
+    }
+    printf("render_all_screens: output/scene_title.png written successfully\n");
+
+    /* -----------------------------------------------------------------------
+     * Screen 4: scene_home.png — home screen with Ember, level 7.
      * ----------------------------------------------------------------------- */
     {
         fq_character_t ch;
@@ -253,7 +328,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 4: scene_inventory.png — inventory with 5 items, cursor at 2.
+     * Screen 5: scene_inventory.png — inventory with 5 items, cursor at 2.
      * ----------------------------------------------------------------------- */
     {
         fq_inventory_t    inv;
@@ -281,7 +356,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 5: scene_stats.png — stats screen for Tide, level 12, rebirth 2.
+     * Screen 6: scene_stats.png — stats screen for Tide, level 12, rebirth 2.
      * ----------------------------------------------------------------------- */
     {
         fq_character_t ch;
@@ -310,7 +385,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 6: scene_combat.png — Round 3, Ember 75/100 HP vs Shadow 40/80.
+     * Screen 7: scene_combat.png — Round 3, Ember 75/100 HP vs Shadow 40/80.
      * action_text = "Cleave! -15"
      * ----------------------------------------------------------------------- */
     {
@@ -339,7 +414,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 7: scene_dialogue.png — REBIRTH dialogue with YES/NO buttons.
+     * Screen 8: scene_dialogue.png — REBIRTH dialogue with YES/NO buttons.
      * ----------------------------------------------------------------------- */
     {
         fq_fb_clear(&framebuffer);
@@ -361,7 +436,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 8: scene_training.png — Speed game, score=70, state=2 (done).
+     * Screen 9: scene_training.png — Speed game, score=70, state=2 (done).
      * ----------------------------------------------------------------------- */
     {
         fq_vm_training_t vm_training;

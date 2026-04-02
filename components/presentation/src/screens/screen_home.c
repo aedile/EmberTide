@@ -47,6 +47,12 @@
 /** Footer bar top y. */
 #define HOME_FOOTER_Y       166
 
+/*
+ * Win/loss buffer size: "W: " (3) + uint16 max "65535" (5) + NUL (1) = 9.
+ * Use 10 for comfortable margin and to satisfy -Wformat-truncation.
+ */
+#define HOME_WL_BUF_SIZE     10
+
 /* ── fq_render_home ──────────────────────────────────────────────────────── */
 
 void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
@@ -112,8 +118,8 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
 
     /* ── Win / Loss stats text ──────────────────────────────────────────── */
     {
-        char w_buf[8];
-        char l_buf[8];
+        char w_buf[HOME_WL_BUF_SIZE];
+        char l_buf[HOME_WL_BUF_SIZE];
         snprintf(w_buf, sizeof(w_buf), "W: %u", (unsigned)vm->wins);
         snprintf(l_buf, sizeof(l_buf), "L: %u", (unsigned)vm->losses);
         fq_draw_text(fb, font, 10, HOME_STATS_Y, w_buf);
@@ -122,8 +128,8 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
 
     /* ── Footer bar: black fill, white text ─────────────────────────────── */
     {
-        char w_buf[8];
-        char l_buf[8];
+        char w_buf[HOME_WL_BUF_SIZE];
+        char l_buf[HOME_WL_BUF_SIZE];
         snprintf(w_buf, sizeof(w_buf), "W: %u", (unsigned)vm->wins);
         snprintf(l_buf, sizeof(l_buf), "L: %u", (unsigned)vm->losses);
         fq_draw_header_bar2(fb, font, HOME_FOOTER_Y, HOME_BAR_H, w_buf, l_buf);

@@ -31,10 +31,13 @@
 
 /* Presentation layer */
 #include "fq_framebuffer.h"
+#include "fq_text.h"
 #include "view_models.h"
 #include "screens/screen_home.h"
 #include "screens/screen_stats.h"
 #include "screens/screen_inventory.h"
+#include "asset_data.h"
+#include "sprite_util.h"
 
 /* HAL layer — only main/ may include hal_*.h */
 #include "hal_epaper.h"
@@ -77,6 +80,68 @@ static void button_callback(hal_btn_id_t btn_id)
 }
 
 /* -------------------------------------------------------------------------
+ * render_title_screen — Draw the FiestaQuest title screen.
+ *
+ * Layout (200x200 px, 1-bit e-paper):
+ *   y=0..3    4-px thick outer border (filled rects on all four edges)
+ *   y=8       1-px inner decorative border (draw_rect, inset 8px)
+ *   y=20      "FiestaQuest" centered, normal text
+ *   y=52      horizontal separator line
+ *   y=60      Dark Knight sprite (32x32) blitted at 2x -> 64x64, centered
+ *   y=130     horizontal separator line
+ *   y=145     "Press BOOT" centered, normal text
+ *   y=192     bottom of inner border
+ *   y=196..199 bottom 4-px thick border
+ * -------------------------------------------------------------------------
+ */
+static void render_title_screen(fq_fb_t *fb)
+{
+    const fq_font_t   *font  = fq_get_font_small();
+    const fq_sprite_t *spr   = fq_get_char_sprite(0u, 0u); /* Dark Knight, frame 0 */
+
+    /* -- Outer 4-px thick border ------------------------------------------ */
+    /* Top band */
+    fq_fb_fill_rect(fb,   0,   0, 200,   4, 1u);
+    /* Bottom band */
+    fq_fb_fill_rect(fb,   0, 196, 200,   4, 1u);
+    /* Left band */
+    fq_fb_fill_rect(fb,   0,   4,   4, 192, 1u);
+    /* Right band */
+    fq_fb_fill_rect(fb, 196,   4,   4, 192, 1u);
+
+    /* -- Inner 1-px decorative border (inset 8px from outer border) --------- */
+    fq_fb_draw_rect(fb, 8, 8, 184, 184, 1u);
+
+    /* -- "FiestaQuest" centered at y=20 ------------------------------------- */
+    {
+        static const char title_str[] = "FiestaQuest";
+        int16_t w = fq_text_width(font, title_str);
+        int16_t x = (int16_t)((200 - w) / 2);
+        fq_draw_text(fb, font, x, 20, title_str);
+    }
+
+    /* -- Horizontal separator below title, y=52 ----------------------------- */
+    fq_fb_draw_line(fb, 12, 52, 187, 52, 1u);
+
+    /* -- Dark Knight sprite at 2x (64x64), centered horizontally, top at y=60 */
+    if (spr != NULL) {
+        int16_t sprite_x = (int16_t)((200 - 64) / 2); /* = 68 */
+        fq_blit_sprite_2x(fb, sprite_x, 60, spr);
+    }
+
+    /* -- Horizontal separator above footer, y=130 --------------------------- */
+    fq_fb_draw_line(fb, 12, 130, 187, 130, 1u);
+
+    /* -- "Press BOOT" centered at y=145 ------------------------------------- */
+    {
+        static const char prompt_str[] = "Press BOOT";
+        int16_t w = fq_text_width(font, prompt_str);
+        int16_t x = (int16_t)((200 - w) / 2);
+        fq_draw_text(fb, font, x, 145, prompt_str);
+    }
+}
+
+/* -------------------------------------------------------------------------
  * render_current_state — Render the current FSM state to the framebuffer
  * and flush it to the e-paper display.
  * -------------------------------------------------------------------------
@@ -92,9 +157,7 @@ static void render_current_state(fq_app_ctx_t   *app,
 
     switch (app->state) {
         case FQ_STATE_TITLE: {
-            /* Proof-of-life title screen: filled rectangle + border. */
-            fq_fb_draw_rect(fb, 0, 0, 200, 200, 1);
-            fq_fb_fill_rect(fb, 10, 80, 180, 40, 1);
+            render_title_screen(fb);
             break;
         }
         case FQ_STATE_HOME: {
