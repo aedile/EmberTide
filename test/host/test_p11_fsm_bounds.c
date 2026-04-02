@@ -138,9 +138,12 @@ int main(void)
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&persistent_ctx, &player, &inv);
 
-    /* Navigate: TITLE → HOME (BTN_A) → INVENTORY (BTN_A) */
+    /* Navigate: TITLE → HOME (BTN_A) → cycle to ITEMS (BTN_B x2) → INVENTORY (BTN_A) */
     fq_app_dispatch(&persistent_ctx, &(fq_event_t){ FQ_EVT_BTN_A_PRESS, 0u });
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)persistent_ctx.state);
+    /* Cycle menu to index=2 (ITEMS) with two BTN_B presses */
+    fq_app_dispatch(&persistent_ctx, &(fq_event_t){ FQ_EVT_BTN_B_PRESS, 0u });
+    fq_app_dispatch(&persistent_ctx, &(fq_event_t){ FQ_EVT_BTN_B_PRESS, 0u });
     fq_app_dispatch(&persistent_ctx, &(fq_event_t){ FQ_EVT_BTN_A_PRESS, 0u });
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_INVENTORY, (int)persistent_ctx.state);
 
@@ -168,9 +171,10 @@ int main(void)
     memset(&guard_inv,    0, sizeof(guard_inv));
     fq_app_init(&guard_ctx, &guard_player, &guard_inv);
 
-    /* Navigate: TITLE → HOME → BATTLE_SETUP → BATTLE */
-    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BTN_A_PRESS,   0u });
-    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BTN_B_PRESS,   0u });
+    /* Navigate: TITLE → HOME → cycle to BATTLE (BTN_B x1) → BATTLE_SETUP (BTN_A) → BATTLE */
+    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BTN_A_PRESS,   0u }); /* TITLE → HOME */
+    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BTN_B_PRESS,   0u }); /* cycle to BATTLE (index=1) */
+    fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BTN_A_PRESS,   0u }); /* select BATTLE_SETUP */
     fq_app_dispatch(&guard_ctx, &(fq_event_t){ FQ_EVT_BLE_CONNECTED, 0u });
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_BATTLE, (int)guard_ctx.state);
     TEST_ASSERT_EQUAL_UINT8(1u, guard_ctx.combat_active);

@@ -180,9 +180,13 @@ void fq_render_training(fq_fb_t *fb, const fq_vm_training_t *vm)
         }
     }
 
-    /* ── Footer bar: state label ─────────────────────────────────────────── */
+    /* ── Footer bar: state label + navigation hint ──────────────────────── */
+    /* Active state: "[SUN] Hit  [PWR] Exit"; waiting/done: "[PWR] Back".   */
     {
         const char *state_str = (vm->state < 3u) ? s_state_labels[vm->state] : "?";
-        fq_draw_header_bar(fb, font, TRAINING_FOOTER_Y, TRAINING_BAR_H, state_str);
+        const char *hint_str  = (vm->state == 1u) ? "[SUN]Hit [PWR]Exit"
+                                                   : "[PWR] Back";
+        fq_draw_header_bar2(fb, font, TRAINING_FOOTER_Y, TRAINING_BAR_H,
+                            state_str, hint_str);
     }
 }

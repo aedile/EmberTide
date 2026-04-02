@@ -87,47 +87,53 @@ int main(void)
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)ctx.state);
 
     /* -----------------------------------------------------------------------
-     * HOME → INVENTORY on BTN_A_PRESS.
+     * HOME → INVENTORY via menu (cycle to ITEMS with BTN_B×2, select with BTN_A).
      * ----------------------------------------------------------------------- */
     fq_app_ctx_t home_ctx;
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&home_ctx, &player, &inv);
-    dispatch_ok(&home_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&home_ctx, FQ_EVT_BTN_A_PRESS); /* HOME → INVENTORY */
+    dispatch_ok(&home_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
+    dispatch_ok(&home_ctx, FQ_EVT_BTN_B_PRESS); /* cycle menu: index 0→1 */
+    dispatch_ok(&home_ctx, FQ_EVT_BTN_B_PRESS); /* cycle menu: index 1→2 (ITEMS) */
+    dispatch_ok(&home_ctx, FQ_EVT_BTN_A_PRESS); /* select → INVENTORY */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_INVENTORY, (int)home_ctx.state);
 
     /* -----------------------------------------------------------------------
-     * HOME → BATTLE_SETUP on BTN_B_PRESS.
+     * HOME → BATTLE_SETUP via menu (cycle to BATTLE with BTN_B×1, select with BTN_A).
      * ----------------------------------------------------------------------- */
     fq_app_ctx_t bs_ctx;
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&bs_ctx, &player, &inv);
-    dispatch_ok(&bs_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&bs_ctx, FQ_EVT_BTN_B_PRESS); /* HOME → BATTLE_SETUP */
+    dispatch_ok(&bs_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
+    dispatch_ok(&bs_ctx, FQ_EVT_BTN_B_PRESS); /* cycle menu: index 0→1 (BATTLE) */
+    dispatch_ok(&bs_ctx, FQ_EVT_BTN_A_PRESS); /* select → BATTLE_SETUP */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_BATTLE_SETUP, (int)bs_ctx.state);
 
     /* -----------------------------------------------------------------------
-     * HOME → TRAINING on BTN_A_LONG.
+     * HOME → TRAINING via menu (BTN_A selects TRAIN at index=0).
      * ----------------------------------------------------------------------- */
     fq_app_ctx_t tr_ctx;
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&tr_ctx, &player, &inv);
-    dispatch_ok(&tr_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&tr_ctx, FQ_EVT_BTN_A_LONG);  /* HOME → TRAINING */
+    dispatch_ok(&tr_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
+    dispatch_ok(&tr_ctx, FQ_EVT_BTN_A_PRESS); /* select TRAIN (index=0) → TRAINING */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_TRAINING, (int)tr_ctx.state);
 
     /* -----------------------------------------------------------------------
-     * HOME → STATS on BTN_B_LONG.
+     * HOME → STATS via menu (cycle to STATS with BTN_B×3, select with BTN_A).
      * ----------------------------------------------------------------------- */
     fq_app_ctx_t st_ctx;
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&st_ctx, &player, &inv);
-    dispatch_ok(&st_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&st_ctx, FQ_EVT_BTN_B_LONG);  /* HOME → STATS */
+    dispatch_ok(&st_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
+    dispatch_ok(&st_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 0→1 */
+    dispatch_ok(&st_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 1→2 */
+    dispatch_ok(&st_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 2→3 (STATS) */
+    dispatch_ok(&st_ctx, FQ_EVT_BTN_A_PRESS); /* select → STATS */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_STATS, (int)st_ctx.state);
 
     /* -----------------------------------------------------------------------
@@ -137,8 +143,10 @@ int main(void)
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&inv_ctx, &player, &inv);
-    dispatch_ok(&inv_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&inv_ctx, FQ_EVT_BTN_A_PRESS); /* → INVENTORY */
+    dispatch_ok(&inv_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
+    dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 0→1 */
+    dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 1→2 (ITEMS) */
+    dispatch_ok(&inv_ctx, FQ_EVT_BTN_A_PRESS); /* select → INVENTORY */
     dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS); /* INVENTORY → HOME */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)inv_ctx.state);
 
@@ -149,8 +157,11 @@ int main(void)
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&stats_ctx, &player, &inv);
-    dispatch_ok(&stats_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&stats_ctx, FQ_EVT_BTN_B_LONG);  /* → STATS */
+    dispatch_ok(&stats_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
+    dispatch_ok(&stats_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 0→1 */
+    dispatch_ok(&stats_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 1→2 */
+    dispatch_ok(&stats_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 2→3 (STATS) */
+    dispatch_ok(&stats_ctx, FQ_EVT_BTN_A_PRESS); /* select → STATS */
     dispatch_ok(&stats_ctx, FQ_EVT_BTN_B_PRESS); /* STATS → HOME */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)stats_ctx.state);
 
@@ -161,8 +172,8 @@ int main(void)
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&train_ctx, &player, &inv);
-    dispatch_ok(&train_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&train_ctx, FQ_EVT_BTN_A_LONG);  /* → TRAINING */
+    dispatch_ok(&train_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
+    dispatch_ok(&train_ctx, FQ_EVT_BTN_A_PRESS); /* select TRAIN (index=0) → TRAINING */
     dispatch_ok(&train_ctx, FQ_EVT_BTN_B_PRESS); /* TRAINING → HOME */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)train_ctx.state);
 
@@ -174,8 +185,9 @@ int main(void)
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&battle_ctx, &player, &inv);
-    dispatch_ok(&battle_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
-    dispatch_ok(&battle_ctx, FQ_EVT_BTN_B_PRESS); /* → BATTLE_SETUP */
+    dispatch_ok(&battle_ctx, FQ_EVT_BTN_A_PRESS);   /* TITLE → HOME */
+    dispatch_ok(&battle_ctx, FQ_EVT_BTN_B_PRESS);   /* cycle: 0→1 (BATTLE) */
+    dispatch_ok(&battle_ctx, FQ_EVT_BTN_A_PRESS);   /* select → BATTLE_SETUP */
     dispatch_ok(&battle_ctx, FQ_EVT_BLE_CONNECTED); /* BATTLE_SETUP → BATTLE */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_BATTLE, (int)battle_ctx.state);
     TEST_ASSERT_EQUAL_UINT8(1u, battle_ctx.combat_active);
@@ -203,7 +215,7 @@ int main(void)
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&ignore_ctx, &player, &inv);
-    dispatch_ok(&ignore_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
+    dispatch_ok(&ignore_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
     /* Dispatch an event with no transition defined in HOME */
     fq_event_t unknown = { FQ_EVT_AUTO_SLEEP_TIMEOUT, 0u };
     game_err_t ign_err = fq_app_dispatch(&ignore_ctx, &unknown);
@@ -219,7 +231,7 @@ int main(void)
     memset(&player, 0, sizeof(player));
     memset(&inv,    0, sizeof(inv));
     fq_app_init(&reentrant_ctx, &player, &inv);
-    dispatch_ok(&reentrant_ctx, FQ_EVT_BTN_A_PRESS); /* → HOME */
+    dispatch_ok(&reentrant_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
 
     /* Post an event directly into the bus */
     uint8_t post_rc = fq_event_bus_post(&reentrant_ctx.bus, FQ_EVT_BTN_A_PRESS, 0u);
@@ -231,8 +243,8 @@ int main(void)
     fq_event_bus_pop(&reentrant_ctx.bus, &queued_evt);
     game_err_t rr_err = fq_app_dispatch(&reentrant_ctx, &queued_evt);
     TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)rr_err);
-    /* HOME → INVENTORY (BTN_A_PRESS in HOME) */
-    TEST_ASSERT_EQUAL_INT((int)FQ_STATE_INVENTORY, (int)reentrant_ctx.state);
+    /* HOME → TRAINING (BTN_A_PRESS in HOME at menu_index=0 selects TRAIN) */
+    TEST_ASSERT_EQUAL_INT((int)FQ_STATE_TRAINING, (int)reentrant_ctx.state);
 
     /* -----------------------------------------------------------------------
      * State enum values check.

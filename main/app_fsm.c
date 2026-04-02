@@ -15,10 +15,28 @@
  *   FQ_STATE_BATTLE block. This is structurally enforced by the switch layout:
  *   each case only touches the fields it needs, and only the BATTLE case is
  *   permitted to call fq_combat_step() which advances the PRNG.
+ *
+ * Phase-19 HOME state:
+ *   BTN_B (☀ SUN, GPIO18) cycles home_menu_index mod FQ_HOME_MENU_COUNT.
+ *   BTN_A (⏻ PWR, GPIO0) selects the highlighted menu item and transitions.
+ *   home_menu_index is reset to 0 whenever any state transitions BACK to HOME.
  */
 
 #include "app_fsm.h"
 #include <string.h>
+
+/* ---------------------------------------------------------------------------
+ * go_home — transition to HOME and reset the menu index.
+ *
+ * Centralised helper used by all states that return to HOME. This ensures
+ * home_menu_index is always 0 when the player arrives at the home screen,
+ * regardless of which path they took to get there.
+ * ---------------------------------------------------------------------------*/
+static void go_home(fq_app_ctx_t *ctx)
+{
+    ctx->state           = FQ_STATE_HOME;
+    ctx->home_menu_index = 0u;
+}
 
 /* ---------------------------------------------------------------------------
  * fq_app_init
@@ -40,6 +58,9 @@ game_err_t fq_app_init(fq_app_ctx_t   *ctx,
 
     /* Initialize the embedded event bus. */
     fq_event_bus_init(&ctx->bus);
+
+    /* home_menu_index starts at 0 (zeroed by memset above — explicit for clarity). */
+    ctx->home_menu_index = 0u;
 
     /* Automatic BOOT → TITLE transition (no PRNG touched). */
     ctx->state = FQ_STATE_TITLE;
@@ -86,7 +107,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                     /* Either button advances past the title screen.
                      * The SUN button (GPIO18, BTN_B) and the PWR button
                      * (GPIO0, BTN_A) both work — any press is intentional. */
-                    ctx->state = FQ_STATE_HOME;
+                    go_home(ctx);
                     break;
                 default:
                     /* All other events silently ignored. */
@@ -96,21 +117,46 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_HOME
+         *
+         * Phase-19 two-button UX:
+         *   BTN_B (☀ SUN) — cycles home_menu_index mod FQ_HOME_MENU_COUNT.
+         *   BTN_A (⏻ PWR) — selects current menu item, transitions to target.
+         *
+         * Menu mapping:
+         *   0 = TRAIN  → FQ_STATE_TRAINING
+         *   1 = BATTLE → FQ_STATE_BATTLE_SETUP
+         *   2 = ITEMS  → FQ_STATE_INVENTORY
+         *   3 = STATS  → FQ_STATE_STATS
          * ------------------------------------------------------------------- */
         case FQ_STATE_HOME:
             switch (evt->id) {
-                case FQ_EVT_BTN_A_PRESS:
-                    ctx->state = FQ_STATE_INVENTORY;
-                    break;
                 case FQ_EVT_BTN_B_PRESS:
-                    ctx->state = FQ_STATE_BATTLE_SETUP;
+                    /* Cycle menu forward, wrapping at FQ_HOME_MENU_COUNT. */
+                    ctx->home_menu_index =
+                        (uint8_t)((ctx->home_menu_index + 1u) % FQ_HOME_MENU_COUNT);
                     break;
-                case FQ_EVT_BTN_A_LONG:
-                    ctx->state = FQ_STATE_TRAINING;
+
+                case FQ_EVT_BTN_A_PRESS:
+                    /* Select the currently highlighted menu item. */
+                    switch (ctx->home_menu_index) {
+                        case FQ_HOME_MENU_TRAIN:
+                            ctx->state = FQ_STATE_TRAINING;
+                            break;
+                        case FQ_HOME_MENU_BATTLE:
+                            ctx->state = FQ_STATE_BATTLE_SETUP;
+                            break;
+                        case FQ_HOME_MENU_ITEMS:
+                            ctx->state = FQ_STATE_INVENTORY;
+                            break;
+                        case FQ_HOME_MENU_STATS:
+                            ctx->state = FQ_STATE_STATS;
+                            break;
+                        default:
+                            /* Defensive: unexpected index — silently ignore. */
+                            break;
+                    }
                     break;
-                case FQ_EVT_BTN_B_LONG:
-                    ctx->state = FQ_STATE_STATS;
-                    break;
+
                 default:
                     break;
             }
@@ -122,7 +168,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         case FQ_STATE_INVENTORY:
             switch (evt->id) {
                 case FQ_EVT_BTN_B_PRESS:
-                    ctx->state = FQ_STATE_HOME;
+                    go_home(ctx);
                     break;
                 default:
                     break;
@@ -135,7 +181,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         case FQ_STATE_STATS:
             switch (evt->id) {
                 case FQ_EVT_BTN_B_PRESS:
-                    ctx->state = FQ_STATE_HOME;
+                    go_home(ctx);
                     break;
                 default:
                     break;
@@ -148,7 +194,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         case FQ_STATE_TRAINING:
             switch (evt->id) {
                 case FQ_EVT_BTN_B_PRESS:
-                    ctx->state = FQ_STATE_HOME;
+                    go_home(ctx);
                     break;
                 default:
                     break;
@@ -199,7 +245,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         case FQ_STATE_BATTLE_RESULT:
             switch (evt->id) {
                 case FQ_EVT_BTN_A_PRESS:
-                    ctx->state = FQ_STATE_HOME;
+                    go_home(ctx);
                     break;
                 default:
                     break;

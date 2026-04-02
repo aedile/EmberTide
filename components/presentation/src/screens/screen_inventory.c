@@ -71,7 +71,7 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
                         (int16_t)(FQ_FB_WIDTH - 5u), (int16_t)(mid_y - 1), 1u);
         fq_fb_draw_line(fb, 5, (int16_t)(mid_y + 1),
                         (int16_t)(FQ_FB_WIDTH - 5u), (int16_t)(mid_y + 1), 1u);
-        fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_BAR_H, "Empty");
+        fq_draw_header_bar2(fb, font, INV_FOOTER_Y, INV_BAR_H, "Empty", "[PWR] Back");
         return;
     }
 
@@ -145,9 +145,13 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
     fq_fb_draw_line(fb, 0, (int16_t)(INV_FOOTER_Y - 1),
                     (int16_t)(FQ_FB_WIDTH - 1u), (int16_t)(INV_FOOTER_Y - 1), 1u);
 
-    /* ── Footer bar: selected item name ─────────────────────────────────── */
+    /* ── Footer bar: selected item name + navigation hint ──────────────── */
+    /* "[PWR] Back" hint is always shown on the right side of the footer.    */
     if (clamped_cursor < vm->item_count) {
-        fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_BAR_H,
-                           vm->item_names[clamped_cursor]);
+        fq_draw_header_bar2(fb, font, INV_FOOTER_Y, INV_BAR_H,
+                            vm->item_names[clamped_cursor], "[PWR] Back");
+    } else {
+        fq_draw_header_bar2(fb, font, INV_FOOTER_Y, INV_BAR_H,
+                            "Empty", "[PWR] Back");
     }
 }

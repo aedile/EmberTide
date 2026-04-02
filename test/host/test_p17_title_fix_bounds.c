@@ -104,20 +104,28 @@ int main(void)
     }
 
     /* -------------------------------------------------------------------
-     * B3: Idempotency — extra BTN_B after TITLE→HOME goes HOME→BATTLE_SETUP.
-     *     Verifies no double-advance or state corruption.
+     * B3: Idempotency — extra BTN_B after TITLE→HOME cycles menu, then
+     *     BTN_A selects BATTLE_SETUP. No double-advance or state corruption.
+     *     Phase-19: BTN_B in HOME now cycles menu (no state change); BTN_A
+     *     selects the highlighted item.
      * ------------------------------------------------------------------- */
     init_fresh(&ctx, &player, &inv);
 
     {
         fq_event_t btn_b = { FQ_EVT_BTN_B_PRESS, 0u };
+        fq_event_t btn_a = { FQ_EVT_BTN_A_PRESS, 0u };
 
         /* First press: TITLE → HOME */
         fq_app_dispatch(&ctx, &btn_b);
         TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)ctx.state);
 
-        /* Second press: HOME → BATTLE_SETUP (not BATTLE — combat_active guard) */
+        /* Second press: HOME BTN_B cycles menu to index=1 (BATTLE), stays HOME */
         fq_app_dispatch(&ctx, &btn_b);
+        TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)ctx.state);
+        TEST_ASSERT_EQUAL_UINT8(1u, ctx.home_menu_index);
+
+        /* BTN_A selects BATTLE → BATTLE_SETUP */
+        fq_app_dispatch(&ctx, &btn_a);
         TEST_ASSERT_EQUAL_INT((int)FQ_STATE_BATTLE_SETUP, (int)ctx.state);
     }
 

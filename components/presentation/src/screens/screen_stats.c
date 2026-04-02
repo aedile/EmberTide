@@ -161,10 +161,11 @@ void fq_render_stats(fq_fb_t *fb, const fq_vm_stats_t *vm)
                      (int16_t)(STATS_XP_Y + STATS_BAR_ROW_H + 2), xp_buf);
     }
 
-    /* ── Footer bar: Deaths count ───────────────────────────────────────── */
+    /* ── Footer bar: Deaths count + navigation hint ─────────────────────── */
     {
         char d_buf[16];
         snprintf(d_buf, sizeof(d_buf), "Deaths: %u", (unsigned)vm->rebirth_count);
-        fq_draw_header_bar(fb, font, STATS_FOOTER_Y, STATS_BAR_H, d_buf);
+        fq_draw_header_bar2(fb, font, STATS_FOOTER_Y, STATS_BAR_H,
+                            d_buf, "[PWR] Back");
     }
 }

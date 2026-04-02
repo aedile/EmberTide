@@ -329,6 +329,7 @@ int main(void)
         ch.hp_max = 100u;
 
         fq_vm_build_home(&vm_home, &ch);
+        vm_home.menu_index = 0u;  /* TRAIN highlighted by default */
         fq_render_home(&framebuffer, &vm_home);
 
         printf("render_all_screens: writing output/scene_home.png ...\n");

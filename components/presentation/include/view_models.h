@@ -13,6 +13,7 @@
  *
  * Phase-8 additions: fq_vm_home_t, fq_vm_inventory_t, fq_vm_stats_t.
  * Phase-9 additions: fq_vm_combat_t, fq_vm_training_t.
+ * Phase-19 additions: menu_index field added to fq_vm_home_t.
  */
 
 #ifndef FIESTAQUEST_PRESENTATION_VIEW_MODELS_H
@@ -43,7 +44,8 @@ typedef struct {
  *   uint8_t  level         (1)  offset 18
  *   uint8_t  hp_percent    (1)  offset 19  — 0-100, pre-computed
  *   uint8_t  sprite_base   (1)  offset 20
- *   uint8_t  _pad[3]       (3)  offset 21  — explicit alignment pad
+ *   uint8_t  menu_index    (1)  offset 21  — 0=TRAIN, 1=BATTLE, 2=ITEMS, 3=STATS
+ *   uint8_t  _pad[2]       (2)  offset 22  — explicit alignment pad
  * Total: 24 bytes.
  * ---------------------------------------------------------------------------*/
 typedef struct {
@@ -54,7 +56,8 @@ typedef struct {
     uint8_t  level;       /**< Current character level. */
     uint8_t  hp_percent;  /**< HP bar fill: 0-100, 0 when hp_max==0. */
     uint8_t  sprite_base; /**< Base sprite index for class rendering. */
-    uint8_t  _pad[3];     /**< Explicit alignment pad. */
+    uint8_t  menu_index;  /**< Currently highlighted menu item: 0=TRAIN, 1=BATTLE, 2=ITEMS, 3=STATS. */
+    uint8_t  _pad[2];     /**< Explicit alignment pad. */
 } fq_vm_home_t;
 
 /* ---------------------------------------------------------------------------

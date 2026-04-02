@@ -167,6 +167,7 @@ static void render_current_state(fq_app_ctx_t   *app,
         case FQ_STATE_HOME: {
             fq_vm_home_t vm_home;
             fq_vm_build_home(&vm_home, player);
+            vm_home.menu_index = app->home_menu_index;
             fq_render_home(fb, &vm_home);
             break;
         }
@@ -275,16 +276,23 @@ void app_main(void)
      * Main event loop — 20 Hz poll (50 ms period).
      * ----------------------------------------------------------------------- */
     fq_event_t      evt;
-    fq_app_state_t  last_state  = app.state;
-    uint8_t         needs_redraw = 0u;
+    fq_app_state_t  last_state        = app.state;
+    uint8_t         last_menu_index   = app.home_menu_index;
+    uint8_t         needs_redraw      = 0u;
 
     while (1) {
         /* Drain the event bus. */
         while (fq_event_bus_pop(&app.bus, &evt)) {
             fq_app_dispatch(&app, &evt);
+            /* Redraw on state change OR on home menu cursor change. */
             if (app.state != last_state) {
-                needs_redraw = 1u;
-                last_state   = app.state;
+                needs_redraw   = 1u;
+                last_state     = app.state;
+                last_menu_index = app.home_menu_index;
+            } else if (app.state == FQ_STATE_HOME &&
+                       app.home_menu_index != last_menu_index) {
+                needs_redraw    = 1u;
+                last_menu_index = app.home_menu_index;
             }
         }
 

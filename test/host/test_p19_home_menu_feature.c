@@ -134,10 +134,10 @@ int main(void)
 
     /* -----------------------------------------------------------------------
      * F7: fq_vm_home_t has a menu_index field (struct layout check).
-     *     Verify sizeof includes the new field — it must be at least 25 bytes
-     *     (was 24 before adding menu_index).
+     *     Verify sizeof includes the new field — it must be at least 24 bytes
+     *     (was 24 — menu_index replaces one pad byte, size stays 24).
      * ----------------------------------------------------------------------- */
-    TEST_ASSERT_TRUE(sizeof(fq_vm_home_t) >= 25u);
+    TEST_ASSERT_TRUE(sizeof(fq_vm_home_t) >= 24u);
 
     /* -----------------------------------------------------------------------
      * F8: fq_render_home with menu_index=0 (TRAIN highlighted):
