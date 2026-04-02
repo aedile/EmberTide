@@ -87,10 +87,7 @@ int16_t fq_draw_text_2x(fq_fb_t         *fb,
                                  * (uint32_t)font->glyph_h
                                  * row_bytes;
 
-        /* Render start (2x y-offset: off_y scaled down since dy is already
-         * in source-pixel units, but we scale the glyph itself 2x).
-         * Per the render contract: off_y is applied once to baseline, then
-         * each row expands 2x from that baseline. */
+        /* Glyph render origin: apply font offsets once (not scaled). */
         int16_t blit_x = (int16_t)(cursor + (int16_t)off_x);
         int16_t blit_y = (int16_t)(y      + (int16_t)off_y);
 
