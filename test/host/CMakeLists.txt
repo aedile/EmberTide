@@ -705,3 +705,18 @@ add_pres_test(test_kerning_bounds
 
 add_pres_test(test_kerning_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_kerning_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-19 Bound tests (Rule 22 Phase A — BOUND RED)
+# Home screen navigation menu: menu_index overflow/wrap, NULL guards,
+# OOB menu_index clamping in renderer.
+# Uses add_app_test to link game + presentation (screens/) + event_bus + app_fsm.
+# ---------------------------------------------------------------------------
+add_app_test(test_p19_home_menu_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_home_menu_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-19 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_app_test(test_p19_home_menu_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_home_menu_feature.c")
