@@ -84,11 +84,14 @@ int main(void)
     uint32_t pixels0 = count_pixels_in_region(&fb0, 68, 20, 64, 64);
     uint32_t pixels2 = count_pixels_in_region(&fb2, 68, 20, 64, 64);
 
-    /* Both renders must produce a non-zero or zero result without crash. */
-    /* If sprite data is available, at least one pixel must be set. */
-    /* We verify the renderer did not crash (reaching this point). */
-    (void)pixels0;
-    (void)pixels2;
+    /* BLOCKER 1 fix: Both frames must produce non-zero pixel output (sprite
+     * data is present in the host build — fq_get_char_sprite(0,0) and
+     * fq_get_char_sprite(0,2) both return non-NULL with real 32x32 data).
+     * Frame 0 and frame 2 share the same character but use different source
+     * rows, so they must produce distinct pixel patterns in the sprite region. */
+    TEST_ASSERT_TRUE(pixels0 > 0u);
+    TEST_ASSERT_TRUE(pixels2 > 0u);
+    TEST_ASSERT_TRUE(pixels0 != pixels2);
 
     /* ------------------------------------------------------------------
      * Test 26: Animation interval constant is exactly 800000 microseconds.
@@ -146,3 +149,4 @@ int main(void)
     printf("test_p19_5_home_anim_feature: PASS\n");
     return 0;
 }
+

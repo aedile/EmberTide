@@ -101,6 +101,12 @@ static const char *TAG = "app_main";
  */
 #define ANIM_FRAME_US      (800000ULL)
 
+/* BLOCKER 2 fix: Compile-time guard — ANIM_FRAME_US must be non-zero.
+ * A value of 0 would cause the animation to fire on every loop iteration,
+ * flooding the e-paper with partial refreshes and corrupting the display. */
+_Static_assert(ANIM_FRAME_US > 0ULL,
+               "ANIM_FRAME_US must be > 0 — zero causes runaway animation refreshes");
+
 /* -------------------------------------------------------------------------
  * File-scope application context pointer.
  *

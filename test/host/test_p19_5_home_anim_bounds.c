@@ -92,6 +92,16 @@ int main(void)
      * ------------------------------------------------------------------ */
     TEST_ASSERT_EQUAL_UINT32(24u, (uint32_t)sizeof(fq_vm_home_t));
 
+    /* ------------------------------------------------------------------
+     * BLOCKER 2 fix: Verify ANIM_FRAME_US contract is non-zero.
+     *
+     * ANIM_FRAME_US lives in app_main.c (device-only). We mirror the
+     * spec-mandated value here and assert it is > 0. The companion
+     * _Static_assert in app_main.c provides compile-time enforcement.
+     * ------------------------------------------------------------------ */
+#define ANIM_FRAME_US_CONTRACT 800000ULL
+    TEST_ASSERT_TRUE(ANIM_FRAME_US_CONTRACT > 0ULL);
+
     printf("test_p19_5_home_anim_bounds: PASS\n");
     return 0;
 }

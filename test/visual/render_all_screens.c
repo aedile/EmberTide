@@ -36,6 +36,7 @@
 #include "screens/screen_stats.h"
 #include "screens/screen_combat.h"
 #include "screens/screen_training.h"
+#include "screens/screen_idle.h"
 #include "ui_widgets.h"
 #include "vm_builder.h"
 #include "types.h"
@@ -467,6 +468,30 @@ int main(void)
             return EXIT_FAILURE;
         }
         printf("render_all_screens: output/scene_training.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 10: scene_idle.png — Idle screensaver, Ember at level 5.
+     *
+     * BLOCKER 5 fix: screen_idle was not rendered in the visual harness.
+     * fq_render_idle() clears the framebuffer before drawing, so we just
+     * call it directly with a valid fq_vm_idle_t.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_vm_idle_t vm_idle;
+        memset(&vm_idle, 0, sizeof(vm_idle));
+        vm_idle.sprite_base = 0u;   /* Dark Knight character */
+        vm_idle.level       = 5u;
+        strncpy(vm_idle.name, "Ember", sizeof(vm_idle.name) - 1u);
+
+        fq_fb_clear(&framebuffer);
+        fq_render_idle(&framebuffer, &vm_idle);
+
+        printf("render_all_screens: writing output/scene_idle.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_idle.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_idle.png written successfully\n");
     }
 
     printf("render_all_screens: ALL SCREENS OK\n");
