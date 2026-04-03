@@ -1,17 +1,19 @@
 # How to Play EmberTide
 
-EmberTide is played on a tiny e-paper device with two buttons: **A** (left) and **B** (right). The entire game is navigated with short presses and long presses of these two buttons. There is no touchscreen, no companion app, and no internet connection required for normal play.
+EmberTide is played on a tiny e-paper device with two buttons. The entire game is navigated with short presses and long presses of these two buttons. There is no touchscreen, no companion app, and no internet connection required for normal play.
 
 ---
 
 ## Controls
 
-| Input | Action |
-|-------|--------|
-| **A press** | Confirm / Select / Advance |
-| **B press** | Back / Cancel / Secondary action |
-| **A long hold** | Context action (Training from Home) |
-| **B long hold** | Context action (Stats from Home) |
+| Input | Button | Icon on Case | GPIO |
+|-------|--------|-------------|------|
+| **A press** — Confirm / Select / Advance | Closest to USB-C | ⏻ (power) | GPIO0 (BOOT pin) |
+| **B press** — Back / Cancel / Secondary action | Far from USB-C | ☀ (sun) | GPIO18 (PWR pin) |
+| **A long hold** | Closest to USB-C | ⏻ (power) | GPIO0 |
+| **B long hold** | Far from USB-C | ☀ (sun) | GPIO18 |
+
+> **Physical layout:** Facing the front of the device, the ⏻ power-icon button is on the left (closest to the USB-C port). The ☀ sun-icon button is on the right. The title screen prompt reads "Press [PWR]" — this refers to the ⏻ button (GPIO0 / HAL_BTN_A).
 
 ---
 
@@ -19,7 +21,7 @@ EmberTide is played on a tiny e-paper device with two buttons: **A** (left) and 
 
 When you power on a fresh device for the first time:
 
-1. The **Title Screen** appears. Press **A** to continue.
+1. The **Title Screen** appears. Press the **⏻ button** (closest to USB-C) to continue.
 2. You are taken to the **Home Screen** — your creature's dashboard.
 3. A default creature is created with randomized stats and a generated two-part name.
 
@@ -204,4 +206,4 @@ Stats follow a logarithmic curve — early training gains are dramatic, but high
 
 ## WiFi and OTA Updates
 
-Hold **A** during boot to enter WiFi setup mode. Your device creates a WiFi access point named `FiestaQuest-AP`. Connect to it from your phone or laptop, navigate to `192.168.4.1`, and enter your home WiFi credentials. The device stores them and uses WiFi for firmware updates (OTA) when available.
+Hold **A** during boot to enter WiFi setup mode. Your device creates a WiFi access point named `EmberTide-AP`. Connect to it from your phone or laptop, navigate to `192.168.4.1`, and enter your home WiFi credentials. The device stores them and uses WiFi for firmware updates (OTA) when available.

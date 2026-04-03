@@ -37,6 +37,20 @@
  */
 const fq_font_t *fq_get_font_small(void);
 
+/**
+ * fq_get_font_title — Return a pointer to the FONT_SCRIPT_36 font descriptor.
+ *
+ * Jacquard 12 script font at 36 px, used for decorative title text.
+ * Glyphs are up to 30 px tall in 30×30 cells. Advance widths corrected:
+ * advance = w+2 (glyph visual width + 2px inter-character gap). Off_x is
+ * zeroed because dx is already baked into the bitmap by extract_glyph_bitmap.
+ * "EmberTide" measures ~160px at this font.
+ * The returned pointer is always non-NULL (points to a static const struct).
+ *
+ * @return  Pointer to the FONT_SCRIPT_36_FONT fq_font_t descriptor.
+ */
+const fq_font_t *fq_get_font_title(void);
+
 /* ── Sprite accessors ─────────────────────────────────────────────────────── */
 
 /**

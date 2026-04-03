@@ -863,3 +863,71 @@ use cases.
 - `ctest --output-on-failure` (Gate #1): all tests pass — 0 failures.
 - No presentation/ files touched — visual regression reviewer not required.
 - No new game/ files — architecture reviewer not required.
+
+---
+
+## Phase 19 (Partial) — Home Screen Navigation Menu
+
+**Date:** 2026-04-03
+**Branch:** `feat/home-screen-nav-menu`
+
+### What Was Built
+
+- Home screen navigation menu: 4 items (TRAIN, BATTLE, ITEMS, STATS) with
+  Button A cycling selection and Button B confirming
+- `fq_vm_home_t.menu_index` field for cursor state
+- Button hint bar on all screens ("A:Select B:Confirm" on home, "B:Back" on sub-screens)
+- Title screen kerning fix and `fq_draw_text_2x()` for large text rendering
+- Updated visual golden baselines for all affected screens
+- Design document: `docs/backlog/phase-19.md` (items 1–3 of Phase 19)
+
+### Key Decisions
+
+1. **Menu rendered as text list, not icons:** At 200x200 1-bit, icon grids
+   are illegible. Four text rows with an arrow cursor tested clearly on hardware.
+
+2. **Button hints on every screen:** Two-button device means discoverability
+   is critical. Persistent hint bar prevents confusion.
+
+---
+
+## Process Lesson: Rapid Iteration for UI/UX Work
+
+**Date:** 2026-04-03
+**Context:** During Phase 19.5 prototyping (idle screen, walk animation, partial refresh)
+
+### Lesson Learned
+
+After completing the Phase 19 home screen menu through the standard TDD
+workflow, the PM and human operator pivoted to a **rapid iteration lab session**
+for the next set of UI/UX features. Instead of the full TDD cycle (which adds
+~10 minutes per iteration for spec → bound test → feature test → implementation),
+the agent and human collaborated in real-time:
+
+- Agent made small code changes (2–5 lines)
+- Human flashed and evaluated on hardware immediately
+- Feedback loop was ~30 seconds instead of ~10 minutes
+- Decisions like animation frame rate, sprite scale, and refresh interval were
+  tuned by human taste, not by specification
+
+**This was the right call.** UI/UX polish is taste-driven work where the
+acceptance criteria can only be written *after* you've seen it. The standard
+TDD workflow excels for deterministic logic (combat math, PRNG sequences,
+protocol serialization) but creates unnecessary friction for "does this look
+and feel right?" questions.
+
+### Recommendation
+
+Incorporate rapid iteration as a recognized workflow phase for UI/UX and
+visual tuning work. The process should be:
+
+1. **Lab phase:** Rapid iteration on a `lab/*` branch with human operator.
+   No TDD overhead. Goal is to converge on the right design.
+2. **Spec phase:** Write the formal spec from the lab results (what we decided,
+   not what we'll explore).
+3. **Build phase:** Standard TDD implementation of the now-known-good design.
+   The lab branch serves as reference for the software-developer agent.
+4. **Cleanup:** Delete the lab branch after the proper implementation merges.
+
+This hybrid approach preserves process rigor for the production build while
+acknowledging that some engineering decisions require human sensory evaluation.

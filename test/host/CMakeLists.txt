@@ -676,3 +676,88 @@ add_vm_test(test_p18_screen_text_bounds
 # ---------------------------------------------------------------------------
 add_vm_test(test_p18_screen_text_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p18_screen_text_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-17 patch: Title Screen Fix (font swap + BTN_B on TITLE + prompt text)
+#
+# Bound tests: BTN_B in TITLE must now advance to HOME; ghost events must
+# leave state unchanged; PRNG must be untouched.
+# Feature tests: both buttons advance TITLE; font-title returns FONT_SCRIPT_36;
+# two-line layout width invariants.
+# ---------------------------------------------------------------------------
+add_app_test(test_p17_title_fix_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_title_fix_bounds.c")
+
+add_app_test(test_p17_title_fix_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p17_title_fix_feature.c")
+
+# ---------------------------------------------------------------------------
+# Kerning fix: fq_draw_text_2x + corrected advance widths
+#
+# Bound tests: NULL guards on draw_text_2x, cursor overflow safety, 2x block
+# pixel address arithmetic, empty-string idempotency.
+# Feature tests: 2x pixel rendering, corrected FONT_SCRIPT_36 advance widths,
+# two-line layout width invariants.
+# Uses add_pres_test to link sprite_util.c and asset_data.c.
+# ---------------------------------------------------------------------------
+add_pres_test(test_kerning_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_kerning_bounds.c")
+
+add_pres_test(test_kerning_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_kerning_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-19 Bound tests (Rule 22 Phase A — BOUND RED)
+# Home screen navigation menu: menu_index overflow/wrap, NULL guards,
+# OOB menu_index clamping in renderer.
+# Uses add_app_test to link game + presentation (screens/) + event_bus + app_fsm.
+# ---------------------------------------------------------------------------
+add_app_test(test_p19_home_menu_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_home_menu_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-19 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_app_test(test_p19_home_menu_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_home_menu_feature.c")
+
+
+# ---------------------------------------------------------------------------
+# Phase-19.5: Idle Screen, Walk Animation & Partial E-Paper Refresh
+#
+# Bound tests (Rule 22 Phase A — BOUND RED):
+#   test_p19_5_epaper_partial_bounds — HAL partial refresh guard/counter bounds
+#   test_p19_5_home_anim_bounds     — anim_frame clamping, struct size assert
+#   test_p19_5_idle_bounds          — idle suppression, blit_3x NULL guards
+#
+# Feature tests (Rule 22 Phase B — FEATURE RED):
+#   test_p19_5_epaper_partial_feature — partial LUT, interval full-refresh
+#   test_p19_5_home_anim_feature     — frame alternation, interval constant
+#   test_p19_5_idle_feature          — idle render, vm_build_idle, blit_3x
+#
+# Epaper partial tests use add_hal_test (HAL layer only — no game/ or pres/).
+# Animation and idle tests use add_app_test (game + pres + screens + vm_builder
+# + event_bus + app_fsm) because they test FSM state transitions.
+# ---------------------------------------------------------------------------
+
+# Phase-19.5 Bound tests
+add_hal_test(test_p19_5_epaper_partial_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_epaper_partial_bounds.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
+
+add_app_test(test_p19_5_home_anim_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_home_anim_bounds.c")
+
+add_app_test(test_p19_5_idle_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_idle_bounds.c")
+
+# Phase-19.5 Feature tests
+add_hal_test(test_p19_5_epaper_partial_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_epaper_partial_feature.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
+
+add_app_test(test_p19_5_home_anim_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_home_anim_feature.c")
+
+add_app_test(test_p19_5_idle_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_idle_feature.c")

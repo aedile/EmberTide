@@ -30,8 +30,9 @@ Output C header contains:
                                bytes (padded with zeros if its bounding box
                                width < glyph_max_w).
   - FONTID_glyph_OFFSETS[95] — byte offset into BITMAP for each glyph.
-  - FONTID_WIDTHS[95]        — advance width from the JSON (w field).
-  - FONTID_OFFSETS_X[95]     — dx values (int8_t).
+  - FONTID_WIDTHS[95]        — advance width = w+2 (glyph width + 2px gap).
+                               dx is NOT added; it is baked into bitmap extraction.
+  - FONTID_OFFSETS_X[95]     — all zero (dx already applied during extraction).
   - FONTID_OFFSETS_Y[95]     — dy values (int8_t).
   - FONTID_FONT              — fq_font_t descriptor.
 
@@ -332,7 +333,10 @@ def generate_font_header(font_png, metrics_json_path, font_id,
             "/* ── Advance widths per glyph ─────────────────────────────────── */\n\n"
             "static const uint8_t {fid}_WIDTHS[{n}] = {{\n".format(
                 fid=font_id, n=NUM_GLYPHS))
-        widths = [m["w"] for m in metrics]
+        # Advance width = glyph_w + 2px inter-char gap.
+        # The bitmap extractor already applies dx (samples from cell_x+dx),
+        # so off_x is zeroed and no left-bearing offset is added to the advance.
+        widths = [m["w"] + 2 for m in metrics]
         items_w = ["{}U".format(w) for w in widths]
         for i in range(0, len(items_w), chunk):
             f.write("    " + ", ".join(items_w[i:i+chunk]) + ",\n")
@@ -343,7 +347,11 @@ def generate_font_header(font_png, metrics_json_path, font_id,
             "/* ── X offsets per glyph (dx, int8_t) ─────────────────────────── */\n\n"
             "static const int8_t {fid}_OFFSETS_X[{n}] = {{\n".format(
                 fid=font_id, n=NUM_GLYPHS))
-        dx_vals = [m["dx"] for m in metrics]
+        # off_x zeroed: dx is already applied during bitmap pixel extraction
+        # (extract_glyph_bitmap samples at cell_x+dx+col). Storing dx here
+        # would push each glyph dx pixels to the right of the cursor,
+        # creating inter-character gaps equal to dx (~8-14px). Zero = tight.
+        dx_vals = [0 for m in metrics]
         items_dx = ["{}".format(dx) for dx in dx_vals]
         for i in range(0, len(items_dx), chunk):
             f.write("    " + ", ".join(items_dx[i:i+chunk]) + ",\n")

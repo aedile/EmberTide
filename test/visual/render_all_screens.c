@@ -30,14 +30,18 @@
 #include "vendors/stb_image_write.h"
 
 #include "fq_framebuffer.h"
+#include "fq_text.h"
 #include "screens/screen_home.h"
 #include "screens/screen_inventory.h"
 #include "screens/screen_stats.h"
 #include "screens/screen_combat.h"
 #include "screens/screen_training.h"
+#include "screens/screen_idle.h"
 #include "ui_widgets.h"
 #include "vm_builder.h"
 #include "types.h"
+#include "asset_data.h"
+#include "sprite_util.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -150,6 +154,77 @@ static int write_framebuffer_png(const fq_fb_t *fb,
 }
 
 /* ---------------------------------------------------------------------------
+ * render_title_screen
+ *
+ * Mirrors the title screen layout from app_main.c render_title_screen().
+ * Called here so the visual harness can produce scene_title.png for review.
+ *
+ * Layout (200x200 px, 1-bit e-paper):
+ *   y=0..3    4-px thick outer border
+ *   y=4..51   Solid black title band (48px tall) with "EmberTide" as white
+ *             inverted text, centered — FONT_SCRIPT_36 with corrected advance
+ *             widths renders "EmberTide" in ~160px (was ~99px broken kerning).
+ *   y=52      horizontal separator
+ *   y=60      Dark Knight 2x sprite (64x64), centered
+ *   y=130     horizontal separator
+ *   y=145     "Press Any Button" centered, small font (FONT_REGS_12)
+ *   y=196..199 bottom 4-px thick border
+ *
+ * Title design: solid black band at top with white script text — maximum
+ * visual contrast on e-paper. Corrected advance widths eliminate inter-
+ * character gaps by zeroing off_x and using w+2 as advance.
+ *
+ * Button note: either button (SUN/GPIO18 = BTN_B, PWR/GPIO0 = BTN_A)
+ * advances the title screen.  The prompt says "Press Any Button".
+ * ---------------------------------------------------------------------------
+ */
+static void render_title_screen(fq_fb_t *fb)
+{
+    const fq_font_t   *font_title = fq_get_font_title();
+    const fq_font_t   *font_small = fq_get_font_small();
+    const fq_sprite_t *spr        = fq_get_char_sprite(0u, 0u); /* Dark Knight, frame 0 */
+
+    /* Outer 4-px thick border */
+    fq_fb_fill_rect(fb,   0,   0, 200,   4, 1u); /* top    */
+    fq_fb_fill_rect(fb,   0, 196, 200,   4, 1u); /* bottom */
+    fq_fb_fill_rect(fb,   0,   4,   4, 192, 1u); /* left   */
+    fq_fb_fill_rect(fb, 196,   4,   4, 192, 1u); /* right  */
+
+    /* Solid black title band y=4..51 (48px tall).
+     * "EmberTide" rendered as white inverted text, vertically centered in band.
+     * FONT_SCRIPT_36: glyph_h=30, so vertical center = (48-30)/2 = 9px margin.
+     * Render at y=4+9=13.
+     * Width = 160px (corrected advances); center at x=(200-160)/2=20. */
+    fq_fb_fill_rect(fb, 4, 4, 192, 48, 1u);
+    {
+        static const char title_str[] = "EmberTide";
+        int16_t w = fq_text_width(font_title, title_str);
+        int16_t x = (int16_t)((200 - w) / 2);
+        fq_draw_text_inverted(fb, font_title, x, 13, title_str);
+    }
+
+    /* Horizontal separator at y=52 */
+    fq_fb_draw_line(fb, 12, 52, 187, 52, 1u);
+
+    /* Dark Knight sprite 2x (64x64), centered at x=68, top at y=60 */
+    if (spr != NULL) {
+        int16_t sprite_x = (int16_t)((200 - 64) / 2);
+        fq_blit_sprite_2x(fb, sprite_x, 60, spr);
+    }
+
+    /* Horizontal separator at y=130 */
+    fq_fb_draw_line(fb, 12, 130, 187, 130, 1u);
+
+    /* "Press Any Button" centered at y=145, small font */
+    {
+        static const char prompt_str[] = "Press Any Button";
+        int16_t w = fq_text_width(font_small, prompt_str);
+        int16_t x = (int16_t)((200 - w) / 2);
+        fq_draw_text(fb, font_small, x, 145, prompt_str);
+    }
+}
+
+/* ---------------------------------------------------------------------------
  * main
  * ---------------------------------------------------------------------------
  */
@@ -228,7 +303,19 @@ int main(void)
     printf("render_all_screens: stbi_write_png correctly returned 0 for NULL filepath\n");
 
     /* -----------------------------------------------------------------------
-     * Screen 3: scene_home.png — home screen with Ember, level 7.
+     * Screen 3: scene_title.png — EmberTide title screen.
+     * ----------------------------------------------------------------------- */
+    fq_fb_clear(&framebuffer);
+    render_title_screen(&framebuffer);
+
+    printf("render_all_screens: writing output/scene_title.png ...\n");
+    if (write_framebuffer_png(&framebuffer, "output/scene_title.png") != 0) {
+        return EXIT_FAILURE;
+    }
+    printf("render_all_screens: output/scene_title.png written successfully\n");
+
+    /* -----------------------------------------------------------------------
+     * Screen 4: scene_home.png — home screen with Ember, level 7.
      * ----------------------------------------------------------------------- */
     {
         fq_character_t ch;
@@ -243,6 +330,7 @@ int main(void)
         ch.hp_max = 100u;
 
         fq_vm_build_home(&vm_home, &ch);
+        vm_home.menu_index = 0u;  /* TRAIN highlighted by default */
         fq_render_home(&framebuffer, &vm_home);
 
         printf("render_all_screens: writing output/scene_home.png ...\n");
@@ -253,7 +341,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 4: scene_inventory.png — inventory with 5 items, cursor at 2.
+     * Screen 5: scene_inventory.png — inventory with 5 items, cursor at 2.
      * ----------------------------------------------------------------------- */
     {
         fq_inventory_t    inv;
@@ -281,7 +369,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 5: scene_stats.png — stats screen for Tide, level 12, rebirth 2.
+     * Screen 6: scene_stats.png — stats screen for Tide, level 12, rebirth 2.
      * ----------------------------------------------------------------------- */
     {
         fq_character_t ch;
@@ -310,7 +398,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 6: scene_combat.png — Round 3, Ember 75/100 HP vs Shadow 40/80.
+     * Screen 7: scene_combat.png — Round 3, Ember 75/100 HP vs Shadow 40/80.
      * action_text = "Cleave! -15"
      * ----------------------------------------------------------------------- */
     {
@@ -339,7 +427,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 7: scene_dialogue.png — REBIRTH dialogue with YES/NO buttons.
+     * Screen 8: scene_dialogue.png — REBIRTH dialogue with YES/NO buttons.
      * ----------------------------------------------------------------------- */
     {
         fq_fb_clear(&framebuffer);
@@ -361,7 +449,7 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Screen 8: scene_training.png — Speed game, score=70, state=2 (done).
+     * Screen 9: scene_training.png — Speed game, score=70, state=2 (done).
      * ----------------------------------------------------------------------- */
     {
         fq_vm_training_t vm_training;
@@ -380,6 +468,30 @@ int main(void)
             return EXIT_FAILURE;
         }
         printf("render_all_screens: output/scene_training.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 10: scene_idle.png — Idle screensaver, Ember at level 5.
+     *
+     * BLOCKER 5 fix: screen_idle was not rendered in the visual harness.
+     * fq_render_idle() clears the framebuffer before drawing, so we just
+     * call it directly with a valid fq_vm_idle_t.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_vm_idle_t vm_idle;
+        memset(&vm_idle, 0, sizeof(vm_idle));
+        vm_idle.sprite_base = 0u;   /* Dark Knight character */
+        vm_idle.level       = 5u;
+        strncpy(vm_idle.name, "Ember", sizeof(vm_idle.name) - 1u);
+
+        fq_fb_clear(&framebuffer);
+        fq_render_idle(&framebuffer, &vm_idle);
+
+        printf("render_all_screens: writing output/scene_idle.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_idle.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_idle.png written successfully\n");
     }
 
     printf("render_all_screens: ALL SCREENS OK\n");
