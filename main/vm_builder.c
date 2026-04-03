@@ -14,6 +14,7 @@
  * game/types.h (via vm_builder.h → types.h) and presentation/view_models.h.
  *
  * Phase-9: fq_vm_build_combat() added.
+ * Phase-19.5: fq_vm_build_idle() added.
  */
 
 #include "vm_builder.h"
@@ -79,6 +80,9 @@ void fq_vm_build_home(fq_vm_home_t *vm, const fq_character_t *ch)
 
     /* Home screen always shows the character at full HP (hp_current == hp_max). */
     vm->hp_percent = calc_hp_percent((uint32_t)ch->hp_max, (uint32_t)ch->hp_max);
+
+    /* anim_frame zeroed — application layer (app_main.c) sets it from timer. */
+    vm->anim_frame = 0u;
 }
 
 /* ---------------------------------------------------------------------------
@@ -196,4 +200,25 @@ void fq_vm_build_combat(fq_vm_combat_t        *vm,
 
     /* action_text cleared — caller populates from round result. */
     vm->action_text[0] = '\0';
+}
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_build_idle
+ *
+ * Builds the idle screensaver view model from a character snapshot.
+ * Copies sprite_base, name (max 12 chars, null-terminated), and level.
+ *
+ * NULL-safe: returns immediately if vm or ch is NULL.
+ * ---------------------------------------------------------------------------*/
+void fq_vm_build_idle(fq_vm_idle_t *vm, const fq_character_t *ch)
+{
+    if (vm == NULL || ch == NULL) {
+        return;
+    }
+
+    vm->sprite_base = ch->sprite_base;
+    vm->level       = ch->level;
+
+    strncpy(vm->name, ch->name, 12u);
+    vm->name[12] = '\0';
 }

@@ -3,7 +3,7 @@
  *
  * Translates raw game state (fq_character_t, fq_inventory_t) into
  * presentation-ready view model structs (fq_vm_home_t, fq_vm_inventory_t,
- * fq_vm_stats_t, fq_vm_combat_t).
+ * fq_vm_stats_t, fq_vm_combat_t, fq_vm_idle_t).
  *
  * Architecture placement: main/ (application layer).
  *   - This is the ONLY module that includes BOTH game/types.h AND
@@ -17,6 +17,7 @@
  * Host-compilable: no hal_*.h included.
  *
  * Phase-9 additions: fq_vm_build_combat().
+ * Phase-19.5 additions: fq_vm_build_idle().
  */
 
 #ifndef FIESTAQUEST_MAIN_VM_BUILDER_H
@@ -33,6 +34,8 @@
  * Populates vm with the character's name (null-terminated, max 12 chars),
  * class_id, level, sprite_base, wins, losses, and hp_percent=100 (home
  * screen always shows full HP — combat HP is not persisted in the save).
+ * anim_frame is zeroed — the application layer (app_main.c) sets it from
+ * the animation timer after calling this function.
  *
  * NULL-safe: returns immediately if vm or ch is NULL.
  *
@@ -102,5 +105,18 @@ void fq_vm_build_combat(fq_vm_combat_t        *vm,
                         const fq_combat_ctx_t *ctx,
                         const fq_character_t  *c1,
                         const fq_character_t  *c2);
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_build_idle() — Build the idle screensaver view model from a character.
+ *
+ * Populates vm with sprite_base, name (null-terminated, max 12 chars),
+ * and level. Minimal data needed by fq_render_idle().
+ *
+ * NULL-safe: returns immediately if vm or ch is NULL.
+ *
+ * @param vm  Output view model. NULL-safe.
+ * @param ch  Source character. NULL-safe.
+ * ---------------------------------------------------------------------------*/
+void fq_vm_build_idle(fq_vm_idle_t *vm, const fq_character_t *ch);
 
 #endif /* FIESTAQUEST_MAIN_VM_BUILDER_H */

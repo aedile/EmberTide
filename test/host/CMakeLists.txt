@@ -721,6 +721,7 @@ add_app_test(test_p19_home_menu_bounds
 add_app_test(test_p19_home_menu_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_home_menu_feature.c")
 
+
 # ---------------------------------------------------------------------------
 # Phase-19.5: Idle Screen, Walk Animation & Partial E-Paper Refresh
 #
@@ -735,7 +736,8 @@ add_app_test(test_p19_home_menu_feature
 #   test_p19_5_idle_feature          — idle render, vm_build_idle, blit_3x
 #
 # Epaper partial tests use add_hal_test (HAL layer only — no game/ or pres/).
-# Animation and idle tests use add_vm_test (game + pres + screens + vm_builder).
+# Animation and idle tests use add_app_test (game + pres + screens + vm_builder
+# + event_bus + app_fsm) because they test FSM state transitions.
 # ---------------------------------------------------------------------------
 
 # Phase-19.5 Bound tests
@@ -743,10 +745,10 @@ add_hal_test(test_p19_5_epaper_partial_bounds
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_epaper_partial_bounds.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
 
-add_vm_test(test_p19_5_home_anim_bounds
+add_app_test(test_p19_5_home_anim_bounds
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_home_anim_bounds.c")
 
-add_vm_test(test_p19_5_idle_bounds
+add_app_test(test_p19_5_idle_bounds
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_idle_bounds.c")
 
 # Phase-19.5 Feature tests
@@ -754,8 +756,8 @@ add_hal_test(test_p19_5_epaper_partial_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_epaper_partial_feature.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_epaper.c")
 
-add_vm_test(test_p19_5_home_anim_feature
+add_app_test(test_p19_5_home_anim_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_home_anim_feature.c")
 
-add_vm_test(test_p19_5_idle_feature
+add_app_test(test_p19_5_idle_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_idle_feature.c")

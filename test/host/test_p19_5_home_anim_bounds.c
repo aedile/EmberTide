@@ -10,6 +10,7 @@
  *   11. test_vm_home_static_assert_24_bytes        (compile-time: verified via sizeof)
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>

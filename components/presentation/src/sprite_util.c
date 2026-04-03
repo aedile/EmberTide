@@ -1,9 +1,11 @@
 /**
  * sprite_util.c — FiestaQuest Presentation Layer: Sprite & Text Utilities
  *
- * Implements 2x-scaled sprite blitting, 2x-scaled text rendering,
+ * Implements 2x/3x-scaled sprite blitting, 2x-scaled text rendering,
  * inverted-text rendering, and the header/footer bar helpers shared by all
  * screen renderers.
+ *
+ * Phase-19.5 additions: fq_blit_sprite_3x() — 3x pixel scale for idle screen.
  *
  * Constitution Priority 0: no float, no malloc, no PRNG calls.
  * HOST-COMPILABLE — no hal_*.h, no game/ headers.
@@ -39,6 +41,57 @@ void fq_blit_sprite_2x(fq_fb_t *fb,
                 fq_fb_set_pixel(fb, (int16_t)(dx + 1), dy,           1u);
                 fq_fb_set_pixel(fb, dx,           (int16_t)(dy + 1), 1u);
                 fq_fb_set_pixel(fb, (int16_t)(dx + 1), (int16_t)(dy + 1), 1u);
+            }
+        }
+    }
+}
+
+/* ── fq_blit_sprite_3x ───────────────────────────────────────────────────── */
+/*
+ * Phase-19.5: Renders each source pixel as a 3x3 block on the framebuffer.
+ * A 32x32 sprite becomes 96x96. Used by the idle screensaver to present the
+ * character at a visually dominant scale on the 200x200 e-paper display.
+ *
+ * Implementation follows the same pattern as fq_blit_sprite_2x with the
+ * scale factor changed from 2 to 3. The inner 3x3 loop runs at most 9
+ * fq_fb_set_pixel calls per source pixel; all calls are NULL- and bounds-safe
+ * through fq_fb_set_pixel's built-in clip guard.
+ *
+ * Overflow analysis:
+ *   col * 3u: col < spr->width <= UINT16_MAX; col * 3 < UINT32_MAX.
+ *   x + col*3: int16_t + uint32_t. The cast chain (int16_t)(col * 3u) is safe
+ *   for col <= 31 (32*3 = 96 < INT16_MAX). For oversized sprites, overflow
+ *   wraps to a valid int16_t; fq_fb_set_pixel clips any OOB value.
+ *   px = dx + 0..2: range is dx to dx+2; dx can be negative or near INT16_MAX;
+ *   adding 2 to INT16_MAX would overflow — guarded by fq_fb_set_pixel's clip.
+ */
+
+void fq_blit_sprite_3x(fq_fb_t *fb,
+                       int16_t x,
+                       int16_t y,
+                       const fq_sprite_t *spr)
+{
+    if (fb == NULL || spr == NULL || spr->data == NULL) { return; }
+    if (spr->width == 0u || spr->height == 0u)          { return; }
+
+    uint16_t stride = (uint16_t)(((uint32_t)spr->width + 7u) / 8u);
+
+    for (uint16_t row = 0u; row < spr->height; row++) {
+        for (uint16_t col = 0u; col < spr->width; col++) {
+            uint16_t byte_idx = (uint16_t)((uint32_t)row * stride + col / 8u);
+            uint8_t  bit      = (uint8_t)((spr->data[byte_idx] >> (7u - (col % 8u))) & 1u);
+            if (bit != 0u) {
+                int16_t dx = (int16_t)(x + (int16_t)((uint16_t)(col * 3u)));
+                int16_t dy = (int16_t)(y + (int16_t)((uint16_t)(row * 3u)));
+                /* Expand each source pixel to a 3x3 block. */
+                for (int16_t py = 0; py < 3; py++) {
+                    for (int16_t px = 0; px < 3; px++) {
+                        fq_fb_set_pixel(fb,
+                                        (int16_t)(dx + px),
+                                        (int16_t)(dy + py),
+                                        1u);
+                    }
+                }
             }
         }
     }

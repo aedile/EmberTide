@@ -14,6 +14,10 @@
  * Phase-8 additions: fq_vm_home_t, fq_vm_inventory_t, fq_vm_stats_t.
  * Phase-9 additions: fq_vm_combat_t, fq_vm_training_t.
  * Phase-19 additions: menu_index field added to fq_vm_home_t.
+ * Phase-19.5 additions:
+ *   - anim_frame field added to fq_vm_home_t (replaces one _pad byte).
+ *     _Static_assert pins fq_vm_home_t at 24 bytes.
+ *   - fq_vm_idle_t added for idle screensaver screen.
  */
 
 #ifndef FIESTAQUEST_PRESENTATION_VIEW_MODELS_H
@@ -45,8 +49,9 @@ typedef struct {
  *   uint8_t  hp_percent    (1)  offset 19  — 0-100, pre-computed
  *   uint8_t  sprite_base   (1)  offset 20
  *   uint8_t  menu_index    (1)  offset 21  — 0=TRAIN, 1=BATTLE, 2=ITEMS, 3=STATS
- *   uint8_t  _pad[2]       (2)  offset 22  — explicit alignment pad
- * Total: 24 bytes.
+ *   uint8_t  anim_frame    (1)  offset 22  — walk cycle frame index 0-7
+ *   uint8_t  _pad[1]       (1)  offset 23  — explicit alignment pad
+ * Total: 24 bytes.  Pinned by _Static_assert below.
  * ---------------------------------------------------------------------------*/
 typedef struct {
     uint16_t wins;        /**< Total wins displayed on home screen. */
@@ -57,8 +62,41 @@ typedef struct {
     uint8_t  hp_percent;  /**< HP bar fill: 0-100, 0 when hp_max==0. */
     uint8_t  sprite_base; /**< Base sprite index for class rendering. */
     uint8_t  menu_index;  /**< Currently highlighted menu item: 0=TRAIN, 1=BATTLE, 2=ITEMS, 3=STATS. */
-    uint8_t  _pad[2];     /**< Explicit alignment pad. */
+    uint8_t  anim_frame;  /**< Walk cycle animation frame index 0-7. Application layer sets this. */
+    uint8_t  _pad[1];     /**< Explicit alignment pad. */
 } fq_vm_home_t;
+
+_Static_assert(sizeof(fq_vm_home_t) == 24u,
+               "fq_vm_home_t size changed — update layout comment and this assert");
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_idle_t — Idle screensaver screen view model.
+ *
+ * Carries the minimum data needed to render the idle screen:
+ * a 3x-scaled character sprite centered on screen, the game title,
+ * and the character name + level at the bottom.
+ *
+ * Architecture: idle is a render-layer OVERLAY, NOT an FSM state.
+ * app_main.c maintains an s_idle_active flag. When set, fq_render_idle()
+ * is called instead of the current state's renderer. The FSM state is
+ * preserved. Any button press clears s_idle_active.
+ *
+ * Field layout:
+ *   uint8_t  sprite_base   (1)  offset 0
+ *   char     name[13]     (13)  offset 1   — 12 chars + null terminator
+ *   uint8_t  level         (1)  offset 14
+ *   uint8_t  _pad[1]       (1)  offset 15  — explicit alignment pad
+ * Total: 16 bytes.
+ * ---------------------------------------------------------------------------*/
+typedef struct {
+    uint8_t  sprite_base; /**< Base sprite index for 3x-scaled rendering. */
+    char     name[13];    /**< Character display name: 12 chars + null. */
+    uint8_t  level;       /**< Current character level shown at bottom. */
+    uint8_t  _pad[1];     /**< Explicit alignment pad. */
+} fq_vm_idle_t;
+
+_Static_assert(sizeof(fq_vm_idle_t) == 16u,
+               "fq_vm_idle_t size changed — update layout comment and this assert");
 
 /* ---------------------------------------------------------------------------
  * fq_vm_inventory_t — Inventory grid screen view model.

@@ -25,6 +25,7 @@
  * in presentation/sprite_util.c.
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>

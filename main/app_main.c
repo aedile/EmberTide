@@ -14,6 +14,39 @@
  *
  * Phase 16: Real FreeRTOS event loop with SPI e-paper flush, button ISR
  * wiring via hal_gpio, and LittleFS save/load via hal_flash.
+ *
+ * Phase 19.5: Idle screensaver, walk animation, partial e-paper refresh.
+ *
+ *   Idle design:
+ *     - Idle is NOT an FSM state. s_idle_active flag overlays the renderer.
+ *     - After IDLE_TIMEOUT_US (30s) of no button input, s_idle_active = 1.
+ *     - Any button press clears s_idle_active; the previous FSM state resumes.
+ *     - Idle is suppressed during FQ_STATE_BATTLE, FQ_STATE_BATTLE_SETUP,
+ *       and FQ_STATE_TITLE (these states must not be interrupted).
+ *     - s_last_button_us is initialized to esp_timer_get_time() at startup
+ *       so idle does not fire before the first user interaction.
+ *
+ *   Animation design:
+ *     - s_anim_frame alternates between 0 and 2 every ANIM_FRAME_US (0.8s)
+ *       while in FQ_STATE_HOME and not idle.
+ *     - Frame 0 = idle pose; Frame 2 = mid-step. Two frames minimize
+ *       accumulated ghosting on e-paper with partial refresh.
+ *     - Animation timer resets when leaving HOME state.
+ *     - Animation is suppressed while s_idle_active is set.
+ *
+ *   Partial refresh:
+ *     - Animation redraws use hal_epaper_flush_partial() (fast, no flicker).
+ *     - HAL internally forces a full refresh every EPD_FULL_REFRESH_INTERVAL
+ *       partial flushes to clear accumulated ghosting.
+ *     - State-change redraws continue to use hal_epaper_flush() (full).
+ *
+ *   Idle precision note:
+ *     The main loop polls at 20 Hz (50ms). Idle timeout accuracy is ±50ms,
+ *     which is acceptable for a 30-second timeout. No real-time guarantee.
+ *
+ *   esp_timer overflow note:
+ *     int64_t subtraction (now - last_button) wraps safely at ~292,000 years.
+ *     Not a practical concern.
  */
 
 #include <stdint.h>
@@ -36,6 +69,7 @@
 #include "screens/screen_home.h"
 #include "screens/screen_stats.h"
 #include "screens/screen_inventory.h"
+#include "screens/screen_idle.h"
 #include "asset_data.h"
 #include "sprite_util.h"
 
@@ -46,25 +80,68 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 
 static const char *TAG = "app_main";
+
+/* -------------------------------------------------------------------------
+ * Idle / animation timing constants.
+ * -------------------------------------------------------------------------
+ */
+
+/** Idle timeout: 30 seconds of no button input activates the screensaver. */
+#define IDLE_TIMEOUT_US    (30ULL * 1000000ULL)
+
+/**
+ * Animation frame interval: 0.8 seconds per walk frame.
+ *
+ * 0.8s = 800,000 µs. Validated interactively on hardware — faster looked
+ * frantic on e-paper partial refresh (~300ms latency); slower felt dead.
+ */
+#define ANIM_FRAME_US      (800000ULL)
 
 /* -------------------------------------------------------------------------
  * File-scope application context pointer.
  *
  * button_callback is called from the gpio_task context (not ISR context —
  * the ISR posts to a queue, the task calls the callback). It needs access
- * to the event bus. Using a file-scope pointer avoids passing through
- * FreeRTOS task parameter indirection.
+ * to the event bus and the idle/anim state. Using a file-scope pointer
+ * avoids passing through FreeRTOS task parameter indirection.
  * -------------------------------------------------------------------------
  */
 static fq_app_ctx_t *s_app = NULL;
 
 /* -------------------------------------------------------------------------
+ * Idle / animation state — file-scope, reset at startup.
+ * -------------------------------------------------------------------------
+ */
+static int64_t  s_last_button_us;  /* esp_timer timestamp of last button press */
+static uint8_t  s_idle_active;     /* 1 = idle screensaver is showing */
+static uint8_t  s_anim_frame;      /* current walk-cycle frame (0 or 2) */
+static int64_t  s_last_anim_us;    /* timestamp of last animation frame advance */
+
+/* -------------------------------------------------------------------------
+ * is_idle_forbidden — Returns 1 if idle must NOT activate in this state.
+ *
+ * Idle is suppressed during active combat, BLE pairing, and the title screen:
+ *   - BATTLE / BATTLE_SETUP: must not interrupt mid-combat.
+ *   - TITLE: the first-boot splash should not auto-dismiss to idle.
+ * -------------------------------------------------------------------------
+ */
+static uint8_t is_idle_forbidden(fq_app_state_t state)
+{
+    return (state == FQ_STATE_BATTLE       ||
+            state == FQ_STATE_BATTLE_SETUP  ||
+            state == FQ_STATE_TITLE)
+           ? 1u : 0u;
+}
+
+/* -------------------------------------------------------------------------
  * button_callback — Called from gpio_task context on each debounced press.
  *
  * Maps the HAL button ID to an FQ event ID and posts to the event bus.
+ * Also resets s_last_button_us for idle timeout tracking.
  * Safe to call from task context.
  * -------------------------------------------------------------------------
  */
@@ -73,6 +150,9 @@ static void button_callback(hal_btn_id_t btn_id)
     if (!s_app) {
         return;
     }
+    /* Reset idle timeout on every button press. */
+    s_last_button_us = esp_timer_get_time();
+
     fq_event_id_t evt_id = (btn_id == HAL_BTN_A)
                            ? FQ_EVT_BTN_A_PRESS
                            : FQ_EVT_BTN_B_PRESS;
@@ -104,13 +184,9 @@ static void render_title_screen(fq_fb_t *fb)
     const fq_sprite_t *spr        = fq_get_char_sprite(0u, 0u); /* Dark Knight, frame 0 */
 
     /* -- Outer 4-px thick border ------------------------------------------ */
-    /* Top band */
     fq_fb_fill_rect(fb,   0,   0, 200,   4, 1u);
-    /* Bottom band */
     fq_fb_fill_rect(fb,   0, 196, 200,   4, 1u);
-    /* Left band */
     fq_fb_fill_rect(fb,   0,   4,   4, 192, 1u);
-    /* Right band */
     fq_fb_fill_rect(fb, 196,   4,   4, 192, 1u);
 
     /* -- Inner 1-px decorative border (inset 8px from outer border) --------- */
@@ -147,7 +223,7 @@ static void render_title_screen(fq_fb_t *fb)
 
 /* -------------------------------------------------------------------------
  * render_current_state — Render the current FSM state to the framebuffer
- * and flush it to the e-paper display.
+ * and flush it to the e-paper display (full refresh).
  * -------------------------------------------------------------------------
  */
 static void render_current_state(fq_app_ctx_t   *app,
@@ -168,6 +244,7 @@ static void render_current_state(fq_app_ctx_t   *app,
             fq_vm_home_t vm_home;
             fq_vm_build_home(&vm_home, player);
             vm_home.menu_index = app->home_menu_index;
+            vm_home.anim_frame = s_anim_frame;
             fq_render_home(fb, &vm_home);
             break;
         }
@@ -200,6 +277,56 @@ static void render_current_state(fq_app_ctx_t   *app,
     err = hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
     if (err != HAL_EPAPER_OK) {
         ESP_LOGE(TAG, "hal_epaper_flush failed: %d", (int)err);
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * render_home_partial — Re-render the home screen and flush using partial
+ * refresh (for animation frame updates — no full flicker).
+ * -------------------------------------------------------------------------
+ */
+static void render_home_partial(fq_app_ctx_t   *app,
+                                 fq_fb_t        *fb,
+                                 fq_character_t *player)
+{
+    hal_epaper_err_t err;
+
+    fq_fb_clear(fb);
+
+    fq_vm_home_t vm_home;
+    fq_vm_build_home(&vm_home, player);
+    vm_home.menu_index = app->home_menu_index;
+    vm_home.anim_frame = s_anim_frame;
+    fq_render_home(fb, &vm_home);
+
+    err = hal_epaper_flush_partial(fb->pixels, FQ_FB_SIZE);
+    if (err != HAL_EPAPER_OK) {
+        ESP_LOGE(TAG, "hal_epaper_flush_partial failed: %d — falling back to full", (int)err);
+        /* Fall back to full flush on partial failure. */
+        hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * render_idle — Render the idle screensaver and flush using partial refresh.
+ * -------------------------------------------------------------------------
+ */
+static void render_idle(fq_app_ctx_t   *app,
+                        fq_fb_t        *fb,
+                        fq_character_t *player)
+{
+    (void)app; /* reserved for future use */
+
+    hal_epaper_err_t err;
+
+    fq_vm_idle_t vm_idle;
+    fq_vm_build_idle(&vm_idle, player);
+    fq_render_idle(fb, &vm_idle);
+
+    err = hal_epaper_flush_partial(fb->pixels, FQ_FB_SIZE);
+    if (err != HAL_EPAPER_OK) {
+        ESP_LOGE(TAG, "idle flush_partial failed: %d — falling back to full", (int)err);
+        hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
     }
 }
 
@@ -255,6 +382,8 @@ void app_main(void)
 
     /* -----------------------------------------------------------------------
      * HAL init.
+     * Phase-19.5: hal_epaper_init() now performs a boot-time full clear
+     * (white→black→white) before returning. s_flush_count reset to 0 after.
      * ----------------------------------------------------------------------- */
     hal_epaper_err_t epaper_err = hal_epaper_init();
     if (epaper_err != HAL_EPAPER_OK) {
@@ -268,7 +397,16 @@ void app_main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * Initial render — display title then home screen.
+     * Phase-19.5: Initialise idle/anim state.
+     * s_last_button_us set to now so idle does not fire before first input.
+     * ----------------------------------------------------------------------- */
+    s_last_button_us = esp_timer_get_time();
+    s_last_anim_us   = s_last_button_us;
+    s_idle_active    = 0u;
+    s_anim_frame     = 0u;
+
+    /* -----------------------------------------------------------------------
+     * Initial render — display title screen.
      * ----------------------------------------------------------------------- */
     render_current_state(&app, &framebuffer, &player, &inventory);
 
@@ -281,14 +419,30 @@ void app_main(void)
     uint8_t         needs_redraw      = 0u;
 
     while (1) {
-        /* Drain the event bus. */
+        int64_t now_us = esp_timer_get_time();
+
+        /* ── Drain the event bus ─────────────────────────────────────────── */
         while (fq_event_bus_pop(&app.bus, &evt)) {
             fq_app_dispatch(&app, &evt);
+
+            /* Wake from idle on any button press. */
+            if (s_idle_active) {
+                s_idle_active    = 0u;
+                s_anim_frame     = 0u;
+                s_last_anim_us   = now_us;
+                needs_redraw     = 1u;
+                last_state       = app.state;
+                last_menu_index  = app.home_menu_index;
+            }
+
             /* Redraw on state change OR on home menu cursor change. */
             if (app.state != last_state) {
-                needs_redraw   = 1u;
-                last_state     = app.state;
-                last_menu_index = app.home_menu_index;
+                needs_redraw     = 1u;
+                last_state       = app.state;
+                last_menu_index  = app.home_menu_index;
+                /* Reset animation frame on any state change. */
+                s_anim_frame     = 0u;
+                s_last_anim_us   = now_us;
             } else if (app.state == FQ_STATE_HOME &&
                        app.home_menu_index != last_menu_index) {
                 needs_redraw    = 1u;
@@ -296,7 +450,31 @@ void app_main(void)
             }
         }
 
-        if (needs_redraw) {
+        /* ── Idle timeout check ──────────────────────────────────────────── */
+        if (!s_idle_active                                    &&
+            !is_idle_forbidden(app.state)                    &&
+            (now_us - s_last_button_us) > (int64_t)IDLE_TIMEOUT_US)
+        {
+            s_idle_active    = 1u;
+            needs_redraw     = 0u;  /* suppress normal redraw */
+            render_idle(&app, &framebuffer, &player);
+        }
+
+        /* ── Home screen animation tick ──────────────────────────────────── */
+        if (!s_idle_active                                    &&
+            app.state == FQ_STATE_HOME                        &&
+            (now_us - s_last_anim_us) > (int64_t)ANIM_FRAME_US)
+        {
+            /* Alternate between frame 0 (idle pose) and frame 2 (mid-step).
+             * Two-frame cycle minimises ghosting on e-paper partial refresh. */
+            s_anim_frame   = (s_anim_frame == 0u) ? 2u : 0u;
+            s_last_anim_us = now_us;
+            needs_redraw   = 0u;  /* handled as partial redraw below */
+            render_home_partial(&app, &framebuffer, &player);
+        }
+
+        /* ── Full redraw if state-change flagged (skip if idle) ──────────── */
+        if (needs_redraw && !s_idle_active) {
             render_current_state(&app, &framebuffer, &player, &inventory);
             needs_redraw = 0u;
         }

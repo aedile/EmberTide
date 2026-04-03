@@ -8,6 +8,11 @@
  *   block). A 32x32 sprite becomes 64x64 on screen. Used to make character
  *   sprites the visual focus on the 200x200 e-paper display.
  *
+ * blit_sprite_3x:
+ *   Renders a sprite at 3x magnification (each source pixel becomes a 3x3
+ *   block). A 32x32 sprite becomes 96x96 on screen. Used by the idle screen
+ *   to create a visually dominant character display at desk-visibility range.
+ *
  * fq_draw_text_2x:
  *   Renders a string at 2x magnification. Each source glyph pixel becomes a
  *   2x2 block on the framebuffer. The cursor advances by advance_width * 2
@@ -56,6 +61,32 @@
  * @param spr  Sprite to magnify. NULL-safe.
  */
 void fq_blit_sprite_2x(fq_fb_t *fb,
+                       int16_t x,
+                       int16_t y,
+                       const fq_sprite_t *spr);
+
+/**
+ * fq_blit_sprite_3x — Blit a sprite at 3x magnification.
+ *
+ * Each source pixel becomes a 3x3 block on the framebuffer.
+ * A 32x32 sprite renders as 96x96. Only SET bits (value 1) in the
+ * sprite produce pixels; cleared bits leave the background unchanged.
+ *
+ * Used by the idle screensaver to display the character at full desk-
+ * visibility scale on the 200x200 e-paper display.
+ *
+ * Clipping: any pixel that falls outside the framebuffer bounds is
+ * silently skipped via fq_fb_set_pixel's built-in bounds check.
+ *
+ * NULL-safe: returns immediately on NULL fb, NULL spr, NULL spr->data,
+ * or zero spr->width/spr->height.
+ *
+ * @param fb   Target framebuffer. NULL-safe.
+ * @param x    Top-left X destination (may be negative — clips gracefully).
+ * @param y    Top-left Y destination (may be negative — clips gracefully).
+ * @param spr  Sprite to magnify. NULL-safe.
+ */
+void fq_blit_sprite_3x(fq_fb_t *fb,
                        int16_t x,
                        int16_t y,
                        const fq_sprite_t *spr);

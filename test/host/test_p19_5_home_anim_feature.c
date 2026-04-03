@@ -7,6 +7,7 @@
  *   27. test_home_animation_resets_on_state_change
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>

@@ -10,6 +10,7 @@
  *   33. test_vm_idle_builds_correctly           — fq_vm_build_idle populates fields
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>

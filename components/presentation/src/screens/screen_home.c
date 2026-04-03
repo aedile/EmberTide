@@ -31,6 +31,12 @@
  *   fill_w = hp_percent (0-100) * HOME_HP_FILL_MAX_W / 100
  *   Clamped to [0, HOME_HP_FILL_MAX_W].
  *
+ * Phase-19.5: vm->anim_frame selects the sprite frame for walk animation.
+ * anim_frame is clamped to [0, HOME_ANIM_FRAME_MAX] defensively — the
+ * application layer should only supply 0 or 2, but we guard either way.
+ * If fq_get_char_sprite() returns NULL for the requested frame, the blit
+ * is skipped (no crash).
+ *
  * Constitution Priority 0: no float, no malloc, no PRNG calls.
  */
 
@@ -101,6 +107,13 @@
 #define HOME_WL_BUF_SIZE     24
 #define HOME_LV_BUF_SIZE      8
 
+/**
+ * Animation frame clamp: valid sprite frames are 0-7 for a standard 8-frame
+ * sprite sheet. Values >= HOME_ANIM_FRAME_MAX are clamped to 0 (frame 0 is
+ * always the safe default).
+ */
+#define HOME_ANIM_FRAME_MAX   8u
+
 /* Menu labels in order: TRAIN(0), BATTLE(1), ITEMS(2), STATS(3). */
 static const char * const s_menu_labels[HOME_MENU_ITEM_COUNT] = {
     "TRAIN",
@@ -124,6 +137,13 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
                   ? vm->menu_index
                   : 0u;
 
+    /* Clamp anim_frame to valid range [0, HOME_ANIM_FRAME_MAX-1].
+     * The renderer accepts any value; out-of-range falls back to frame 0.
+     * fq_get_char_sprite() returns NULL for missing frames — blit is skipped. */
+    uint8_t frame = (vm->anim_frame < (uint8_t)HOME_ANIM_FRAME_MAX)
+                    ? vm->anim_frame
+                    : 0u;
+
     /* Clear to white. */
     fq_fb_clear(fb);
 
@@ -138,9 +158,9 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
     fq_fb_draw_line(fb, 0, HOME_HDR_H,
                     (int16_t)(FQ_FB_WIDTH - 1u), HOME_HDR_H, 1u);
 
-    /* ── 2x-scaled character sprite ─────────────────────────────────────── */
+    /* ── 2x-scaled character sprite, frame selected by anim_frame ───────── */
     {
-        const fq_sprite_t *sp = fq_get_char_sprite(vm->sprite_base, 0u);
+        const fq_sprite_t *sp = fq_get_char_sprite(vm->sprite_base, (uint32_t)frame);
         if (sp != NULL) {
             fq_blit_sprite_2x(fb, HOME_SPRITE_X, HOME_SPRITE_Y, sp);
         }
