@@ -788,3 +788,9 @@ add_app_test(test_p19_interactive_bounds
 # Phase-19 Interactive Feature tests
 add_app_test(test_p19_interactive_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_interactive_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-19 Audit Fix: Training BTN_B partial XP award
+# ---------------------------------------------------------------------------
+add_app_test(test_p19_training_b_exit
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_training_b_exit.c")

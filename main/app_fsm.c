@@ -269,7 +269,12 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                         /* B in WAITING: start the session. */
                         fq_training_session_start(&ctx->training);
                     } else if (ctx->training.state == (uint8_t)FQ_TS_ACTIVE) {
-                        /* B in ACTIVE: abandon session (no XP). */
+                        /* B in ACTIVE: partial exit — award XP for score earned so far,
+                         * then return to HOME. Spec: "Button B exits training at any
+                         * time (partial score, partial XP award)." */
+                        if (ctx->player != NULL) {
+                            fq_training_award_xp(&ctx->training, ctx->player);
+                        }
                         go_home(ctx);
                     } else {
                         /* B in DONE: return home. */

@@ -171,6 +171,11 @@ game_err_t fq_training_hit(fq_training_session_t *ts);
 /**
  * fq_training_advance_target() — Skip current target without hit.
  *
+ * Test accessor — no production caller.
+ * Used in test/host/test_p19_interactive_feature.c (test F10) to advance
+ * targets explicitly. Production tick loop calls fq_training_step() which
+ * advances the target internally when target_pos exceeds 100.
+ *
  * Increments targets_done and resets target_pos to 0. If
  * targets_done == FQ_TS_TOTAL_TARGETS, transitions to DONE.
  * Score unchanged.
@@ -184,6 +189,10 @@ game_err_t fq_training_advance_target(fq_training_session_t *ts);
 
 /**
  * fq_training_get_target_speed() — Return target_speed for a session.
+ *
+ * Test accessor — no production caller.
+ * Used in test/host/test_p19_interactive_feature.c (test F8, F12) to verify
+ * speed values after fq_training_session_start().
  *
  * Returns 0 if ts == NULL.
  *
