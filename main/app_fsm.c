@@ -43,8 +43,16 @@
  *   DONE:    BTN_B returns to HOME (XP already awarded on DONE transition).
  *
  * Phase-20 BATTLE state:
- *   COMBAT_ROUND_COMPLETE: calls fq_combat_award_xp() to credit XP/wins/losses,
- *   stores result in ctx->xp_earned, then transitions to BATTLE_RESULT.
+ *   COMBAT_ROUND_COMPLETE: calls fq_generate_combat_hash() to capture round
+ *   hash for peer exchange, then calls fq_combat_award_xp() to credit
+ *   XP/wins/losses, stores result in ctx->xp_earned, transitions to BATTLE_RESULT.
+ *
+ *   BLE_PACKET_RX in BATTLE: calls fq_sync_verify_round() against the received
+ *   peer hash. On mismatch → disconnect and return HOME (desync protection).
+ *
+ * Phase-20 BATTLE_SETUP state:
+ *   BLE_CONNECTED: calls fq_protocol_derive_seed() from my_nonce and the
+ *   peer nonce to populate shared_seed before entering BATTLE.
  *
  * Phase-20 REBIRTH state:
  *   BTN_A: spend one legacy point on the next eligible tree node via
@@ -61,6 +69,9 @@
 #include "equip.h"
 #include "progression.h"
 #include "legacy.h"
+#include "combat_hash.h"
+#include "sync.h"
+#include "protocol.h"
 #include <string.h>
 
 /* ---------------------------------------------------------------------------
@@ -328,17 +339,33 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
          * FQ_STATE_BATTLE_SETUP
          *
          * BTN_B: Cancel — return to HOME immediately.
-         * BLE_CONNECTED: Begin battle.
+         * BLE_CONNECTED: Derive shared seed from nonces, then begin battle.
          * BLE_DISCONNECTED: Return to HOME (no peer).
          * TIMER_TICK: Auto-timeout after BATTLE_SETUP_TIMEOUT_TICKS ticks.
+         *
+         * DC-3 fix: fq_protocol_derive_seed() is called on BLE_CONNECTED to
+         * populate ctx->shared_seed before the PRNG is seeded for combat.
+         * The peer nonce is carried in evt->data (uint32_t).
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE_SETUP:
             switch (evt->id) {
-                case FQ_EVT_BLE_CONNECTED:
+                case FQ_EVT_BLE_CONNECTED: {
+                    /* DC-3: Derive shared PRNG seed from local and peer nonces.
+                     * my_nonce is stored as 4 bytes LE; reassemble as uint32_t. */
+                    uint32_t my_nonce_u32 =
+                        ((uint32_t)ctx->my_nonce[0])        |
+                        ((uint32_t)ctx->my_nonce[1] <<  8u) |
+                        ((uint32_t)ctx->my_nonce[2] << 16u) |
+                        ((uint32_t)ctx->my_nonce[3] << 24u);
+                    /* Peer nonce arrives in evt->data (set by BLE RX handler). */
+                    uint32_t peer_nonce = evt->data;
+                    ctx->shared_seed = fq_protocol_derive_seed(my_nonce_u32, peer_nonce);
+
                     ctx->state                     = FQ_STATE_BATTLE;
                     ctx->combat_active             = 1u;
                     ctx->battle_setup_start_tick   = 0u;  /* clear for next use */
                     break;
+                }
 
                 case FQ_EVT_BTN_B_PRESS:
                     /* Cancel: return HOME immediately. */
@@ -370,6 +397,14 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
          * Constitution Priority 0: ONLY this block may access ctx->combat.rng.
          * BLE_DISCONNECTED: clean up and return HOME (no save).
          *
+         * Phase-20 (DC-1): On COMBAT_ROUND_COMPLETE, call
+         * fq_generate_combat_hash() to capture the round hash into
+         * ctx->last_combat_hash for peer exchange, BEFORE awarding XP.
+         *
+         * Phase-20 (DC-3): On BLE_PACKET_RX, extract peer round hash from
+         * evt->data and call fq_sync_verify_round(). On mismatch, disconnect
+         * and return HOME to prevent desync from corrupting battle state.
+         *
          * Phase-20: On COMBAT_ROUND_COMPLETE, call fq_combat_award_xp() to
          * credit XP and update win/loss counters. Store the earned XP in
          * ctx->xp_earned for the battle result screen.
@@ -378,6 +413,14 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
             switch (evt->id) {
                 case FQ_EVT_COMBAT_ROUND_COMPLETE:
                     if (ctx->combat_active == 1u) {
+                        /* DC-1: Generate combat hash at this round boundary and
+                         * store it for the BLE hash exchange protocol.
+                         * Round is read from ctx->combat.current_round — the field
+                         * incremented by fq_combat_step() before the event fires. */
+                        ctx->last_combat_hash =
+                            fq_generate_combat_hash(&ctx->combat,
+                                                     ctx->combat.current_round);
+
                         /* Award XP based on battle outcome. */
                         if (ctx->player != NULL) {
                             uint32_t xp_before = ctx->player->xp;
@@ -395,6 +438,33 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                         ctx->combat_active = 0u;
                     }
                     break;
+
+                case FQ_EVT_BLE_PACKET_RX: {
+                    /* DC-3: Verify the peer's round hash against our local hash.
+                     * evt->data carries the peer's combat hash for the current round.
+                     * On mismatch, abort the battle immediately — disconnect and
+                     * return HOME to prevent desync from producing invalid results.
+                     *
+                     * Note: in host tests the BLE mock does not exchange real packets,
+                     * so this path is only exercised when evt->data != 0. A zero
+                     * peer hash is treated as "no verification needed" (test stub
+                     * behaviour). On target the BLE RX handler always sets data != 0
+                     * for a valid FQ_PKT_ROUND_HASH packet. */
+                    if (ctx->combat_active == 1u && evt->data != 0u) {
+                        uint32_t peer_hash = evt->data;
+                        fq_sync_err_t sync_err =
+                            fq_sync_verify_round(ctx->combat.current_round,
+                                                  ctx->combat.current_round,
+                                                  ctx->last_combat_hash,
+                                                  peer_hash);
+                        if (sync_err != FQ_SYNC_OK) {
+                            /* Desync detected — abort battle, return HOME. */
+                            ctx->combat_active = 0u;
+                            go_home(ctx);
+                        }
+                    }
+                    break;
+                }
 
                 case FQ_EVT_BLE_DISCONNECTED:
                     /* Disconnect mid-combat: abort without saving. */

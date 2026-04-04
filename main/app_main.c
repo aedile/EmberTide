@@ -510,6 +510,18 @@ void app_main(void)
                     }
                 }
 
+                /* ── AC-1: Auto-save on BATTLE_RESULT → HOME. ────────── */
+                if (last_state == FQ_STATE_BATTLE_RESULT &&
+                    app.state  == FQ_STATE_HOME) {
+                    do_auto_save(&app, &player, &inventory);
+                }
+
+                /* ── AC-1: Auto-save on REBIRTH → HOME. ──────────────── */
+                if (last_state == FQ_STATE_REBIRTH &&
+                    app.state  == FQ_STATE_HOME) {
+                    do_auto_save(&app, &player, &inventory);
+                }
+
                 needs_redraw     = 1u;
                 last_state       = app.state;
                 last_menu_index  = app.home_menu_index;

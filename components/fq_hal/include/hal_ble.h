@@ -20,6 +20,10 @@
  *   The target GAP event callback MUST transition state to
  *   HAL_BLE_STATE_DISCONNECTED on BLE_GAP_EVENT_DISCONNECT so Device A never
  *   hangs in STATE_CONNECTED waiting for packets from a crashed Device B.
+ *
+ * Phase-20 audit fix (DC-2): hal_ble_get_mac() added.
+ *   Returns the device's 6-byte BLE public address. Used by the BLE combat
+ *   protocol to seed the nonce with a device-unique value.
  */
 
 #ifndef FIESTAQUEST_HAL_BLE_H
@@ -35,6 +39,9 @@
  */
 #define HAL_BLE_MAX_MTU     256u            /**< Maximum BLE write payload (bytes). */
 #define HAL_BLE_SERVICE_UUID "FQ01"         /**< FiestaQuest GATT service UUID string. */
+
+/** Length of a BLE MAC address in bytes. */
+#define HAL_BLE_MAC_LEN     6u
 
 /* -------------------------------------------------------------------------
  * Return codes for hal_ble operations.
@@ -116,6 +123,23 @@ hal_ble_err_t hal_ble_send(const uint8_t *data, uint16_t len);
  * @return Current hal_ble_state_t value.
  */
 hal_ble_state_t hal_ble_get_state(void);
+
+/**
+ * hal_ble_get_mac — Read the device's 6-byte BLE public MAC address.
+ *
+ * On the target this reads the ESP32 efuse BLE address via esp_read_mac().
+ * The stub/mock returns a fixed test address {0x01, 0x02, 0x03, 0x04, 0x05, 0x06}.
+ * The mock allows the address to be overridden via mock_ble_set_mac() for
+ * test scenarios that require a specific address.
+ *
+ * Guard: mac_out must not be NULL — returns HAL_BLE_ERR_NULL if it is.
+ *
+ * @param mac_out  Output buffer of exactly HAL_BLE_MAC_LEN (6) bytes.
+ *                 Written MSB-first (mac_out[0] = most significant byte).
+ * @return HAL_BLE_OK       on success.
+ *         HAL_BLE_ERR_NULL if mac_out is NULL.
+ */
+hal_ble_err_t hal_ble_get_mac(uint8_t mac_out[6]);
 
 /**
  * hal_ble_disconnect — Terminate the active connection.

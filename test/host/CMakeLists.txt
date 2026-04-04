@@ -456,6 +456,7 @@ function(add_app_test target source)
         "${GAME_INCLUDE}"
         "${PRES_INCLUDE}"
         "${MAIN_INCLUDE}"
+        "${CONN_INCLUDE}"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     if(GAME_SOURCES)
         target_sources(${target} PRIVATE ${GAME_SOURCES})
@@ -474,6 +475,9 @@ function(add_app_test target source)
     endif()
     if(EXISTS "${APP_FSM_SOURCE}")
         target_sources(${target} PRIVATE "${APP_FSM_SOURCE}")
+    endif()
+    if(CONN_SOURCES)
+        target_sources(${target} PRIVATE ${CONN_SOURCES})
     endif()
     add_test(NAME ${target} COMMAND ${target})
 endfunction()

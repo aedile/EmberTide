@@ -14,9 +14,16 @@
  *   - mock_ble_get_send_count() — returns the total count of successful sends
  *     since the last mock_ble_reset() or hal_ble_init().
  *   - mock_ble_reset() — clears all state to power-on defaults.
+ *   - mock_ble_set_mac(mac) — override the MAC returned by hal_ble_get_mac().
+ *   - mock_ble_get_mac_call_count() — count of hal_ble_get_mac() calls.
  *
  * Guard order for hal_ble_send():  NULL -> MTU -> init -> connected -> capture.
  * This order is consistent with the header documentation and the bound tests.
+ *
+ * Phase-20 audit fix (DC-2): hal_ble_get_mac() implemented. Default MAC is
+ * {0x01, 0x02, 0x03, 0x04, 0x05, 0x06} (matches the target stub). Tests may
+ * call mock_ble_set_mac() to inject a specific address before the call under
+ * test. mock_ble_get_mac_call_count() lets tests verify the function was called.
  *
  * Design note: The NimBLE MTU negotiation and GAP supervisor timeout logic
  * present in the real target driver are NOT simulated here. Tests inject
@@ -26,6 +33,14 @@
 #include "mock_hal_ble.h"
 #include "hal_ble.h"
 #include <string.h>
+
+/* -------------------------------------------------------------------------
+ * Default test MAC address (matches target stub).
+ * -------------------------------------------------------------------------
+ */
+static const uint8_t k_default_mac[HAL_BLE_MAC_LEN] = {
+    0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u
+};
 
 /* -------------------------------------------------------------------------
  * Internal mock state (all file-scope static).
@@ -39,6 +54,10 @@ static hal_ble_state_t       s_state;
 static uint8_t  s_last_sent_buf[HAL_BLE_MAX_MTU];
 static uint16_t s_last_sent_len;
 static uint32_t s_send_count;
+
+/* MAC address state. */
+static uint8_t  s_mac[HAL_BLE_MAC_LEN];
+static uint32_t s_mac_call_count;
 
 /* -------------------------------------------------------------------------
  * Public hal_ble API — mock implementations.
@@ -95,6 +114,16 @@ hal_ble_err_t hal_ble_send(const uint8_t *data, uint16_t len)
 hal_ble_state_t hal_ble_get_state(void)
 {
     return s_state;
+}
+
+hal_ble_err_t hal_ble_get_mac(uint8_t mac_out[6])
+{
+    if (!mac_out) {
+        return HAL_BLE_ERR_NULL;
+    }
+    memcpy(mac_out, s_mac, HAL_BLE_MAC_LEN);
+    s_mac_call_count++;
+    return HAL_BLE_OK;
 }
 
 hal_ble_err_t hal_ble_disconnect(void)
@@ -208,17 +237,45 @@ uint32_t mock_ble_get_send_count(void)
 }
 
 /**
+ * mock_ble_set_mac — Override the MAC address returned by hal_ble_get_mac().
+ *
+ * Copies @p mac into the internal MAC buffer. NULL-safe: no-op if mac is NULL.
+ *
+ * @param mac  Pointer to a HAL_BLE_MAC_LEN-byte address. Must not be NULL.
+ */
+void mock_ble_set_mac(const uint8_t mac[6])
+{
+    if (!mac) {
+        return;
+    }
+    memcpy(s_mac, mac, HAL_BLE_MAC_LEN);
+}
+
+/**
+ * mock_ble_get_mac_call_count — Return the number of hal_ble_get_mac() calls.
+ *
+ * @return  Total call count since the last mock_ble_reset().
+ */
+uint32_t mock_ble_get_mac_call_count(void)
+{
+    return s_mac_call_count;
+}
+
+/**
  * mock_ble_reset — Reset all mock state to power-on defaults.
  *
- * Clears callback, initialized flag, state, send capture buffer, and send count.
+ * Clears callback, initialized flag, state, send capture buffer, send count,
+ * MAC address (restored to default), and MAC call count.
  * Call at the start of each test main() for a clean slate.
  */
 void mock_ble_reset(void)
 {
-    s_rx_callback   = (hal_ble_rx_callback_t)0;
-    s_initialized   = 0u;
-    s_state         = HAL_BLE_STATE_IDLE;
-    s_last_sent_len = 0u;
-    s_send_count    = 0u;
+    s_rx_callback    = (hal_ble_rx_callback_t)0;
+    s_initialized    = 0u;
+    s_state          = HAL_BLE_STATE_IDLE;
+    s_last_sent_len  = 0u;
+    s_send_count     = 0u;
+    s_mac_call_count = 0u;
     memset(s_last_sent_buf, 0, sizeof(s_last_sent_buf));
+    memcpy(s_mac, k_default_mac, HAL_BLE_MAC_LEN);
 }
