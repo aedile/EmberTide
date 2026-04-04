@@ -32,6 +32,13 @@ set(MAIN_SRC_DIR   "${PROJECT_ROOT}/main")
 # Collect sources. screen_mgr.c is device-only (calls hal_epaper) —
 # excluded here to keep the visual harness host-compilable.
 file(GLOB GAME_SOURCES        "${GAME_SRC_DIR}/*.c")
+
+# Also collect game/lib sources (sfxr.c -- vendored PCM generator).
+set(GAME_LIB_DIR "${PROJECT_ROOT}/components/game/lib")
+file(GLOB GAME_LIB_SOURCES "${GAME_LIB_DIR}/*.c")
+if(GAME_LIB_SOURCES)
+    list(APPEND GAME_SOURCES ${GAME_LIB_SOURCES})
+endif()
 file(GLOB PRES_SOURCES        "${PRES_SRC_DIR}/*.c")
 file(GLOB PRES_SCREEN_SOURCES "${PRES_SRC_DIR}/screens/*.c")
 list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\.c$")
@@ -57,6 +64,7 @@ add_executable(render_all_screens
 target_include_directories(render_all_screens PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"   # resolves vendors/stb_image_write.h
     "${GAME_INCLUDE}"
+    "${GAME_LIB_DIR}"               # resolves sfxr.h
     "${PRES_INCLUDE}"
     "${MAIN_SRC_DIR}"               # resolves vm_builder.h
 )

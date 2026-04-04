@@ -42,6 +42,13 @@ set(CONN_SRC_DIR  "${PROJECT_ROOT}/components/connectivity/src")
 # Collect all game component .c sources for host linkage.
 file(GLOB GAME_SOURCES "${GAME_SRC_DIR}/*.c")
 
+# Also collect game/lib sources (sfxr.c -- vendored PCM generator).
+set(GAME_LIB_DIR "${PROJECT_ROOT}/components/game/lib")
+file(GLOB GAME_LIB_SOURCES "${GAME_LIB_DIR}/*.c")
+if(GAME_LIB_SOURCES)
+    list(APPEND GAME_SOURCES ${GAME_LIB_SOURCES})
+endif()
+
 # Collect presentation sources (exclude device-only screen_mgr.c).
 file(GLOB PRES_SOURCES "${PRES_SRC_DIR}/*.c")
 list(FILTER PRES_SOURCES EXCLUDE REGEX ".*screen_mgr\\.c$")
@@ -869,7 +876,8 @@ add_p20_test(test_p20_feature
 # Architecture: sfx.h lives in game/include; sfxr.h/sfxr.c live in game/lib.
 # sfxr.c is picked up by GAME_SOURCES glob (or added explicitly below).
 # ---------------------------------------------------------------------------
-set(GAME_LIB_DIR "${PROJECT_ROOT}/components/game/lib")
+# GAME_LIB_DIR is defined at the top of this file (alongside GAME_SOURCES glob).
+# sfxr.c and sfx.c are included in GAME_SOURCES via the lib glob.
 
 function(add_p21_test target source)
     add_executable(${target} ${source}
@@ -881,14 +889,6 @@ function(add_p21_test target source)
         "${CMAKE_CURRENT_SOURCE_DIR}")
     if(GAME_SOURCES)
         target_sources(${target} PRIVATE ${GAME_SOURCES})
-    endif()
-    # Explicitly add game/lib sources (sfxr.c, sfx.c) — not covered by GAME_SOURCES glob.
-    if(EXISTS "${GAME_LIB_DIR}/sfxr.c")
-        target_sources(${target} PRIVATE "${GAME_LIB_DIR}/sfxr.c")
-    endif()
-    if(EXISTS "${PROJECT_ROOT}/components/game/src/sfx.c")
-        target_sources(${target} PRIVATE
-            "${PROJECT_ROOT}/components/game/src/sfx.c")
     endif()
     add_test(NAME ${target} COMMAND ${target})
 endfunction()

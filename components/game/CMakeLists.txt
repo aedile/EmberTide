@@ -14,8 +14,11 @@ idf_component_register(
         "src/equip.c"
         "src/training_session.c"
         "src/name_gen.c"
+        "src/sfx.c"
+        "lib/sfxr.c"
     INCLUDE_DIRS
         "include"
+        "lib"
     # game/ MUST NOT depend on hal/, presentation/, or connectivity/.
     # This component declares no REQUIRES or PRIV_REQUIRES to those layers.
     # Enforced by CMake include path isolation and try_compile boundary checks.
