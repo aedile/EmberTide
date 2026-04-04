@@ -761,3 +761,30 @@ add_app_test(test_p19_5_home_anim_feature
 
 add_app_test(test_p19_5_idle_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_5_idle_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-19 Interactive Gameplay — Onboarding, Training, Inventory Equip
+#
+# Bound tests (Rule 22 Phase A — BOUND RED):
+#   17 bound tests: class wrap, name length/null-term, save-failure re-entry,
+#   FSM state value, sizeof, score clamp, XP at L99, PRNG isolation,
+#   zero targets zero XP, hit outside active, full slots rejected,
+#   item ID 0 rejected, duplicate unequip, count clamp, cursor bounds,
+#   empty inventory no-crash.
+#
+# Feature tests (Rule 22 Phase B — FEATURE RED):
+#   18 feature tests: all three items — onboarding flow, training session
+#   state machine, inventory equip/unequip with VM builder integration.
+#
+# Both use add_app_test() to link game + presentation (screens/) + vm_builder
+# + event_bus + app_fsm. The new game sources (name_gen.c, training_session.c,
+# equip.c) are picked up automatically by file(GLOB GAME_SOURCES ...).
+# ---------------------------------------------------------------------------
+
+# Phase-19 Interactive Bound tests
+add_app_test(test_p19_interactive_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_interactive_bounds.c")
+
+# Phase-19 Interactive Feature tests
+add_app_test(test_p19_interactive_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_interactive_feature.c")
