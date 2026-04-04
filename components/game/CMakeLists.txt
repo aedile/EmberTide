@@ -15,6 +15,12 @@ idf_component_register(
         "src/training_session.c"
         "src/name_gen.c"
         "src/sfx.c"
+        # ADR: sfxr.c uses float for audio synthesis (envelope, frequency, phase).
+        # This is EXEMPT from Constitution Priority 0 float ban because:
+        # 1. sfxr is audio signal processing, not deterministic game logic
+        # 2. ESP32-S3 has hardware single-precision FPU (no performance penalty)
+        # 3. sfxr output (PCM samples) does not feed back into combat/PRNG state
+        # See: docs/fiestaquest-architecture.md v2.20 Phase 21 amendment
         "lib/sfxr.c"
     INCLUDE_DIRS
         "include"

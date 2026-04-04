@@ -51,13 +51,22 @@
  *   - hal_audio_init() called during HAL init.
  *   - do_sfx(id) helper: generates PCM via fq_sfx_play(), pushes to HAL
  *     ring buffer via hal_audio_write_samples(). No-op if sfx_enabled==0.
- *   - button_callback: plays SFX_BTN_PRESS (BTN_A) or SFX_BTN_BACK (BTN_B).
- *   - Event loop: SFX_MENU_NAVIGATE on home menu cycle, SFX_ITEM_EQUIP on
- *     equip toggle, SFX_COMBAT_HIT/MISS/CRIT on combat events,
- *     SFX_LEVEL_UP on level gain, SFX_REBIRTH on rebirth, SFX_DEATH on death.
+ *   - button_callback: ONLY posts events to the event bus. do_sfx() is NOT
+ *     called from button_callback — that would create a data race because
+ *     button_callback runs in gpio_task (a separate FreeRTOS task) while
+ *     do_sfx() uses a static buffer and an unprotected ring buffer.
+ *   - Event loop: SFX_BTN_PRESS on FQ_EVT_BTN_A_PRESS, SFX_BTN_BACK on
+ *     FQ_EVT_BTN_B_PRESS, SFX_MENU_NAVIGATE on home menu cycle,
+ *     SFX_ITEM_EQUIP on equip toggle, SFX_COMBAT_HIT/MISS/CRIT on combat
+ *     events, SFX_LEVEL_UP on level gain, SFX_REBIRTH on rebirth,
+ *     SFX_DEATH on death.
  *
  *   SFX quiet-mode: app.sfx_enabled flag (set by fq_app_init to 1).
  *   do_sfx() checks the flag — zero SFX overhead when disabled.
+ *
+ *   Concurrency: do_sfx() is ONLY called from the main loop task. The static
+ *   PCM buffer and HAL ring buffer are accessed exclusively from the main
+ *   loop — no mutex required.
  */
 
 #include <stdint.h>
@@ -101,6 +110,18 @@
 #include "esp_log.h"
 
 static const char *TAG = "app_main";
+
+/* -------------------------------------------------------------------------
+ * Compile-time sample-rate consistency guard.
+ *
+ * sfxr.h defines SFXR_SAMPLE_RATE_HZ; hal_audio.h defines AUDIO_SAMPLE_RATE_HZ.
+ * These must be identical — sfxr generates PCM that is fed directly into the
+ * HAL ring buffer. A mismatch would cause pitch distortion at runtime.
+ * -------------------------------------------------------------------------
+ */
+_Static_assert(SFXR_SAMPLE_RATE_HZ == AUDIO_SAMPLE_RATE_HZ,
+               "SFXR_SAMPLE_RATE_HZ must equal AUDIO_SAMPLE_RATE_HZ — "
+               "sfxr PCM is fed directly into the HAL audio ring buffer");
 
 /* -------------------------------------------------------------------------
  * Idle / animation timing constants.
@@ -161,8 +182,12 @@ static uint8_t is_idle_forbidden(fq_app_state_t state)
  * static buffer, then pushes them to the HAL ring buffer via
  * hal_audio_write_samples(). No-op when sfx_enabled == 0 (quiet mode).
  *
- * The static buffer is safe here because do_sfx() is only called from
- * the main loop task -- not from ISR or concurrent task context.
+ * CONCURRENCY: do_sfx() is ONLY called from the main loop task. The static
+ * PCM buffer and the HAL ring buffer have no mutex because they are never
+ * accessed from any other task. button_callback() runs in gpio_task and
+ * does NOT call do_sfx() — it only posts events to the event bus. The main
+ * loop drains the bus and calls do_sfx() from the single main-loop task
+ * context, preserving this invariant.
  * -------------------------------------------------------------------------
  */
 static void do_sfx(fq_sfx_id_t id)
@@ -209,9 +234,13 @@ static void do_auto_save(fq_app_ctx_t   *app,
 /* -------------------------------------------------------------------------
  * button_callback -- Called from gpio_task context on each debounced press.
  *
- * Phase-21: BTN_A plays SFX_BTN_PRESS; BTN_B plays SFX_BTN_BACK.
- * SFX is played before posting to the event bus so the audio pipeline
- * starts while the FSM is still processing.
+ * ONLY posts events to the event bus. do_sfx() is deliberately NOT called
+ * here because button_callback runs in gpio_task (a separate FreeRTOS task).
+ * Calling do_sfx() from gpio_task would create a data race on the static
+ * PCM buffer in do_sfx() and on the unprotected HAL ring buffer.
+ *
+ * Button SFX (SFX_BTN_PRESS / SFX_BTN_BACK) are triggered in the main loop
+ * event drain when FQ_EVT_BTN_A_PRESS / FQ_EVT_BTN_B_PRESS are dequeued.
  * -------------------------------------------------------------------------
  */
 static void button_callback(hal_btn_id_t btn_id)
@@ -220,13 +249,6 @@ static void button_callback(hal_btn_id_t btn_id)
         return;
     }
     s_last_button_us = esp_timer_get_time();
-
-    /* Phase-21: button SFX. */
-    if (btn_id == HAL_BTN_A) {
-        do_sfx(SFX_BTN_PRESS);
-    } else {
-        do_sfx(SFX_BTN_BACK);
-    }
 
     fq_event_id_t evt_id = (btn_id == HAL_BTN_A)
                            ? FQ_EVT_BTN_A_PRESS
@@ -551,6 +573,15 @@ void app_main(void)
                 needs_redraw     = 1u;
                 last_state       = app.state;
                 last_menu_index  = app.home_menu_index;
+            }
+
+            /* Phase-21: Button SFX — triggered here in the main loop task,
+             * NOT in button_callback (which runs in gpio_task). This is the
+             * only safe place to call do_sfx() without a mutex. */
+            if (evt.id == FQ_EVT_BTN_A_PRESS) {
+                do_sfx(SFX_BTN_PRESS);
+            } else if (evt.id == FQ_EVT_BTN_B_PRESS) {
+                do_sfx(SFX_BTN_BACK);
             }
 
             /* Phase-21: Menu navigation SFX on home_menu_index change. */

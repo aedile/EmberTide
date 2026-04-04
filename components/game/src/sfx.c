@@ -20,6 +20,12 @@
  *   SFX_ITEM_EQUIP    — Mid sine chime.
  *   SFX_DEATH         — Low noise with long descending slide.
  *   SFX_REBIRTH       — Rising sine burst (ethereal).
+ *
+ * Duration constraint (B7):
+ *   At 22050 Hz, AUDIO_RING_BUF_SAMPLES == 4096 samples.
+ *   Max safe duration = 4096 / 22050 * 1000 ~= 185ms.
+ *   All presets with total_ms > 185 have been reduced to <= 180ms so that
+ *   fq_sfx_play() never generates more samples than the ring buffer can hold.
  */
 
 #include "sfx.h"
@@ -112,7 +118,8 @@ static const sfxr_params_t k_sfx_presets[SFX_COUNT] = {
         .total_ms      = 180u
     },
 
-    /* SFX_LEVEL_UP (6) — ascending square arpeggio feel */
+    /* SFX_LEVEL_UP (6) — ascending square arpeggio feel
+     * Reduced from 400ms to 180ms (B7: 400ms = 8820 samples > ring capacity 4096). */
     [SFX_LEVEL_UP] = {
         .wave          = SFXR_WAVE_SQUARE,
         .attack        = 0.05f,
@@ -122,10 +129,11 @@ static const sfxr_params_t k_sfx_presets[SFX_COUNT] = {
         .release       = 0.2f,
         .base_freq_hz  = 330u,
         .freq_slide    = 24.0f,
-        .total_ms      = 400u
+        .total_ms      = 180u
     },
 
-    /* SFX_ITEM_EQUIP (7) — mid sine chime */
+    /* SFX_ITEM_EQUIP (7) — mid sine chime
+     * Reduced from 200ms to 150ms (B7: 200ms = 4410 samples > ring capacity 4096). */
     [SFX_ITEM_EQUIP] = {
         .wave          = SFXR_WAVE_SINE,
         .attack        = 0.1f,
@@ -135,10 +143,11 @@ static const sfxr_params_t k_sfx_presets[SFX_COUNT] = {
         .release       = 0.3f,
         .base_freq_hz  = 660u,
         .freq_slide    = 6.0f,
-        .total_ms      = 200u
+        .total_ms      = 150u
     },
 
-    /* SFX_DEATH (8) — low noise descending */
+    /* SFX_DEATH (8) — low noise descending
+     * Reduced from 500ms to 180ms (B7: 500ms = 11025 samples > ring capacity 4096). */
     [SFX_DEATH] = {
         .wave          = SFXR_WAVE_NOISE,
         .attack        = 0.05f,
@@ -148,10 +157,11 @@ static const sfxr_params_t k_sfx_presets[SFX_COUNT] = {
         .release       = 0.5f,
         .base_freq_hz  = 110u,
         .freq_slide    = -6.0f,
-        .total_ms      = 500u
+        .total_ms      = 180u
     },
 
-    /* SFX_REBIRTH (9) — rising sine burst */
+    /* SFX_REBIRTH (9) — rising sine burst
+     * Reduced from 500ms to 180ms (B7: 500ms = 11025 samples > ring capacity 4096). */
     [SFX_REBIRTH] = {
         .wave          = SFXR_WAVE_SINE,
         .attack        = 0.15f,
@@ -161,7 +171,7 @@ static const sfxr_params_t k_sfx_presets[SFX_COUNT] = {
         .release       = 0.35f,
         .base_freq_hz  = 220u,
         .freq_slide    = 30.0f,
-        .total_ms      = 500u
+        .total_ms      = 180u
     }
 };
 

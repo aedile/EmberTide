@@ -18,9 +18,13 @@
  *   The caller checks the flag before calling fq_sfx_play(). This module
  *   has no quiet-mode awareness — single-responsibility preserved.
  *
- * SFX duration: each preset generates at most SFXR_MAX_DURATION_MS (500ms)
- * = 11025 samples at 22050 Hz — safely within AUDIO_RING_BUF_SAMPLES (4096).
- * Individual preset durations are tuned well below this ceiling.
+ * SFX duration constraint:
+ *   At 22050 Hz, AUDIO_RING_BUF_SAMPLES == 4096 samples.
+ *   Max safe duration = 4096 / 22050 * 1000 ~= 185ms.
+ *   ALL presets have total_ms <= 180ms to stay safely within the ring buffer
+ *   capacity. SFXR_MAX_DURATION_MS (500ms = 11025 samples) is the sfxr engine
+ *   ceiling and EXCEEDS the ring buffer — it must NOT be used as a preset
+ *   duration. Preset durations are individually bounded below 185ms.
  */
 
 #ifndef FIESTAQUEST_GAME_SFX_H

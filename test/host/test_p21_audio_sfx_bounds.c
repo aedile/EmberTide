@@ -26,6 +26,17 @@
  * 9. test_sfx_sample_count_bounded    — fq_sfx_play for each preset generates
  *                                       <= AUDIO_RING_BUF_SAMPLES samples
  * 10. test_sfx_play_returns_game_err  — return type is game_err_t (GAME_OK == 0)
+ *
+ * B1-B4 additions (reviewer blockers):
+ * 11. test_sfx_play_null_buf          — fq_sfx_play with NULL buf returns GAME_ERR_NULL_PTR
+ * 12. test_sfx_play_null_samples_out  — fq_sfx_play with NULL samples_out returns
+ *                                       GAME_ERR_NULL_PTR
+ * 13. test_audio_play_before_init     — hal_audio_play() before init returns
+ *                                       HAL_AUDIO_ERR_INIT
+ * 14. test_audio_nyquist_frequency    — hal_audio_play(22050, 100) returns HAL_AUDIO_OK
+ *                                       (aliased but valid at Nyquist boundary)
+ * 15. test_audio_deinit_while_playing — init, write_samples, deinit, write_samples again
+ *                                       returns HAL_AUDIO_ERR_INIT
  */
 
 #include "hal_audio.h"
@@ -193,6 +204,70 @@ int main(void)
                                           AUDIO_RING_BUF_SAMPLES,
                                           &samples_out);
         ASSERT_EQ("sfx_play_returns_game_err_ok", (int)GAME_OK, (int)ret);
+    }
+
+    /* -----------------------------------------------------------------------
+     * B1. fq_sfx_play with NULL buf returns GAME_ERR_NULL_PTR.
+     * ----------------------------------------------------------------------- */
+    {
+        size_t samples_out = 0u;
+        ASSERT_EQ("sfx_play_null_buf",
+                  GAME_ERR_NULL_PTR,
+                  (int)fq_sfx_play(SFX_BTN_PRESS, NULL, AUDIO_RING_BUF_SAMPLES,
+                                   &samples_out));
+    }
+
+    /* -----------------------------------------------------------------------
+     * B2. fq_sfx_play with NULL samples_out returns GAME_ERR_NULL_PTR.
+     * ----------------------------------------------------------------------- */
+    {
+        static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
+        ASSERT_EQ("sfx_play_null_samples_out",
+                  GAME_ERR_NULL_PTR,
+                  (int)fq_sfx_play(SFX_BTN_PRESS, sfx_buf, AUDIO_RING_BUF_SAMPLES,
+                                   NULL));
+    }
+
+    /* -----------------------------------------------------------------------
+     * B3. hal_audio_play() before init returns HAL_AUDIO_ERR_INIT.
+     *     mock_audio_reset() clears the initialised flag without re-initing.
+     * ----------------------------------------------------------------------- */
+    mock_audio_reset();
+    ASSERT_EQ("audio_play_before_init",
+              HAL_AUDIO_ERR_INIT,
+              hal_audio_play(440u, 100u));
+
+    /* -----------------------------------------------------------------------
+     * B4. Nyquist boundary: hal_audio_play(22050, 100) returns HAL_AUDIO_OK.
+     *     22050 Hz is the sample rate itself — aliased but syntactically valid.
+     *     The HAL must not reject it (only freq_hz == 0 is invalid).
+     * ----------------------------------------------------------------------- */
+    hal_audio_init();
+    ASSERT_EQ("audio_nyquist_frequency_ok",
+              HAL_AUDIO_OK,
+              hal_audio_play(22050u, 100u));
+
+    /* -----------------------------------------------------------------------
+     * B5. Deinit while playing: init, write_samples, deinit, write_samples
+     *     again — must return HAL_AUDIO_ERR_INIT after deinit.
+     * ----------------------------------------------------------------------- */
+    {
+        static int16_t sfx_buf[64];
+        mock_audio_reset();
+        hal_audio_init();
+
+        /* Write some samples while initialised — must succeed. */
+        ASSERT_EQ("write_after_init_ok",
+                  HAL_AUDIO_OK,
+                  hal_audio_write_samples(sfx_buf, 64u));
+
+        /* Deinit — teardown the driver. */
+        hal_audio_deinit();
+
+        /* Write again after deinit — must return ERR_INIT. */
+        ASSERT_EQ("write_after_deinit_err_init",
+                  HAL_AUDIO_ERR_INIT,
+                  hal_audio_write_samples(sfx_buf, 64u));
     }
 
     hal_audio_deinit();

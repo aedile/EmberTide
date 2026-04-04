@@ -59,7 +59,13 @@ typedef enum {
  * -------------------------------------------------------------------------
  */
 
-/** Maximum SFX duration in milliseconds (500ms = 11025 samples at 22050Hz). */
+/** Maximum SFX duration in milliseconds (500ms = 11025 samples at 22050Hz).
+ *
+ * WARNING: This ceiling EXCEEDS AUDIO_RING_BUF_SAMPLES (4096 samples).
+ * Preset total_ms values must be kept <= 180ms (= ~3969 samples) to avoid
+ * ring buffer overflow. SFXR_MAX_DURATION_MS is the engine clamp, not a
+ * safe preset target.
+ */
 #define SFXR_MAX_DURATION_MS  500u
 
 /** Sample rate (must match AUDIO_SAMPLE_RATE_HZ in hal_audio.h). */
@@ -76,6 +82,14 @@ typedef struct {
     float       freq_slide;    /**< Pitch slide in semitones/second. */
     uint16_t    total_ms;      /**< Total duration in ms (clamped to SFXR_MAX_DURATION_MS). */
 } sfxr_params_t;
+
+/* Compile-time struct size guard — catches unexpected layout changes due to
+ * field additions, reordering, or platform ABI divergence.
+ * Layout: sfxr_wave_t(4) + attack(4) + decay(4) + sustain_level(4) +
+ *         sustain(4) + release(4) + base_freq_hz(2) + [2 pad] +
+ *         freq_slide(4) + total_ms(2) + [2 pad] = 36 bytes. */
+_Static_assert(sizeof(sfxr_params_t) == 36u,
+               "sfxr_params_t size changed — update preset table and this assert");
 
 /* -------------------------------------------------------------------------
  * sfxr_generate — Generate PCM samples from a parameter preset.

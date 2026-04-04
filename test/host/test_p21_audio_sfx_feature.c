@@ -11,7 +11,8 @@
  * 4. fq_sfx_play(SFX_BTN_PRESS)   — generates > 0 samples.
  * 5. fq_sfx_play(SFX_COMBAT_HIT)  — generates > 0 samples, different from BTN_PRESS.
  * 6. fq_sfx_play(SFX_LEVEL_UP)    — generates > 0 samples.
- * 7. Rapid SFX spam (10 calls)     — no crash, ring buffer handles overflow.
+ * 7. Rapid SFX spam (10 calls)     — no crash, ring buffer overflow flag is set
+ *                                    after filling beyond capacity.
  * 8. All 10 SFX IDs succeed        — complete enum coverage.
  * 9. fq_sfx_play returns GAME_OK for all valid IDs.
  * 10. SFX presets are distinct      — BTN_PRESS and DEATH produce different first sample.
@@ -128,8 +129,10 @@ int main(void)
     }
 
     /* -----------------------------------------------------------------------
-     * 7. Rapid SFX spam — 10 rapid calls must not crash.
-     *    Ring buffer overflow is handled gracefully (no crash, flag set is OK).
+     * 7. Rapid SFX spam — 10 rapid calls pushing to the ring buffer.
+     *    After filling beyond AUDIO_RING_BUF_SAMPLES, the overflow flag must
+     *    be set. This asserts the overflow detection is functional, not a
+     *    tautology.
      * ----------------------------------------------------------------------- */
     {
         static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
@@ -144,7 +147,11 @@ int main(void)
                         &samples_out);
             hal_audio_write_samples(sfx_buf, samples_out);
         }
-        ASSERT_TRUE("rapid_spam_no_crash", 1);
+        /* 10 BTN_PRESS calls each push ~1323 samples (60ms at 22050Hz).
+         * 10 * 1323 = 13230 > AUDIO_RING_BUF_SAMPLES (4096) — overflow must fire. */
+        ASSERT_EQ("rapid_spam_overflow_flag_set",
+                  1u,
+                  mock_audio_get_overflow_flag());
     }
 
     /* -----------------------------------------------------------------------
