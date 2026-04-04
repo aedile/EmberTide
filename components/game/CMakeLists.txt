@@ -11,6 +11,9 @@ idf_component_register(
         "src/legacy.c"
         "src/combat_hash.c"
         "src/character.c"
+        "src/equip.c"
+        "src/training_session.c"
+        "src/name_gen.c"
     INCLUDE_DIRS
         "include"
     # game/ MUST NOT depend on hal/, presentation/, or connectivity/.

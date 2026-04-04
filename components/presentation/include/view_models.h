@@ -18,6 +18,12 @@
  *   - anim_frame field added to fq_vm_home_t (replaces one _pad byte).
  *     _Static_assert pins fq_vm_home_t at 24 bytes.
  *   - fq_vm_idle_t added for idle screensaver screen.
+ * Phase-19 Interactive additions:
+ *   - fq_vm_onboarding_t added (new first-boot character creation screen).
+ *   - fq_vm_training_t updated: target_pos, targets_done, game_type added.
+ *     _Static_assert added for fq_vm_training_t.
+ *   - fq_vm_inventory_t gains item_equipped[32] flags.
+ *     _Static_assert updated from 548 to 580 bytes.
  */
 
 #ifndef FIESTAQUEST_PRESENTATION_VIEW_MODELS_H
@@ -36,9 +42,6 @@ typedef struct {
 
 /* ---------------------------------------------------------------------------
  * fq_vm_home_t — Home screen view model.
- *
- * Carries all pre-computed display values for the home/dashboard screen.
- * No game/ types referenced here — plain integers and strings only.
  *
  * Field layout (no hidden padding on 32-bit aligned targets):
  *   uint16_t wins          (2)  offset 0
@@ -72,15 +75,6 @@ _Static_assert(sizeof(fq_vm_home_t) == 24u,
 /* ---------------------------------------------------------------------------
  * fq_vm_idle_t — Idle screensaver screen view model.
  *
- * Carries the minimum data needed to render the idle screen:
- * a 3x-scaled character sprite centered on screen, the game title,
- * and the character name + level at the bottom.
- *
- * Architecture: idle is a render-layer OVERLAY, NOT an FSM state.
- * app_main.c maintains an s_idle_active flag. When set, fq_render_idle()
- * is called instead of the current state's renderer. The FSM state is
- * preserved. Any button press clears s_idle_active.
- *
  * Field layout:
  *   uint8_t  sprite_base   (1)  offset 0
  *   char     name[13]     (13)  offset 1   — 12 chars + null terminator
@@ -99,33 +93,67 @@ _Static_assert(sizeof(fq_vm_idle_t) == 16u,
                "fq_vm_idle_t size changed — update layout comment and this assert");
 
 /* ---------------------------------------------------------------------------
+ * fq_vm_onboarding_t — Character creation / onboarding screen view model.
+ *
+ * Carries all pre-computed display values for the first-boot class selection
+ * carousel. Built by fq_vm_build_onboarding() in vm_builder.c.
+ *
+ * Field layout:
+ *   char    class_name[16]  (16)  offset 0  — class display name + null
+ *   uint8_t class_index      (1)  offset 16 — 0..FQ_CLASS_COUNT-1
+ *   uint8_t sprite_base      (1)  offset 17 — base sprite for selected class
+ *   uint8_t strength         (1)  offset 18 — class base strength stat
+ *   uint8_t speed            (1)  offset 19 — class base speed stat
+ *   uint8_t precision        (1)  offset 20 — class base precision stat
+ *   uint8_t intelligence     (1)  offset 21 — class base intelligence stat
+ *   uint8_t _pad[2]          (2)  offset 22 — explicit alignment pad
+ * Total: 24 bytes.
+ * ---------------------------------------------------------------------------*/
+typedef struct {
+    char    class_name[16];  /**< Human-readable class name (e.g. "Bruiser"). */
+    uint8_t class_index;     /**< Currently selected class index [0..4]. */
+    uint8_t sprite_base;     /**< Base sprite index for the selected class. */
+    uint8_t strength;        /**< Base strength stat for this class. */
+    uint8_t speed;           /**< Base speed stat for this class. */
+    uint8_t precision;       /**< Base precision stat for this class. */
+    uint8_t intelligence;    /**< Base intelligence stat for this class. */
+    uint8_t _pad[2];         /**< Explicit alignment pad. */
+} fq_vm_onboarding_t;
+
+_Static_assert(sizeof(fq_vm_onboarding_t) == 24u,
+               "fq_vm_onboarding_t size changed — update layout comment and this assert");
+
+/* ---------------------------------------------------------------------------
  * fq_vm_inventory_t — Inventory grid screen view model.
  *
- * Carries up to 32 pre-resolved item display names and rarities.
- * Cursor and scroll state are held here (no game interaction during render).
+ * Carries up to 32 pre-resolved item display names, rarities, and equipped
+ * status flags.
  *
  * Field layout:
  *   char    item_names[32][16]  (512)  offset 0
  *   uint8_t item_rarities[32]    (32)  offset 512
- *   uint8_t item_count           (1)   offset 544
- *   uint8_t cursor_index         (1)   offset 545
- *   uint8_t scroll_offset        (1)   offset 546
- *   uint8_t equipped_count       (1)   offset 547
- * Total: 548 bytes.
+ *   uint8_t item_equipped[32]    (32)  offset 544  — 1=equipped, 0=not
+ *   uint8_t item_count           (1)   offset 576
+ *   uint8_t cursor_index         (1)   offset 577
+ *   uint8_t scroll_offset        (1)   offset 578
+ *   uint8_t equipped_count       (1)   offset 579  — max slot limit for display
+ * Total: 580 bytes.
  * ---------------------------------------------------------------------------*/
 typedef struct {
     char    item_names[32][16];  /**< Display name per slot (15 chars + null). */
     uint8_t item_rarities[32];   /**< Rarity per slot (fq_rarity_t as uint8_t). */
+    uint8_t item_equipped[32];   /**< Equipped flag per slot: 1=equipped, 0=not. */
     uint8_t item_count;          /**< Number of items in inventory (0-32). */
-    uint8_t cursor_index;        /**< Currently selected slot (0-based). */
+    uint8_t cursor_index;        /**< Currently selected slot (0-based, clamped). */
     uint8_t scroll_offset;       /**< First visible row (for scroll). */
-    uint8_t equipped_count;      /**< Number of equipped items. */
+    uint8_t equipped_count;      /**< Max slot limit (for display, e.g. "2/4"). */
 } fq_vm_inventory_t;
+
+_Static_assert(sizeof(fq_vm_inventory_t) == 580u,
+               "fq_vm_inventory_t size changed — update layout comment and this assert");
 
 /* ---------------------------------------------------------------------------
  * fq_vm_stats_t — Character stats screen view model.
- *
- * Carries level, four core stats, XP progress, and rebirth count.
  *
  * Field layout (no hidden padding):
  *   uint32_t xp              (4)  offset 0
@@ -158,34 +186,21 @@ typedef struct {
 /* ---------------------------------------------------------------------------
  * fq_vm_combat_t — Combat HUD screen view model.
  *
- * Carries pre-computed display values for the split-screen combat view.
- * No game/ types referenced — plain integers and strings only.
- *
- * Naming convention:
- *   f1 = player fighter (bottom half of screen)
- *   f2 = enemy fighter  (top half of screen)
- *
- * HP is stored as int16_t to match fq_combat_fighter_t.hp. Negative HP
- * is valid (fighter KO'd past zero) and renders as a 0-width bar.
- *
- * action_text[0] == '\0' means no banner overlay.
- * action_text is bounded at 32 bytes; use strnlen(..., 31) for safe length.
- *
  * Field layout (verified with _Static_assert below):
  *   char    f1_name[13]     (13)  offset 0
  *   char    f2_name[13]     (13)  offset 13
- *   int16_t f1_hp            (2)  offset 26  — even, no compiler pad needed
+ *   int16_t f1_hp            (2)  offset 26
  *   int16_t f1_hp_max        (2)  offset 28
  *   int16_t f2_hp            (2)  offset 30
  *   int16_t f2_hp_max        (2)  offset 32
- *   uint8_t round            (1)  offset 34  — wait, see note
- *   uint8_t f1_class_id      (1)  offset 35  (see note on actual offsets below)
+ *   uint8_t round            (1)  offset 34
+ *   uint8_t f1_class_id      (1)  offset 35
  *   uint8_t f2_class_id      (1)  offset 36
  *   char    action_text[32] (32)  offset 37
  *   uint8_t finished         (1)  offset 69
  *   uint8_t winner           (1)  offset 70
- *   uint8_t _pad[1]          (1)  offset 71  — explicit trailing pad
- * Total: 72 bytes.  Verified by _Static_assert.
+ *   uint8_t _pad[1]          (1)  offset 71
+ * Total: 72 bytes.
  * ---------------------------------------------------------------------------*/
 typedef struct {
     char    f1_name[13];      /**< Player fighter name: 12 chars + null. */
@@ -193,14 +208,14 @@ typedef struct {
     int16_t f1_hp;            /**< Player current HP (may be negative = KO). */
     int16_t f1_hp_max;        /**< Player max HP. 0 → bar width = 0. */
     int16_t f2_hp;            /**< Enemy current HP. */
-    int16_t f2_hp_max;        /**< Enemy max HP. 0 → bar width = 0. */
+    int16_t f2_hp_max;        /**< Enemy max HP. */
     uint8_t round;            /**< Current round number (1-12). */
     uint8_t f1_class_id;      /**< Player class (fq_class_t as uint8_t). */
     uint8_t f2_class_id;      /**< Enemy class (fq_class_t as uint8_t). */
     char    action_text[32];  /**< Banner text. Empty string = no banner. */
     uint8_t finished;         /**< 1 = combat concluded this render. */
     uint8_t winner;           /**< 0=none, 1=f1 won, 2=f2 won. */
-    uint8_t _pad[1];          /**< Explicit trailing pad — makes size predictable. */
+    uint8_t _pad[1];          /**< Explicit trailing pad. */
 } fq_vm_combat_t;
 
 _Static_assert(sizeof(fq_vm_combat_t) == 72u,
@@ -209,18 +224,36 @@ _Static_assert(sizeof(fq_vm_combat_t) == 72u,
 /* ---------------------------------------------------------------------------
  * fq_vm_training_t — Training mini-game screen view model.
  *
- * Carries pre-computed display values for the training screen.
+ * Phase-19 update: added target_pos, targets_done, game_type fields.
  *
  * state:
- *   0 = waiting (pre-game prompt)
+ *   0 = waiting (pre-game type selection)
  *   1 = active  (mini-game running)
  *   2 = done    (result shown)
+ *
+ * Field layout:
+ *   char    game_name[16]   (16)  offset 0
+ *   uint8_t score            (1)  offset 16  — 0-100
+ *   uint8_t difficulty       (1)  offset 17  — 0-10
+ *   uint8_t state            (1)  offset 18  — 0=waiting, 1=active, 2=done
+ *   uint8_t target_pos       (1)  offset 19  — 0-100 (target position on bar)
+ *   uint8_t targets_done     (1)  offset 20  — 0-5
+ *   uint8_t game_type        (1)  offset 21  — 0=Speed, 1=Power, 2=Intel
+ *   uint8_t _pad[2]          (2)  offset 22  — explicit alignment pad
+ * Total: 24 bytes.
  * ---------------------------------------------------------------------------*/
 typedef struct {
     char    game_name[16]; /**< Mini-game name: "Speed", "Power", "Intel". */
     uint8_t score;         /**< Mini-game score: 0-100. */
     uint8_t difficulty;    /**< Difficulty level 0-10. */
     uint8_t state;         /**< 0=waiting, 1=active, 2=done. */
+    uint8_t target_pos;    /**< Target position on bar: 0-100. */
+    uint8_t targets_done;  /**< Number of targets completed: 0-5. */
+    uint8_t game_type;     /**< Game type: 0=Speed, 1=Power, 2=Intel. */
+    uint8_t _pad[2];       /**< Explicit alignment pad. */
 } fq_vm_training_t;
+
+_Static_assert(sizeof(fq_vm_training_t) == 24u,
+               "fq_vm_training_t size changed — update layout comment and this assert");
 
 #endif /* FIESTAQUEST_PRESENTATION_VIEW_MODELS_H */
