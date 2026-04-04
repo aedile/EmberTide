@@ -14,7 +14,7 @@
  *   state is FQ_STATE_BATTLE AND ctx->combat_active == 1. This preserves
  *   the deterministic PRNG stream used by the combat engine.
  *
- * State transition table (Phase-19 home menu navigation):
+ * State transition table (Phase-19 home menu navigation + onboarding):
  *   BOOT            → TITLE         (automatic on fq_app_init)
  *   TITLE           → HOME          (BTN_A_PRESS or BTN_B_PRESS)
  *   HOME            → (cycles menu)  (BTN_B_PRESS: increments home_menu_index mod 4)
@@ -22,12 +22,17 @@
  *   HOME            → BATTLE_SETUP  (BTN_A_PRESS when home_menu_index == 1)
  *   HOME            → INVENTORY     (BTN_A_PRESS when home_menu_index == 2)
  *   HOME            → STATS         (BTN_A_PRESS when home_menu_index == 3)
- *   INVENTORY       → HOME          (BTN_B_PRESS; resets home_menu_index to 0)
+ *   INVENTORY       → HOME          (double-tap BTN_B; resets home_menu_index to 0)
+ *   INVENTORY cursor: BTN_B = cycle cursor; BTN_A = equip toggle
  *   STATS           → HOME          (BTN_B_PRESS; resets home_menu_index to 0)
- *   TRAINING        → HOME          (BTN_B_PRESS; resets home_menu_index to 0)
+ *   TRAINING state=WAITING: BTN_A=cycle type, BTN_B=start game
+ *   TRAINING state=ACTIVE: BTN_A=hit, BTN_B=exit; auto-tick per TIMER_TICK
+ *   TRAINING state=DONE: BTN_B=exit to HOME
+ *   TRAINING        → HOME          (BTN_B_PRESS in DONE or B during WAITING)
  *   BATTLE_SETUP    → BATTLE        (BLE_CONNECTED; sets combat_active=1)
  *   BATTLE          → BATTLE_RESULT (COMBAT_ROUND_COMPLETE; clears combat_active)
  *   BATTLE_RESULT   → HOME          (BTN_A_PRESS; resets home_menu_index to 0)
+ *   ONBOARDING: BTN_A=cycle class, BTN_B=confirm (→HOME on save success)
  *
  * All other events in any state are silently ignored — GAME_OK is returned
  * and the state is unchanged.
@@ -61,7 +66,8 @@ typedef enum {
     FQ_STATE_TRAINING      = 8,  /**< Training mini-game. */
     FQ_STATE_REBIRTH       = 9,  /**< Rebirth / permadeath screen. */
     FQ_STATE_SETTINGS      = 10, /**< Settings / preferences. */
-    FQ_STATE_COUNT         = 11  /**< Sentinel — number of valid states. */
+    FQ_STATE_ONBOARDING    = 11, /**< First-boot character creation. */
+    FQ_STATE_COUNT         = 12  /**< Sentinel — number of valid states. */
 } fq_app_state_t;
 
 /* ---------------------------------------------------------------------------
@@ -84,18 +90,40 @@ typedef enum {
  *
  * Phase-19: home_menu_index added. Tracks the currently highlighted home
  * screen menu entry. Reset to 0 whenever the FSM enters FQ_STATE_HOME.
+ *
+ * Phase-19 interactive: onboarding_class_index, onboarding_save_failed,
+ * inventory_cursor, inv_b_press_tick added for onboarding and inventory
+ * button handling. These fields fit into the trailing byte padding that
+ * existed after home_menu_index and anim_frame — struct size unchanged.
+ *
+ * Phase-19 training: training_session embedded directly. Since
+ * fq_training_session_t is 8 bytes and we need it linked to the context
+ * for FSM dispatch, it is embedded here. The struct size increases
+ * accordingly (see _Static_assert update below).
  * ---------------------------------------------------------------------------*/
+
+#include "training_session.h"
+
 typedef struct {
-    fq_app_state_t  state;            /**< Current FSM state. */
-    fq_event_bus_t  bus;              /**< Embedded event bus. */
-    uint32_t        tick_count;       /**< Monotonic tick counter (incremented per TIMER_TICK). */
+    fq_app_state_t  state;                 /**< Current FSM state. */
+    fq_event_bus_t  bus;                   /**< Embedded event bus. */
+    uint32_t        tick_count;            /**< Monotonic tick counter. */
     /* Non-owning game state pointers — set at init, never freed by this module. */
-    fq_character_t *player;           /**< Player character record. Not owned. */
-    fq_inventory_t *inventory;        /**< Player inventory. Not owned. */
+    fq_character_t *player;                /**< Player character record. Not owned. */
+    fq_inventory_t *inventory;             /**< Player inventory. Not owned. */
     /* Combat context — initialized only when entering FQ_STATE_BATTLE. */
-    fq_combat_ctx_t combat;           /**< Full combat context (64 bytes). */
-    uint8_t         combat_active;    /**< 1 when a battle is in progress, 0 otherwise. */
-    uint8_t         home_menu_index;  /**< Home menu cursor: 0=TRAIN,1=BATTLE,2=ITEMS,3=STATS. */
+    fq_combat_ctx_t combat;                /**< Full combat context (64 bytes). */
+    uint8_t         combat_active;         /**< 1 when a battle is in progress, 0 otherwise. */
+    uint8_t         home_menu_index;       /**< Home menu cursor: 0=TRAIN,1=BATTLE,2=ITEMS,3=STATS. */
+    /* Onboarding state */
+    uint8_t         onboarding_class_index; /**< Selected class index [0, FQ_CLASS_COUNT-1]. */
+    uint8_t         onboarding_save_failed; /**< 1 = last save attempt failed; re-enter onboarding. */
+    /* Inventory state */
+    uint8_t         inventory_cursor;      /**< Currently highlighted inventory slot. */
+    uint8_t         inv_b_press_count;     /**< Double-tap B counter for inventory exit. */
+    uint32_t        inv_b_last_tick;       /**< Tick count of last B press in INVENTORY. */
+    /* Training session (embedded, 8 bytes) */
+    fq_training_session_t training;        /**< Active training session state. */
 } fq_app_ctx_t;
 
 /* ---------------------------------------------------------------------------
@@ -127,12 +155,6 @@ game_err_t fq_app_init(fq_app_ctx_t  *ctx,
  * Constitution Priority 0: MUST NOT touch ctx->combat.rng unless
  * ctx->state == FQ_STATE_BATTLE && ctx->combat_active == 1.
  *
- * Phase-19 HOME state behaviour:
- *   BTN_B_PRESS: increments home_menu_index modulo FQ_HOME_MENU_COUNT (wraps 3→0).
- *   BTN_A_PRESS: transitions to the state for the current home_menu_index.
- *   Any transition away from HOME that later returns to HOME resets
- *   home_menu_index to 0.
- *
  * @param ctx  Application context. Returns GAME_ERR_NULL_PTR if NULL.
  * @param evt  Event to process. Returns GAME_ERR_NULL_PTR if NULL.
  * @return     GAME_OK on success, GAME_ERR_NULL_PTR if ctx or evt is NULL.
@@ -143,22 +165,33 @@ game_err_t fq_app_dispatch(fq_app_ctx_t      *ctx,
 /* ---------------------------------------------------------------------------
  * A4 (Architecture P11): fq_app_ctx_t layout invariant pinned at compile time.
  *
- * Phase-19: home_menu_index (uint8_t) added after combat_active (uint8_t).
- * Both bytes pack into the trailing padding of the struct — total size is
- * unchanged on both host (64-bit) and target (32-bit).
+ * Phase-19 interactive additions:
+ *   - onboarding_class_index (uint8_t) — 1 byte
+ *   - onboarding_save_failed (uint8_t) — 1 byte
+ *   - inventory_cursor       (uint8_t) — 1 byte
+ *   - inv_b_press_count      (uint8_t) — 1 byte
+ *   - inv_b_last_tick        (uint32_t) — 4 bytes
+ *   - training               (fq_training_session_t = 8 bytes)
+ * Total added: 16 bytes beyond the previous base.
  *
- * Layout varies by pointer width:
+ * Previous sizes:
  *   Host (x86-64, 8-byte pointers): 232 bytes
  *   Target (Xtensa ESP32-S3, 4-byte pointers): 216 bytes
  *
- * The struct contains two pointers (player, inventory) whose size differs
- * between host and target. Both sizes are pinned below.
+ * New sizes (previous + 16):
+ *   Host (x86-64, 8-byte pointers): 248 bytes
+ *   Target (Xtensa ESP32-S3, 4-byte pointers): 232 bytes
+ *
+ * Alignment analysis for new fields after home_menu_index (uint8_t, prev
+ * offset varies): the four new uint8_t fields pack into contiguous bytes,
+ * then inv_b_last_tick (uint32_t) needs 4-byte alignment, and training
+ * (8 bytes) follows.
  * ---------------------------------------------------------------------------*/
 #if __SIZEOF_POINTER__ == 8
-_Static_assert(sizeof(fq_app_ctx_t) == 232u,
+_Static_assert(sizeof(fq_app_ctx_t) == 248u,
     "fq_app_ctx_t layout changed (64-bit host)");
 #elif __SIZEOF_POINTER__ == 4
-_Static_assert(sizeof(fq_app_ctx_t) == 216u,
+_Static_assert(sizeof(fq_app_ctx_t) == 232u,
     "fq_app_ctx_t layout changed (32-bit target)");
 #endif
 

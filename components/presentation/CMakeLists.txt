@@ -12,6 +12,7 @@ idf_component_register(
         "src/screens/screen_stats.c"
         "src/screens/screen_combat.c"
         "src/screens/screen_training.c"
+        "src/screens/screen_onboarding.c"
     INCLUDE_DIRS
         "include"
     # presentation/ does NOT depend on game/ — view model construction happens
@@ -36,4 +37,7 @@ idf_component_register(
     #
     # screen_idle.c: idle overlay renderer added in Phase-19.5. Renders a
     # 3x-scaled character sprite with name/level after 30s of inactivity.
+    #
+    # screen_onboarding.c: first-boot character creation screen added in
+    # Phase-19. Renders class sprite, stat bars, and class name for FQ_STATE_ONBOARDING.
 )

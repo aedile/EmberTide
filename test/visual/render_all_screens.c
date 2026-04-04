@@ -37,6 +37,7 @@
 #include "screens/screen_combat.h"
 #include "screens/screen_training.h"
 #include "screens/screen_idle.h"
+#include "screens/screen_onboarding.h"
 #include "ui_widgets.h"
 #include "vm_builder.h"
 #include "types.h"
@@ -492,6 +493,29 @@ int main(void)
             return EXIT_FAILURE;
         }
         printf("render_all_screens: output/scene_idle.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 11: scene_onboarding.png — Warrior class, class index 0.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_vm_onboarding_t vm_onboard;
+        memset(&vm_onboard, 0, sizeof(vm_onboard));
+        strncpy(vm_onboard.class_name, "Warrior", sizeof(vm_onboard.class_name) - 1u);
+        vm_onboard.class_index   = 0u;
+        vm_onboard.sprite_base   = 0u;
+        vm_onboard.strength      = 80u;
+        vm_onboard.speed         = 40u;
+        vm_onboard.precision     = 30u;
+        vm_onboard.intelligence  = 20u;
+
+        fq_render_onboarding(&framebuffer, &vm_onboard);
+
+        printf("render_all_screens: writing output/scene_onboarding.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_onboarding.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_onboarding.png written successfully\n");
     }
 
     printf("render_all_screens: ALL SCREENS OK\n");

@@ -17,12 +17,19 @@
  *
  * Phase 19.5: Idle screensaver, walk animation, partial e-paper refresh.
  *
+ * Phase 19 Interactive:
+ *   First-boot routing: if no valid save exists, state → ONBOARDING.
+ *   Remove hardcoded "Ember" character creation.
+ *   ONBOARDING added to idle suppression list.
+ *   Training session: TIMER_TICK posted to event bus every loop (acts as
+ *   tick source for target movement). Auto-save on inventory exit.
+ *
  *   Idle design:
  *     - Idle is NOT an FSM state. s_idle_active flag overlays the renderer.
  *     - After IDLE_TIMEOUT_US (30s) of no button input, s_idle_active = 1.
  *     - Any button press clears s_idle_active; the previous FSM state resumes.
  *     - Idle is suppressed during FQ_STATE_BATTLE, FQ_STATE_BATTLE_SETUP,
- *       and FQ_STATE_TITLE (these states must not be interrupted).
+ *       FQ_STATE_TITLE, and FQ_STATE_ONBOARDING.
  *     - s_last_button_us is initialized to esp_timer_get_time() at startup
  *       so idle does not fire before the first user interaction.
  *
@@ -39,14 +46,6 @@
  *     - HAL internally forces a full refresh every EPD_FULL_REFRESH_INTERVAL
  *       partial flushes to clear accumulated ghosting.
  *     - State-change redraws continue to use hal_epaper_flush() (full).
- *
- *   Idle precision note:
- *     The main loop polls at 20 Hz (50ms). Idle timeout accuracy is ±50ms,
- *     which is acceptable for a 30-second timeout. No real-time guarantee.
- *
- *   esp_timer overflow note:
- *     int64_t subtraction (now - last_button) wraps safely at ~292,000 years.
- *     Not a practical concern.
  */
 
 #include <stdint.h>
@@ -69,6 +68,8 @@
 #include "screens/screen_home.h"
 #include "screens/screen_stats.h"
 #include "screens/screen_inventory.h"
+#include "screens/screen_training.h"
+#include "screens/screen_onboarding.h"
 #include "screens/screen_idle.h"
 #include "asset_data.h"
 #include "sprite_util.h"
@@ -101,19 +102,12 @@ static const char *TAG = "app_main";
  */
 #define ANIM_FRAME_US      (800000ULL)
 
-/* BLOCKER 2 fix: Compile-time guard — ANIM_FRAME_US must be non-zero.
- * A value of 0 would cause the animation to fire on every loop iteration,
- * flooding the e-paper with partial refreshes and corrupting the display. */
+/* BLOCKER 2 fix: Compile-time guard — ANIM_FRAME_US must be non-zero. */
 _Static_assert(ANIM_FRAME_US > 0ULL,
                "ANIM_FRAME_US must be > 0 — zero causes runaway animation refreshes");
 
 /* -------------------------------------------------------------------------
  * File-scope application context pointer.
- *
- * button_callback is called from the gpio_task context (not ISR context —
- * the ISR posts to a queue, the task calls the callback). It needs access
- * to the event bus and the idle/anim state. Using a file-scope pointer
- * avoids passing through FreeRTOS task parameter indirection.
  * -------------------------------------------------------------------------
  */
 static fq_app_ctx_t *s_app = NULL;
@@ -122,33 +116,56 @@ static fq_app_ctx_t *s_app = NULL;
  * Idle / animation state — file-scope, reset at startup.
  * -------------------------------------------------------------------------
  */
-static int64_t  s_last_button_us;  /* esp_timer timestamp of last button press */
-static uint8_t  s_idle_active;     /* 1 = idle screensaver is showing */
-static uint8_t  s_anim_frame;      /* current walk-cycle frame (0 or 2) */
-static int64_t  s_last_anim_us;    /* timestamp of last animation frame advance */
+static int64_t  s_last_button_us;
+static uint8_t  s_idle_active;
+static uint8_t  s_anim_frame;
+static int64_t  s_last_anim_us;
 
 /* -------------------------------------------------------------------------
  * is_idle_forbidden — Returns 1 if idle must NOT activate in this state.
  *
- * Idle is suppressed during active combat, BLE pairing, and the title screen:
- *   - BATTLE / BATTLE_SETUP: must not interrupt mid-combat.
- *   - TITLE: the first-boot splash should not auto-dismiss to idle.
+ * Phase-19 Interactive: ONBOARDING added (first-boot must not auto-dismiss).
  * -------------------------------------------------------------------------
  */
 static uint8_t is_idle_forbidden(fq_app_state_t state)
 {
     return (state == FQ_STATE_BATTLE       ||
             state == FQ_STATE_BATTLE_SETUP  ||
-            state == FQ_STATE_TITLE)
+            state == FQ_STATE_TITLE         ||
+            state == FQ_STATE_ONBOARDING)
            ? 1u : 0u;
 }
 
 /* -------------------------------------------------------------------------
- * button_callback — Called from gpio_task context on each debounced press.
+ * do_auto_save — Serialize and write save to flash.
  *
- * Maps the HAL button ID to an FQ event ID and posts to the event bus.
- * Also resets s_last_button_us for idle timeout tracking.
- * Safe to call from task context.
+ * Called on inventory exit and after onboarding character creation.
+ * Sets app->onboarding_save_failed based on result.
+ * -------------------------------------------------------------------------
+ */
+static void do_auto_save(fq_app_ctx_t   *app,
+                         fq_character_t *player,
+                         fq_inventory_t *inventory)
+{
+    uint8_t save_buf[FQ_SAVE_MAX_SIZE];
+    size_t  bytes = fq_save_serialize(player, inventory, save_buf, sizeof(save_buf));
+    if (bytes == 0u) {
+        ESP_LOGE(TAG, "save_serialize failed");
+        if (app) { app->onboarding_save_failed = 1u; }
+        return;
+    }
+    hal_flash_err_t err = hal_flash_write_save(save_buf, bytes);
+    if (err != HAL_FLASH_OK) {
+        ESP_LOGE(TAG, "hal_flash_write_save failed: %d", (int)err);
+        if (app) { app->onboarding_save_failed = 1u; }
+    } else {
+        ESP_LOGI(TAG, "Auto-save OK (%u bytes)", (unsigned)bytes);
+        if (app) { app->onboarding_save_failed = 0u; }
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * button_callback — Called from gpio_task context on each debounced press.
  * -------------------------------------------------------------------------
  */
 static void button_callback(hal_btn_id_t btn_id)
@@ -156,7 +173,6 @@ static void button_callback(hal_btn_id_t btn_id)
     if (!s_app) {
         return;
     }
-    /* Reset idle timeout on every button press. */
     s_last_button_us = esp_timer_get_time();
 
     fq_event_id_t evt_id = (btn_id == HAL_BTN_A)
@@ -167,38 +183,21 @@ static void button_callback(hal_btn_id_t btn_id)
 
 /* -------------------------------------------------------------------------
  * render_title_screen — Draw the EmberTide title screen.
- *
- * Layout (200x200 px, 1-bit e-paper):
- *   y=0..3    4-px thick outer border (filled rects on all four edges)
- *   y=8       1-px inner decorative border (draw_rect, inset 8px)
- *   y=20      "EmberTide" centered, script font (FONT_SCRIPT_24)
- *   y=52      horizontal separator line
- *   y=60      Dark Knight sprite (32x32) blitted at 2x -> 64x64, centered
- *   y=130     horizontal separator line
- *   y=145     "Press [PWR]" centered, small font (FONT_REGS_12)
- *   y=192     bottom of inner border
- *   y=196..199 bottom 4-px thick border
- *
- * Button note: [PWR] refers to GPIO0 (the ⏻ power icon button on the case),
- * which is the button closest to the USB-C port. This is HAL_BTN_A.
  * -------------------------------------------------------------------------
  */
 static void render_title_screen(fq_fb_t *fb)
 {
     const fq_font_t   *font_title = fq_get_font_title();
     const fq_font_t   *font_small = fq_get_font_small();
-    const fq_sprite_t *spr        = fq_get_char_sprite(0u, 0u); /* Dark Knight, frame 0 */
+    const fq_sprite_t *spr        = fq_get_char_sprite(0u, 0u);
 
-    /* -- Outer 4-px thick border ------------------------------------------ */
     fq_fb_fill_rect(fb,   0,   0, 200,   4, 1u);
     fq_fb_fill_rect(fb,   0, 196, 200,   4, 1u);
     fq_fb_fill_rect(fb,   0,   4,   4, 192, 1u);
     fq_fb_fill_rect(fb, 196,   4,   4, 192, 1u);
 
-    /* -- Inner 1-px decorative border (inset 8px from outer border) --------- */
     fq_fb_draw_rect(fb, 8, 8, 184, 184, 1u);
 
-    /* -- "EmberTide" centered at y=20, script font -------------------------- */
     {
         static const char title_str[] = "EmberTide";
         int16_t w = fq_text_width(font_title, title_str);
@@ -206,19 +205,15 @@ static void render_title_screen(fq_fb_t *fb)
         fq_draw_text(fb, font_title, x, 20, title_str);
     }
 
-    /* -- Horizontal separator below title, y=52 ----------------------------- */
     fq_fb_draw_line(fb, 12, 52, 187, 52, 1u);
 
-    /* -- Dark Knight sprite at 2x (64x64), centered horizontally, top at y=60 */
     if (spr != NULL) {
-        int16_t sprite_x = (int16_t)((200 - 64) / 2); /* = 68 */
+        int16_t sprite_x = (int16_t)((200 - 64) / 2);
         fq_blit_sprite_2x(fb, sprite_x, 60, spr);
     }
 
-    /* -- Horizontal separator above footer, y=130 --------------------------- */
     fq_fb_draw_line(fb, 12, 130, 187, 130, 1u);
 
-    /* -- "Press [PWR]" centered at y=145, small font ------------------------ */
     {
         static const char prompt_str[] = "Press [PWR]";
         int16_t w = fq_text_width(font_small, prompt_str);
@@ -262,8 +257,21 @@ static void render_current_state(fq_app_ctx_t   *app,
         }
         case FQ_STATE_INVENTORY: {
             fq_vm_inventory_t vm_inv;
-            fq_vm_build_inventory(&vm_inv, inventory);
+            fq_vm_build_inventory_ex(&vm_inv, inventory, player,
+                                      app->inventory_cursor, 0u);
             fq_render_inventory(fb, &vm_inv);
+            break;
+        }
+        case FQ_STATE_TRAINING: {
+            fq_vm_training_t vm_train;
+            fq_vm_build_training_session(&vm_train, &app->training);
+            fq_render_training(fb, &vm_train);
+            break;
+        }
+        case FQ_STATE_ONBOARDING: {
+            fq_vm_onboarding_t vm_ob;
+            fq_vm_build_onboarding(&vm_ob, player, app->onboarding_class_index);
+            fq_render_onboarding(fb, &vm_ob);
             break;
         }
         default:
@@ -287,8 +295,7 @@ static void render_current_state(fq_app_ctx_t   *app,
 }
 
 /* -------------------------------------------------------------------------
- * render_home_partial — Re-render the home screen and flush using partial
- * refresh (for animation frame updates — no full flicker).
+ * render_home_partial — Re-render the home screen with partial refresh.
  * -------------------------------------------------------------------------
  */
 static void render_home_partial(fq_app_ctx_t   *app,
@@ -308,20 +315,19 @@ static void render_home_partial(fq_app_ctx_t   *app,
     err = hal_epaper_flush_partial(fb->pixels, FQ_FB_SIZE);
     if (err != HAL_EPAPER_OK) {
         ESP_LOGE(TAG, "hal_epaper_flush_partial failed: %d — falling back to full", (int)err);
-        /* Fall back to full flush on partial failure. */
         hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
     }
 }
 
 /* -------------------------------------------------------------------------
- * render_idle — Render the idle screensaver and flush using partial refresh.
+ * render_idle — Render the idle screensaver with partial refresh.
  * -------------------------------------------------------------------------
  */
 static void render_idle(fq_app_ctx_t   *app,
                         fq_fb_t        *fb,
                         fq_character_t *player)
 {
-    (void)app; /* reserved for future use */
+    (void)app;
 
     hal_epaper_err_t err;
 
@@ -354,6 +360,7 @@ void app_main(void)
     /* -----------------------------------------------------------------------
      * Flash init + save load.
      * ----------------------------------------------------------------------- */
+    uint8_t  save_valid = 0u;
     hal_flash_err_t flash_err = hal_flash_init();
     if (flash_err != HAL_FLASH_OK) {
         ESP_LOGE(TAG, "hal_flash_init failed: %d — first-boot fallback", (int)flash_err);
@@ -366,18 +373,13 @@ void app_main(void)
                                                           &player, &inventory);
             if (save_err == FQ_SAVE_OK) {
                 ESP_LOGI(TAG, "Save loaded OK (%u bytes)", (unsigned)bytes_read);
+                save_valid = 1u;
             } else {
                 ESP_LOGW(TAG, "Save corrupt (%d) — first-boot fallback", (int)save_err);
                 memset(&player,    0, sizeof(player));
                 memset(&inventory, 0, sizeof(inventory));
             }
         }
-    }
-
-    /* First-boot: create default character if name is empty. */
-    if (player.name[0] == '\0') {
-        fq_character_create(&player, FQ_CLASS_BRUISER, 1u, "Ember");
-        ESP_LOGI(TAG, "First boot — created default character 'Ember'");
     }
 
     /* -----------------------------------------------------------------------
@@ -387,14 +389,24 @@ void app_main(void)
     s_app = &app;
 
     /* -----------------------------------------------------------------------
+     * Phase-19 Interactive: first-boot routing.
+     *
+     * If no valid save: go to ONBOARDING instead of creating "Ember".
+     * If valid save: stay on TITLE (fq_app_init already set TITLE).
+     * ----------------------------------------------------------------------- */
+    if (!save_valid) {
+        app.state = FQ_STATE_ONBOARDING;
+        app.onboarding_class_index = 0u;
+        app.onboarding_save_failed = 0u;
+        ESP_LOGI(TAG, "First boot — entering ONBOARDING");
+    }
+
+    /* -----------------------------------------------------------------------
      * HAL init.
-     * Phase-19.5: hal_epaper_init() now performs a boot-time full clear
-     * (white→black→white) before returning. s_flush_count reset to 0 after.
      * ----------------------------------------------------------------------- */
     hal_epaper_err_t epaper_err = hal_epaper_init();
     if (epaper_err != HAL_EPAPER_OK) {
         ESP_LOGE(TAG, "hal_epaper_init failed: %d", (int)epaper_err);
-        /* Non-fatal: continue without display. */
     }
 
     hal_gpio_err_t gpio_err = hal_gpio_init(button_callback);
@@ -404,7 +416,6 @@ void app_main(void)
 
     /* -----------------------------------------------------------------------
      * Phase-19.5: Initialise idle/anim state.
-     * s_last_button_us set to now so idle does not fire before first input.
      * ----------------------------------------------------------------------- */
     s_last_button_us = esp_timer_get_time();
     s_last_anim_us   = s_last_button_us;
@@ -412,7 +423,7 @@ void app_main(void)
     s_anim_frame     = 0u;
 
     /* -----------------------------------------------------------------------
-     * Initial render — display title screen.
+     * Initial render.
      * ----------------------------------------------------------------------- */
     render_current_state(&app, &framebuffer, &player, &inventory);
 
@@ -424,8 +435,18 @@ void app_main(void)
     uint8_t         last_menu_index   = app.home_menu_index;
     uint8_t         needs_redraw      = 0u;
 
+    /* Track inventory state to detect exit (for auto-save). */
+    uint8_t         was_inventory     = (app.state == FQ_STATE_INVENTORY) ? 1u : 0u;
+
     while (1) {
         int64_t now_us = esp_timer_get_time();
+
+        /* ── Post TIMER_TICK to event bus (drives training target movement). */
+        {
+            fq_event_t tick_evt = { FQ_EVT_TIMER_TICK, 0u };
+            fq_event_bus_post(&app.bus, FQ_EVT_TIMER_TICK, 0u);
+            (void)tick_evt;
+        }
 
         /* ── Drain the event bus ─────────────────────────────────────────── */
         while (fq_event_bus_pop(&app.bus, &evt)) {
@@ -441,19 +462,41 @@ void app_main(void)
                 last_menu_index  = app.home_menu_index;
             }
 
-            /* Redraw on state change OR on home menu cursor change. */
             if (app.state != last_state) {
+                /* ── Auto-save on inventory exit. ─────────────────────── */
+                if (was_inventory && app.state != FQ_STATE_INVENTORY) {
+                    do_auto_save(&app, &player, &inventory);
+                }
+
+                /* ── Auto-save on onboarding confirm (BTN_B → HOME). ─── */
+                if (last_state == FQ_STATE_ONBOARDING &&
+                    app.state  == FQ_STATE_HOME) {
+                    do_auto_save(&app, &player, &inventory);
+                    if (app.onboarding_save_failed) {
+                        /* Save failed — re-enter onboarding. */
+                        app.state = FQ_STATE_ONBOARDING;
+                        ESP_LOGW(TAG, "Onboarding save failed — re-entering");
+                    }
+                }
+
                 needs_redraw     = 1u;
                 last_state       = app.state;
                 last_menu_index  = app.home_menu_index;
-                /* Reset animation frame on any state change. */
                 s_anim_frame     = 0u;
                 s_last_anim_us   = now_us;
             } else if (app.state == FQ_STATE_HOME &&
                        app.home_menu_index != last_menu_index) {
                 needs_redraw    = 1u;
                 last_menu_index = app.home_menu_index;
+            } else if (app.state == FQ_STATE_INVENTORY) {
+                /* Redraw on cursor movement. */
+                needs_redraw = 1u;
+            } else if (app.state == FQ_STATE_TRAINING) {
+                /* Redraw on training tick (target moved). */
+                needs_redraw = 1u;
             }
+
+            was_inventory = (app.state == FQ_STATE_INVENTORY) ? 1u : 0u;
         }
 
         /* ── Idle timeout check ──────────────────────────────────────────── */
@@ -462,7 +505,7 @@ void app_main(void)
             (now_us - s_last_button_us) > (int64_t)IDLE_TIMEOUT_US)
         {
             s_idle_active    = 1u;
-            needs_redraw     = 0u;  /* suppress normal redraw */
+            needs_redraw     = 0u;
             render_idle(&app, &framebuffer, &player);
         }
 
@@ -471,15 +514,13 @@ void app_main(void)
             app.state == FQ_STATE_HOME                        &&
             (now_us - s_last_anim_us) > (int64_t)ANIM_FRAME_US)
         {
-            /* Alternate between frame 0 (idle pose) and frame 2 (mid-step).
-             * Two-frame cycle minimises ghosting on e-paper partial refresh. */
             s_anim_frame   = (s_anim_frame == 0u) ? 2u : 0u;
             s_last_anim_us = now_us;
-            needs_redraw   = 0u;  /* handled as partial redraw below */
+            needs_redraw   = 0u;
             render_home_partial(&app, &framebuffer, &player);
         }
 
-        /* ── Full redraw if state-change flagged (skip if idle) ──────────── */
+        /* ── Full redraw if flagged (skip if idle) ───────────────────────── */
         if (needs_redraw && !s_idle_active) {
             render_current_state(&app, &framebuffer, &player, &inventory);
             needs_redraw = 0u;

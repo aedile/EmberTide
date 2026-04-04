@@ -137,7 +137,12 @@ int main(void)
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_STATS, (int)st_ctx.state);
 
     /* -----------------------------------------------------------------------
-     * INVENTORY → HOME on BTN_B_PRESS.
+     * INVENTORY → HOME on double-tap BTN_B_PRESS (Phase-19 behavior).
+     *
+     * Phase-19 changed BTN_B in INVENTORY from "exit to HOME" to
+     * "cycle cursor". Exit is now triggered by two B presses within
+     * INV_DOUBLE_TAP_TICKS (6 ticks). With tick_count=0, two consecutive
+     * B presses have ticks_since=0 which is <= 6, triggering the exit.
      * ----------------------------------------------------------------------- */
     fq_app_ctx_t inv_ctx;
     memset(&player, 0, sizeof(player));
@@ -147,7 +152,10 @@ int main(void)
     dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 0→1 */
     dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS); /* cycle: 1→2 (ITEMS) */
     dispatch_ok(&inv_ctx, FQ_EVT_BTN_A_PRESS); /* select → INVENTORY */
-    dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS); /* INVENTORY → HOME */
+    /* Double-tap: first B (cycles cursor, records timestamp tick=0). */
+    dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS);
+    /* Second B within double-tap window (tick unchanged = 0 <= 6) → exit. */
+    dispatch_ok(&inv_ctx, FQ_EVT_BTN_B_PRESS);
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)inv_ctx.state);
 
     /* -----------------------------------------------------------------------
@@ -166,7 +174,12 @@ int main(void)
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)stats_ctx.state);
 
     /* -----------------------------------------------------------------------
-     * TRAINING → HOME on BTN_B_PRESS.
+     * TRAINING → HOME on BTN_B_PRESS (Phase-19 behavior).
+     *
+     * Phase-19 changed TRAINING BTN_B semantics:
+     *   BTN_B in WAITING: starts game (WAITING → ACTIVE).
+     *   BTN_B in ACTIVE:  abandons game, returns to HOME.
+     * So two B presses from TRAINING/WAITING → HOME.
      * ----------------------------------------------------------------------- */
     fq_app_ctx_t train_ctx;
     memset(&player, 0, sizeof(player));
@@ -174,7 +187,8 @@ int main(void)
     fq_app_init(&train_ctx, &player, &inv);
     dispatch_ok(&train_ctx, FQ_EVT_BTN_A_PRESS); /* TITLE → HOME */
     dispatch_ok(&train_ctx, FQ_EVT_BTN_A_PRESS); /* select TRAIN (index=0) → TRAINING */
-    dispatch_ok(&train_ctx, FQ_EVT_BTN_B_PRESS); /* TRAINING → HOME */
+    dispatch_ok(&train_ctx, FQ_EVT_BTN_B_PRESS); /* WAITING → ACTIVE (starts game) */
+    dispatch_ok(&train_ctx, FQ_EVT_BTN_B_PRESS); /* ACTIVE → HOME (abandon) */
     TEST_ASSERT_EQUAL_INT((int)FQ_STATE_HOME, (int)train_ctx.state);
 
     /* -----------------------------------------------------------------------
@@ -260,7 +274,8 @@ int main(void)
     TEST_ASSERT_EQUAL_INT(8,  (int)FQ_STATE_TRAINING);
     TEST_ASSERT_EQUAL_INT(9,  (int)FQ_STATE_REBIRTH);
     TEST_ASSERT_EQUAL_INT(10, (int)FQ_STATE_SETTINGS);
-    TEST_ASSERT_EQUAL_INT(11, (int)FQ_STATE_COUNT);
+    TEST_ASSERT_EQUAL_INT(11, (int)FQ_STATE_ONBOARDING);
+    TEST_ASSERT_EQUAL_INT(12, (int)FQ_STATE_COUNT);
 
     /* -----------------------------------------------------------------------
      * A2 (QA P11-02): tick_count increments on TIMER_TICK in ALL states.

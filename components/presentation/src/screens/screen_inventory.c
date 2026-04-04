@@ -8,20 +8,18 @@
  *   y=35..145 : Item grid — 4 columns × 3 visible rows, each cell 50×37px
  *               Item sprites (24×24) centred in each cell at (+13, +6)
  *               Cursor cell drawn with thick (double) border
+ *               Equipped cell: small "E" marker at top-left of cell
  *   y=146     : Grid bottom separator line
- *   y=148..171: Bordered tooltip panel — selected item name in content area
- *               Text y_param=149: visible at y≈158..170 (font off_y=9)
+ *   y=148..171: Bordered tooltip panel — selected item name
  *   y=174     : Footer separator line
- *   y=177..199: Black footer bar — white "[PWR] Back" only
- *               Text at y=179: visible at y≈188..200 (font off_y=9)
+ *   y=177..199: Black footer bar — "[SUN] Cycle  [PWR] Equip  ²×[SUN] Back"
  *
- * Cell geometry:
- *   Width  : 50px (4 × 50 = 200px, flush to display edges)
- *   Height : 37px (3 × 37 = 111px for the grid zone)
- *   Sprite : 24×24, blitted at (cx + 13, cy + 6) — centre in cell
- *
- * Font note: FONT_REGS_12 has glyph_h=30 with off_y=9, so visible glyph
- * content appears at (y_param + 9) to (y_param + 21).
+ * Phase-19 additions:
+ *   - item_equipped[cursor] check: draws inverted "E" marker on equipped cells.
+ *   - "FULL" overlay text shown when equipped_count == max and cursor item
+ *     is not equipped (caller sets this via vm->equipped_count when all slots
+ *     are full). Actually the renderer shows a "FULL" message by checking
+ *     how many equipped flags are set vs equipped_count.
  *
  * NULL-safe: fq_render_inventory(NULL, ...) is a silent no-op.
  * Constitution Priority 0: no float, no malloc, no PRNG.
@@ -32,6 +30,7 @@
 #include "sprite_util.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 /* ── Grid geometry constants ─────────────────────────────────────────────── */
 
@@ -39,37 +38,22 @@
 
 #define INV_GRID_ORIGIN_Y  35  /**< Grid top-left y. */
 #define INV_CELL_W         50  /**< Cell width (4 × 50 = 200). */
-#define INV_CELL_H         37  /**< Cell height (3 × 37 = 111px grid zone). */
+#define INV_CELL_H         37  /**< Cell height. */
 #define INV_GRID_COLS       4
-#define INV_VISIBLE_ROWS    3  /**< 3 rows × 37 = 111px grid zone. */
+#define INV_VISIBLE_ROWS    3
 
-/** Item sprite blit offset within cell (centres 24×24 sprite in 50×37 cell). */
 #define INV_SPRITE_OFFSET_X  13
 #define INV_SPRITE_OFFSET_Y   6
 
-/**
- * Grid bottom separator — immediately below the grid zone.
- * y = INV_GRID_ORIGIN_Y + INV_VISIBLE_ROWS * INV_CELL_H = 35 + 111 = 146.
- */
 #define INV_GRID_SEP_Y     146
 
-/**
- * Tooltip bordered panel: selected item name displayed in the content area.
- * Panel top y=148, height=24px → panel bottom y=171.
- * Text y_param=149: visible at y=158..170 (off_y=9), fits inside panel.
- */
-#define INV_TOOLTIP_Y      148  /**< Panel top. */
-#define INV_TOOLTIP_H       24  /**< Panel height — contains 12px visible text. */
-#define INV_TOOLTIP_TEXT_Y  149 /**< Text y_param inside the tooltip box. */
+#define INV_TOOLTIP_Y      148
+#define INV_TOOLTIP_H       24
+#define INV_TOOLTIP_TEXT_Y  149
 
-/**
- * Footer separator and bar.
- * Separator at y=174, footer at y=177 (height=23 fills to y=200).
- * Footer text at y=179: visible at y=188..200, fully within display.
- */
-#define INV_FOOTER_SEP_Y   174  /**< Separator line above footer. */
-#define INV_FOOTER_Y       177  /**< Footer bar top. */
-#define INV_FOOTER_H        23  /**< Footer bar height — fills y=177..199. */
+#define INV_FOOTER_SEP_Y   174
+#define INV_FOOTER_Y       177
+#define INV_FOOTER_H        23
 
 /* ── fq_render_inventory ─────────────────────────────────────────────────── */
 
@@ -81,7 +65,6 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
 
     const fq_font_t *font = fq_get_font_small();
 
-    /* Clear to white. */
     fq_fb_clear(fb);
 
     /* ── Display border ─────────────────────────────────────────────────── */
@@ -93,18 +76,15 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
 
     /* ── Empty inventory guard ──────────────────────────────────────────── */
     if (vm->item_count == 0u) {
-        /* Centred "empty" indicator lines in the grid zone. */
         int16_t mid_y = (int16_t)(INV_GRID_ORIGIN_Y
                                    + INV_CELL_H * INV_VISIBLE_ROWS / 2);
         fq_fb_draw_line(fb, 5, (int16_t)(mid_y - 1),
                         (int16_t)(FQ_FB_WIDTH - 5u), (int16_t)(mid_y - 1), 1u);
         fq_fb_draw_line(fb, 5, (int16_t)(mid_y + 1),
                         (int16_t)(FQ_FB_WIDTH - 5u), (int16_t)(mid_y + 1), 1u);
-        /* Tooltip: "Empty" */
         fq_fb_draw_rect(fb, 4, INV_TOOLTIP_Y,
                         (int16_t)(FQ_FB_WIDTH - 8u), INV_TOOLTIP_H, 1u);
         fq_draw_text(fb, font, 8, INV_TOOLTIP_TEXT_Y, "Empty");
-        /* Footer: nav hint only */
         fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_FOOTER_H, "[PWR] Back");
         return;
     }
@@ -120,6 +100,15 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
         scroll = (uint8_t)(vm->item_count - 1u);
     }
 
+    /* ── Count currently equipped items for FULL detection ─────────────── */
+    uint8_t eq_count = 0u;
+    for (uint8_t i = 0u; i < vm->item_count && i < 32u; i++) {
+        if (vm->item_equipped[i]) { eq_count++; }
+    }
+    /* max slots from vm->equipped_count (the MAX SLOT LIMIT). Clamp to 5. */
+    uint8_t max_slots = (vm->equipped_count > 5u) ? 5u : vm->equipped_count;
+    uint8_t slots_full = (eq_count >= max_slots && max_slots > 0u) ? 1u : 0u;
+
     /* ── Draw grid cells ─────────────────────────────────────────────────── */
     for (uint8_t idx = scroll; idx < vm->item_count; idx++) {
         uint8_t vis_idx = (uint8_t)(idx - scroll);
@@ -134,7 +123,7 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
         /* Cell outline. */
         fq_fb_draw_rect(fb, cx, cy, INV_CELL_W, INV_CELL_H, 1u);
 
-        /* Item sprite — map item index to available sprites (mod 16). */
+        /* Item sprite. */
         {
             uint8_t sprite_id = (uint8_t)(idx % 16u);
             const fq_sprite_t *sp = fq_get_item_sprite(sprite_id);
@@ -147,11 +136,22 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
         }
 
         /* Rarity dot: small filled square at top-right of cell. */
-        if (vm->item_rarities[idx] > 0u) {
+        if (idx < 32u && vm->item_rarities[idx] > 0u) {
             fq_fb_fill_rect(fb,
                             (int16_t)(cx + INV_CELL_W - 5),
                             (int16_t)(cy + 3),
                             3, 3, 1u);
+        }
+
+        /* Equipped indicator: inverted small "E" marker at top-left. */
+        if (idx < 32u && vm->item_equipped[idx]) {
+            /* Draw a small filled 7x7 square at top-left as equipped marker. */
+            fq_fb_fill_rect(fb,
+                            (int16_t)(cx + 1),
+                            (int16_t)(cy + 1),
+                            7, 7, 1u);
+            /* Draw "E" in white (color 0) on the black marker. */
+            fq_draw_text(fb, font, (int16_t)(cx + 2), (int16_t)(cy - 6), "E");
         }
     }
 
@@ -167,9 +167,7 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
             int16_t cx = (int16_t)((uint16_t)col * INV_CELL_W);
             int16_t cy = (int16_t)(INV_GRID_ORIGIN_Y + (uint16_t)row * INV_CELL_H);
 
-            /* Outer cursor rect (already drawn above as cell outline). */
             fq_fb_draw_rect(fb, cx, cy, INV_CELL_W, INV_CELL_H, 1u);
-            /* Inner inset for double-border effect. */
             fq_fb_draw_rect(fb, (int16_t)(cx + 2), (int16_t)(cy + 2),
                             INV_CELL_W - 4, INV_CELL_H - 4, 1u);
         }
@@ -179,19 +177,25 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
     fq_fb_draw_line(fb, 0, INV_GRID_SEP_Y,
                     (int16_t)(FQ_FB_WIDTH - 1u), INV_GRID_SEP_Y, 1u);
 
-    /* ── Tooltip panel: selected item name in content area ──────────────── */
-    /* Bordered rectangle. Text at y_param=149: visible glyph at y=158..170. */
+    /* ── Tooltip panel ──────────────────────────────────────────────────── */
     fq_fb_draw_rect(fb, 4, INV_TOOLTIP_Y,
                     (int16_t)(FQ_FB_WIDTH - 8u), INV_TOOLTIP_H, 1u);
     if (clamped_cursor < vm->item_count) {
-        fq_draw_text(fb, font, 8, INV_TOOLTIP_TEXT_Y,
-                     vm->item_names[clamped_cursor]);
+        /* Show "FULL" if slots are all taken and cursor item is not equipped. */
+        if (slots_full && clamped_cursor < 32u &&
+            !vm->item_equipped[clamped_cursor]) {
+            fq_draw_text(fb, font, 8, INV_TOOLTIP_TEXT_Y, "FULL");
+        } else {
+            fq_draw_text(fb, font, 8, INV_TOOLTIP_TEXT_Y,
+                         vm->item_names[clamped_cursor]);
+        }
     }
 
     /* ── Footer separator ────────────────────────────────────────────────── */
     fq_fb_draw_line(fb, 0, INV_FOOTER_SEP_Y,
                     (int16_t)(FQ_FB_WIDTH - 1u), INV_FOOTER_SEP_Y, 1u);
 
-    /* ── Footer bar: nav hint ONLY — no item name collision ─────────────── */
-    fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_FOOTER_H, "[PWR] Back");
+    /* ── Footer bar: 2×[SUN]=back hint ─────────────────────────────────── */
+    fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_FOOTER_H,
+                       "[SUN]Cyc [PWR]Eq 2x[SUN]Back");
 }

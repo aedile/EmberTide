@@ -20,23 +20,43 @@
  *   BTN_B (☀ SUN, GPIO18) cycles home_menu_index mod FQ_HOME_MENU_COUNT.
  *   BTN_A (⏻ PWR, GPIO0) selects the highlighted menu item and transitions.
  *   home_menu_index is reset to 0 whenever any state transitions BACK to HOME.
+ *
+ * Phase-19 ONBOARDING state:
+ *   BTN_A (⏻ PWR) cycles onboarding_class_index mod FQ_CLASS_COUNT.
+ *   BTN_B (☀ SUN) confirms: creates character, saves (if save_failed==0),
+ *   transitions to HOME on success. If onboarding_save_failed==1, stays.
+ *
+ * Phase-19 INVENTORY state:
+ *   BTN_B cycles inventory_cursor mod inventory->count.
+ *   BTN_A toggles equip/unequip on the cursor item.
+ *   Double-tap BTN_B (two B presses within 6 ticks = 300ms) exits to HOME.
+ *
+ * Phase-19 TRAINING state:
+ *   WAITING: BTN_A cycles game_type, BTN_B starts game (->ACTIVE).
+ *   ACTIVE:  BTN_A registers hit, TIMER_TICK advances target_pos.
+ *            BTN_B exits immediately (partial score, 0 XP).
+ *   DONE:    BTN_B returns to HOME (XP already awarded on DONE transition).
  */
 
 #include "app_fsm.h"
+#include "character.h"
+#include "name_gen.h"
+#include "equip.h"
 #include <string.h>
 
 /* ---------------------------------------------------------------------------
  * go_home — transition to HOME and reset the menu index.
- *
- * Centralised helper used by all states that return to HOME. This ensures
- * home_menu_index is always 0 when the player arrives at the home screen,
- * regardless of which path they took to get there.
  * ---------------------------------------------------------------------------*/
 static void go_home(fq_app_ctx_t *ctx)
 {
     ctx->state           = FQ_STATE_HOME;
     ctx->home_menu_index = 0u;
 }
+
+/* ---------------------------------------------------------------------------
+ * Double-tap B threshold: 6 ticks @ 50ms/tick = 300ms.
+ * ---------------------------------------------------------------------------*/
+#define INV_DOUBLE_TAP_TICKS  6u
 
 /* ---------------------------------------------------------------------------
  * fq_app_init
@@ -49,20 +69,16 @@ game_err_t fq_app_init(fq_app_ctx_t   *ctx,
         return GAME_ERR_NULL_PTR;
     }
 
-    /* Zero the context first to establish a clean baseline. */
     memset(ctx, 0, sizeof(*ctx));
 
-    /* Wire non-owning pointers. */
     ctx->player    = player;
     ctx->inventory = inv;
 
-    /* Initialize the embedded event bus. */
     fq_event_bus_init(&ctx->bus);
 
-    /* home_menu_index starts at 0 (zeroed by memset above — explicit for clarity). */
     ctx->home_menu_index = 0u;
 
-    /* Automatic BOOT → TITLE transition (no PRNG touched). */
+    /* Automatic BOOT → TITLE transition. */
     ctx->state = FQ_STATE_TITLE;
 
     return GAME_OK;
@@ -78,9 +94,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         return GAME_ERR_NULL_PTR;
     }
 
-    /* QA P11-02: TIMER_TICK increments tick_count in ALL states.
-     * This runs before the state switch so it fires regardless of current state.
-     * Constitution Priority 0: no PRNG touched here. */
+    /* TIMER_TICK increments tick_count in ALL states. */
     if (evt->id == FQ_EVT_TIMER_TICK) {
         ctx->tick_count++;
     }
@@ -89,12 +103,8 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_BOOT
-         * Only the automatic init transition exits BOOT. Button presses and
-         * all other runtime events are ignored — BOOT is a transient state
-         * that should not be reached during normal runtime.
          * ------------------------------------------------------------------- */
         case FQ_STATE_BOOT:
-            /* No transitions defined for any event in BOOT. */
             break;
 
         /* -------------------------------------------------------------------
@@ -104,55 +114,43 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
             switch (evt->id) {
                 case FQ_EVT_BTN_A_PRESS:
                 case FQ_EVT_BTN_B_PRESS:
-                    /* Either button advances past the title screen.
-                     * The SUN button (GPIO18, BTN_B) and the PWR button
-                     * (GPIO0, BTN_A) both work — any press is intentional. */
                     go_home(ctx);
                     break;
                 default:
-                    /* All other events silently ignored. */
                     break;
             }
             break;
 
         /* -------------------------------------------------------------------
          * FQ_STATE_HOME
-         *
-         * Phase-19 two-button UX:
-         *   BTN_B (☀ SUN) — cycles home_menu_index mod FQ_HOME_MENU_COUNT.
-         *   BTN_A (⏻ PWR) — selects current menu item, transitions to target.
-         *
-         * Menu mapping:
-         *   0 = TRAIN  → FQ_STATE_TRAINING
-         *   1 = BATTLE → FQ_STATE_BATTLE_SETUP
-         *   2 = ITEMS  → FQ_STATE_INVENTORY
-         *   3 = STATS  → FQ_STATE_STATS
          * ------------------------------------------------------------------- */
         case FQ_STATE_HOME:
             switch (evt->id) {
                 case FQ_EVT_BTN_B_PRESS:
-                    /* Cycle menu forward, wrapping at FQ_HOME_MENU_COUNT. */
                     ctx->home_menu_index =
                         (uint8_t)((ctx->home_menu_index + 1u) % FQ_HOME_MENU_COUNT);
                     break;
 
                 case FQ_EVT_BTN_A_PRESS:
-                    /* Select the currently highlighted menu item. */
                     switch (ctx->home_menu_index) {
                         case FQ_HOME_MENU_TRAIN:
+                            /* Enter TRAINING: init session in WAITING state. */
+                            fq_training_session_init(&ctx->training, FQ_TS_SPEED);
                             ctx->state = FQ_STATE_TRAINING;
                             break;
                         case FQ_HOME_MENU_BATTLE:
                             ctx->state = FQ_STATE_BATTLE_SETUP;
                             break;
                         case FQ_HOME_MENU_ITEMS:
+                            ctx->inventory_cursor  = 0u;
+                            ctx->inv_b_press_count = 0u;
+                            ctx->inv_b_last_tick   = ctx->tick_count;
                             ctx->state = FQ_STATE_INVENTORY;
                             break;
                         case FQ_HOME_MENU_STATS:
                             ctx->state = FQ_STATE_STATS;
                             break;
                         default:
-                            /* Defensive: unexpected index — silently ignore. */
                             break;
                     }
                     break;
@@ -164,12 +162,56 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_INVENTORY
+         *
+         * BTN_B: cycle cursor forward (mod item_count), with double-tap exit.
+         * BTN_A: toggle equip on cursor item.
+         * Double-tap B (2 B presses within INV_DOUBLE_TAP_TICKS): exit to HOME.
          * ------------------------------------------------------------------- */
         case FQ_STATE_INVENTORY:
             switch (evt->id) {
-                case FQ_EVT_BTN_B_PRESS:
-                    go_home(ctx);
+                case FQ_EVT_BTN_B_PRESS: {
+                    uint8_t item_count = (ctx->inventory != NULL)
+                                        ? ctx->inventory->count : 0u;
+
+                    /* Check for double-tap exit. */
+                    uint32_t ticks_since = ctx->tick_count - ctx->inv_b_last_tick;
+                    if (ctx->inv_b_press_count >= 1u &&
+                        ticks_since <= INV_DOUBLE_TAP_TICKS) {
+                        /* Double-tap confirmed — exit to HOME. */
+                        ctx->inv_b_press_count = 0u;
+                        go_home(ctx);
+                        break;
+                    }
+
+                    /* Record this press for double-tap detection. */
+                    ctx->inv_b_press_count = 1u;
+                    ctx->inv_b_last_tick   = ctx->tick_count;
+
+                    /* Cycle cursor forward. */
+                    if (item_count > 0u) {
+                        uint8_t next = (uint8_t)(ctx->inventory_cursor + 1u);
+                        if (next >= item_count) { next = 0u; }
+                        ctx->inventory_cursor = next;
+                    }
                     break;
+                }
+
+                case FQ_EVT_BTN_A_PRESS: {
+                    /* Toggle equip on cursor item. */
+                    if (ctx->player != NULL && ctx->inventory != NULL &&
+                        ctx->inventory->count > 0u) {
+                        uint8_t cursor = ctx->inventory_cursor;
+                        /* Clamp cursor to valid range. */
+                        if (cursor >= ctx->inventory->count) {
+                            cursor = (uint8_t)(ctx->inventory->count - 1u);
+                            ctx->inventory_cursor = cursor;
+                        }
+                        /* Silently ignore GAME_ERR_OVERFLOW (caller can show FULL). */
+                        fq_equip_toggle(ctx->player, ctx->inventory, cursor);
+                    }
+                    break;
+                }
+
                 default:
                     break;
             }
@@ -190,12 +232,68 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_TRAINING
+         *
+         * WAITING (type select):
+         *   BTN_A = cycle game_type forward (mod 3).
+         *   BTN_B = start session (WAITING -> ACTIVE).
+         *
+         * ACTIVE (game running):
+         *   BTN_A = register hit.
+         *   BTN_B = exit immediately to HOME (no XP).
+         *   TIMER_TICK = advance target position.
+         *
+         * DONE (score shown):
+         *   BTN_B = exit to HOME (XP was awarded on DONE transition).
          * ------------------------------------------------------------------- */
         case FQ_STATE_TRAINING:
             switch (evt->id) {
-                case FQ_EVT_BTN_B_PRESS:
-                    go_home(ctx);
+                case FQ_EVT_BTN_A_PRESS:
+                    if (ctx->training.state == (uint8_t)FQ_TS_WAITING) {
+                        /* Cycle game type: 0->1->2->0. */
+                        uint8_t next_type = (uint8_t)(ctx->training.game_type + 1u);
+                        if (next_type >= 3u) { next_type = 0u; }
+                        ctx->training.game_type = next_type;
+                    } else if (ctx->training.state == (uint8_t)FQ_TS_ACTIVE) {
+                        /* Register hit attempt. */
+                        fq_training_hit(&ctx->training);
+                        /* If session ended (DONE), award XP. */
+                        if (ctx->training.state == (uint8_t)FQ_TS_DONE &&
+                            ctx->player != NULL) {
+                            fq_training_award_xp(&ctx->training, ctx->player);
+                        }
+                    }
                     break;
+
+                case FQ_EVT_BTN_B_PRESS:
+                    if (ctx->training.state == (uint8_t)FQ_TS_WAITING) {
+                        /* B in WAITING: start the session. */
+                        fq_training_session_start(&ctx->training);
+                    } else if (ctx->training.state == (uint8_t)FQ_TS_ACTIVE) {
+                        /* B in ACTIVE: partial exit — award XP for score earned so far,
+                         * then return to HOME. Spec: "Button B exits training at any
+                         * time (partial score, partial XP award)." */
+                        if (ctx->player != NULL) {
+                            fq_training_award_xp(&ctx->training, ctx->player);
+                        }
+                        go_home(ctx);
+                    } else {
+                        /* B in DONE: return home. */
+                        go_home(ctx);
+                    }
+                    break;
+
+                case FQ_EVT_TIMER_TICK:
+                    /* Only advance target in ACTIVE state. */
+                    if (ctx->training.state == (uint8_t)FQ_TS_ACTIVE) {
+                        fq_training_step(&ctx->training);
+                        /* If target advance caused DONE, award XP. */
+                        if (ctx->training.state == (uint8_t)FQ_TS_DONE &&
+                            ctx->player != NULL) {
+                            fq_training_award_xp(&ctx->training, ctx->player);
+                        }
+                    }
+                    break;
+
                 default:
                     break;
             }
@@ -209,9 +307,6 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                 case FQ_EVT_BLE_CONNECTED:
                     ctx->state         = FQ_STATE_BATTLE;
                     ctx->combat_active = 1u;
-                    /* NOTE: fq_combat_init() would be called here in a full
-                     * integration (using the BLE-negotiated seed). Deferred
-                     * to the BLE HAL integration phase — see Rule 8 advisory. */
                     break;
                 default:
                     break;
@@ -221,14 +316,11 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         /* -------------------------------------------------------------------
          * FQ_STATE_BATTLE
          *
-         * Constitution Priority 0: this is the ONLY case block permitted to
-         * access ctx->combat.rng. The guard (combat_active == 1) is checked
-         * before any combat logic would run.
+         * Constitution Priority 0: ONLY this block may access ctx->combat.rng.
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE:
             switch (evt->id) {
                 case FQ_EVT_COMBAT_ROUND_COMPLETE:
-                    /* Only advance if combat is actually active (PRNG guard). */
                     if (ctx->combat_active == 1u) {
                         ctx->state         = FQ_STATE_BATTLE_RESULT;
                         ctx->combat_active = 0u;
@@ -253,13 +345,62 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
             break;
 
         /* -------------------------------------------------------------------
+         * FQ_STATE_ONBOARDING
+         *
+         * BTN_A: cycle class index forward (mod FQ_CLASS_COUNT = 5).
+         * BTN_B: confirm selection.
+         *        - If onboarding_save_failed == 1: stay in ONBOARDING.
+         *        - Else: create character via fq_character_create(), set state
+         *          HOME. (The actual save to flash is handled in app_main.c
+         *          via a post-dispatch hook — the FSM only tracks intent.)
+         * ------------------------------------------------------------------- */
+        case FQ_STATE_ONBOARDING:
+            switch (evt->id) {
+                case FQ_EVT_BTN_A_PRESS:
+                    /* Cycle class forward: 0->1->2->3->4->0. */
+                    ctx->onboarding_class_index =
+                        (uint8_t)((ctx->onboarding_class_index + 1u)
+                                  % (uint8_t)FQ_CLASS_COUNT);
+                    break;
+
+                case FQ_EVT_BTN_B_PRESS: {
+                    /* If save previously failed, re-enter onboarding. */
+                    if (ctx->onboarding_save_failed != 0u) {
+                        /* Stay in ONBOARDING — save failure re-entry. */
+                        break;
+                    }
+
+                    /* Create character with selected class and generated name. */
+                    if (ctx->player != NULL) {
+                        fq_prng_t name_rng;
+                        fq_prng_init(&name_rng,
+                            (uint32_t)(ctx->tick_count ^ 0xA5A5A5A5u));
+                        char new_name[12];
+                        memset(new_name, 0, sizeof(new_name));
+                        fq_generate_name(&name_rng, new_name, sizeof(new_name));
+
+                        fq_character_create(ctx->player,
+                                            (fq_class_t)ctx->onboarding_class_index,
+                                            ctx->tick_count, /* unique ID from tick */
+                                            new_name);
+                    }
+
+                    go_home(ctx);
+                    break;
+                }
+
+                default:
+                    break;
+            }
+            break;
+
+        /* -------------------------------------------------------------------
          * FQ_STATE_REBIRTH, FQ_STATE_SETTINGS — no transitions yet.
          * ------------------------------------------------------------------- */
         case FQ_STATE_REBIRTH:
         case FQ_STATE_SETTINGS:
         case FQ_STATE_COUNT:
         default:
-            /* Silently ignore all events in unimplemented / sentinel states. */
             break;
     }
 
