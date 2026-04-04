@@ -92,4 +92,80 @@ uint32_t fq_calc_xp_to_next(uint8_t current_level);
  * ---------------------------------------------------------------------------*/
 game_err_t fq_level_up(fq_character_t *ch);
 
+
+/* ---------------------------------------------------------------------------
+ * fq_combat_award_xp() — Award XP for a combat result and update win/loss.
+ *
+ * Phase 20: Called after BLE combat resolves.
+ *
+ * XP formula (on win): xp_award = 50 + (opponent_level * 10).
+ * XP formula (on loss): 0 XP.
+ * XP addition saturates at UINT32_MAX (never wraps).
+ *
+ * Increments ch->wins (on win) or ch->losses (on loss). Both uint16_t,
+ * saturate at UINT16_MAX.
+ *
+ * After XP addition, calls fq_level_up() in a loop to process any pending
+ * level-ups (single-call chains: one XP award can trigger multiple levels
+ * if XP was already banked).
+ *
+ * NULL-safe: no-op if ch is NULL.
+ *
+ * @param ch              Character to award XP to. Must not be NULL.
+ * @param opponent_level  Opponent character level [0..99].
+ * @param won             1 = player won, 0 = player lost.
+ * ---------------------------------------------------------------------------*/
+void fq_combat_award_xp(fq_character_t *ch,
+                         uint8_t         opponent_level,
+                         uint8_t         won);
+
+/* ---------------------------------------------------------------------------
+ * fq_rebirth_reset() — Apply permadeath rebirth: reset level, halve stats, earn tokens.
+ *
+ * Phase 20: Called when a dead player (is_dead==1) enters the REBIRTH screen
+ * and confirms via BTN_B.
+ *
+ * Operations (all saturating):
+ *   1. tokens_earned = max(1u, ch->level / 10u)
+ *   2. ch->legacy_points += tokens_earned  (saturate at 255)
+ *   3. ch->rebirth_count += 1              (saturate at 255)
+ *   4. ch->level = 1
+ *   5. ch->strength     = ch->strength    / 2u
+ *      ch->speed        = ch->speed       / 2u
+ *      ch->precision    = ch->precision   / 2u
+ *      ch->intelligence = ch->intelligence / 2u
+ *   6. ch->xp    = 0
+ *   7. ch->is_dead = 0
+ *   8. ch->hp_max recalculated from new stats (same formula as fq_character_create)
+ *
+ * Stat halving uses integer division (floor). The minimum value after halving
+ * is 0 (for odd stats like 1 -> 0). Stats are uint8_t; no negative underflow
+ * is possible.
+ *
+ * NULL-safe: returns GAME_ERR_NULL_PTR if ch is NULL.
+ *
+ * @param ch  Character to rebirth. Must not be NULL.
+ * @return    GAME_OK, or GAME_ERR_NULL_PTR.
+ * ---------------------------------------------------------------------------*/
+game_err_t fq_rebirth_reset(fq_character_t *ch);
+
+/* ---------------------------------------------------------------------------
+ * fq_legacy_spend_token() — Spend one legacy token on the next free tree node.
+ *
+ * Phase 20: Called when BTN_A is pressed in FQ_STATE_REBIRTH.
+ *
+ * Scans ch->legacy_tree for the lowest unset bit (bit 0 first). If found
+ * AND ch->legacy_points > 0, sets that bit and decrements legacy_points.
+ *
+ * No-op conditions (returns GAME_ERR_INVALID, no state change):
+ *   - ch->legacy_points == 0
+ *   - All 32 bits of ch->legacy_tree are set (tree full)
+ *
+ * NULL-safe: returns GAME_ERR_NULL_PTR if ch is NULL.
+ *
+ * @param ch  Character whose legacy tree to update. Must not be NULL.
+ * @return    GAME_OK on success, GAME_ERR_INVALID on no-op, GAME_ERR_NULL_PTR.
+ * ---------------------------------------------------------------------------*/
+game_err_t fq_legacy_spend_token(fq_character_t *ch);
+
 #endif /* FIESTAQUEST_PROGRESSION_H */

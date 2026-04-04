@@ -124,6 +124,15 @@ typedef struct {
     uint32_t        inv_b_last_tick;       /**< Tick count of last B press in INVENTORY. */
     /* Training session (embedded, 8 bytes) */
     fq_training_session_t training;        /**< Active training session state. */
+    /* Phase-20: BLE combat orchestration fields. */
+    uint32_t        shared_seed;           /**< Derived from nonce XOR after team sync. */
+    uint32_t        battle_setup_start_tick; /**< tick_count when BATTLE_SETUP was entered. */
+    uint16_t        xp_earned;             /**< XP awarded at end of battle (for result screen). */
+    uint8_t         my_nonce[4];           /**< Local nonce for seed derivation. */
+    uint8_t         battle_won;            /**< 1=won, 0=lost (set on COMBAT_ROUND_COMPLETE). */
+    uint8_t         rounds_survived;       /**< Number of rounds the fight lasted. */
+    /* Phase-20: opponent character snapshot received via team_sync. */
+    fq_character_t  opponent;              /**< Opponent character (received from BLE peer). */
 } fq_app_ctx_t;
 
 /* ---------------------------------------------------------------------------
@@ -165,33 +174,23 @@ game_err_t fq_app_dispatch(fq_app_ctx_t      *ctx,
 /* ---------------------------------------------------------------------------
  * A4 (Architecture P11): fq_app_ctx_t layout invariant pinned at compile time.
  *
- * Phase-19 interactive additions:
- *   - onboarding_class_index (uint8_t) — 1 byte
- *   - onboarding_save_failed (uint8_t) — 1 byte
- *   - inventory_cursor       (uint8_t) — 1 byte
- *   - inv_b_press_count      (uint8_t) — 1 byte
- *   - inv_b_last_tick        (uint32_t) — 4 bytes
- *   - training               (fq_training_session_t = 8 bytes)
- * Total added: 16 bytes beyond the previous base.
- *
- * Previous sizes:
- *   Host (x86-64, 8-byte pointers): 232 bytes
- *   Target (Xtensa ESP32-S3, 4-byte pointers): 216 bytes
- *
- * New sizes (previous + 16):
- *   Host (x86-64, 8-byte pointers): 248 bytes
- *   Target (Xtensa ESP32-S3, 4-byte pointers): 232 bytes
- *
- * Alignment analysis for new fields after home_menu_index (uint8_t, prev
- * offset varies): the four new uint8_t fields pack into contiguous bytes,
- * then inv_b_last_tick (uint32_t) needs 4-byte alignment, and training
- * (8 bytes) follows.
+ * Phase-20 additions (appended after training field, offset 248 on 64-bit):
+ *   - shared_seed             (uint32_t)       — 4 bytes → 252
+ *   - battle_setup_start_tick (uint32_t)       — 4 bytes → 256
+ *   - xp_earned               (uint16_t)       — 2 bytes → 258
+ *   - my_nonce[4]             (uint8_t[4])     — 4 bytes → 262
+ *   - battle_won              (uint8_t)        — 1 byte  → 263
+ *   - rounds_survived         (uint8_t)        — 1 byte  → 264
+ *   - opponent                (fq_character_t) — 156 bytes → 420
+ *     (264 is 4-byte aligned; no implicit padding before opponent)
+ * Total new size (64-bit): 416 bytes.
+ * Total new size (32-bit): 404 bytes (pointer fields are 4 bytes, not 8).
  * ---------------------------------------------------------------------------*/
 #if __SIZEOF_POINTER__ == 8
-_Static_assert(sizeof(fq_app_ctx_t) == 248u,
+_Static_assert(sizeof(fq_app_ctx_t) == 416u,
     "fq_app_ctx_t layout changed (64-bit host)");
 #elif __SIZEOF_POINTER__ == 4
-_Static_assert(sizeof(fq_app_ctx_t) == 232u,
+_Static_assert(sizeof(fq_app_ctx_t) == 404u,
     "fq_app_ctx_t layout changed (32-bit target)");
 #endif
 

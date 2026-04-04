@@ -129,3 +129,131 @@ game_err_t fq_level_up(fq_character_t *ch)
 
     return GAME_OK;
 }
+
+/* ---------------------------------------------------------------------------
+ * Phase 20: fq_combat_award_xp, fq_rebirth, fq_legacy_spend_token
+ * ---------------------------------------------------------------------------*/
+
+void fq_combat_award_xp(fq_character_t *ch,
+                         uint8_t         opponent_level,
+                         uint8_t         won)
+{
+    if (ch == NULL) {
+        return;
+    }
+
+    if (won) {
+        /* Saturating win counter */
+        if (ch->wins < UINT16_MAX) {
+            ch->wins++;
+        }
+
+        /* XP formula: 50 + opponent_level * 10. Use uint32_t arithmetic. */
+        uint32_t xp_award = 50u + (uint32_t)opponent_level * 10u;
+
+        /* Saturating XP addition */
+        if (xp_award > (UINT32_MAX - ch->xp)) {
+            ch->xp = UINT32_MAX;
+        } else {
+            ch->xp += xp_award;
+        }
+
+        /* Process any pending level-ups */
+        while (ch->level < 99u &&
+               fq_calc_xp_to_next(ch->level) > 0u &&
+               ch->xp >= fq_calc_xp_to_next(ch->level)) {
+            fq_level_up(ch);
+        }
+    } else {
+        /* Saturating loss counter */
+        if (ch->losses < UINT16_MAX) {
+            ch->losses++;
+        }
+        /* 0 XP on loss */
+    }
+}
+
+game_err_t fq_rebirth_reset(fq_character_t *ch)
+{
+    if (ch == NULL) {
+        return GAME_ERR_NULL_PTR;
+    }
+
+    /* Step 1: compute tokens earned = max(1, level/10) */
+    uint8_t tokens = (ch->level >= 10u) ? (uint8_t)(ch->level / 10u) : 1u;
+
+    /* Step 2: add tokens to legacy_points (saturate at 255) */
+    uint16_t new_pts = (uint16_t)ch->legacy_points + (uint16_t)tokens;
+    ch->legacy_points = (new_pts > 255u) ? 255u : (uint8_t)new_pts;
+
+    /* Step 3: increment rebirth_count (saturate at 255) */
+    if (ch->rebirth_count < 255u) {
+        ch->rebirth_count++;
+    }
+
+    /* Step 4: reset level */
+    ch->level = 1u;
+
+    /* Step 5: halve stats (integer division, floor; uint8_t -> no underflow) */
+    ch->strength     = (uint8_t)(ch->strength     / 2u);
+    ch->speed        = (uint8_t)(ch->speed        / 2u);
+    ch->precision    = (uint8_t)(ch->precision    / 2u);
+    ch->intelligence = (uint8_t)(ch->intelligence / 2u);
+
+    /* Step 6: reset XP */
+    ch->xp = 0u;
+
+    /* Step 7: clear is_dead */
+    ch->is_dead = 0u;
+
+    /* Step 8: recalculate hp_max from new stats
+     * Formula (same as fq_character_create): base_hp + (strength * 2)
+     * base_hp varies per class; use a safe minimum of 10 as floor. */
+    {
+        /* Look up class base HP. Matches fq_character_create table. */
+        static const uint16_t k_class_base_hp[FQ_CLASS_COUNT] = {
+            /* BRUISER   */ 30u,
+            /* TRICKSTER */ 20u,
+            /* HEX       */ 15u,
+            /* WARDEN    */ 25u,
+            /* WILDCARD  */ 20u
+        };
+        uint8_t cls = ch->class_id;
+        if (cls >= (uint8_t)FQ_CLASS_COUNT) { cls = 0u; }
+        uint32_t base_hp = (uint32_t)k_class_base_hp[cls];
+        uint32_t hp = base_hp + (uint32_t)ch->strength * 2u;
+        /* Clamp to uint16_t */
+        ch->hp_max = (hp > 65535u) ? 65535u : (uint16_t)hp;
+    }
+
+    return GAME_OK;
+}
+
+game_err_t fq_legacy_spend_token(fq_character_t *ch)
+{
+    if (ch == NULL) {
+        return GAME_ERR_NULL_PTR;
+    }
+
+    /* No-op: no tokens available */
+    if (ch->legacy_points == 0u) {
+        return GAME_ERR_INVALID;
+    }
+
+    /* No-op: tree is full */
+    if (ch->legacy_tree == 0xFFFFFFFFu) {
+        return GAME_ERR_INVALID;
+    }
+
+    /* Find the lowest unset bit */
+    uint32_t mask = 1u;
+    while ((ch->legacy_tree & mask) != 0u) {
+        mask <<= 1u;
+    }
+
+    /* Set that bit and deduct the token */
+    ch->legacy_tree  |= mask;
+    ch->legacy_points--;
+
+    return GAME_OK;
+}

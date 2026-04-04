@@ -42,6 +42,7 @@
 #include "character.h"
 #include "name_gen.h"
 #include "equip.h"
+#include "progression.h"
 #include <string.h>
 
 /* ---------------------------------------------------------------------------
@@ -57,6 +58,11 @@ static void go_home(fq_app_ctx_t *ctx)
  * Double-tap B threshold: 6 ticks @ 50ms/tick = 300ms.
  * ---------------------------------------------------------------------------*/
 #define INV_DOUBLE_TAP_TICKS  6u
+
+/* ---------------------------------------------------------------------------
+ * BATTLE_SETUP auto-timeout: 200 ticks @ 50ms/tick = 10 seconds.
+ * ---------------------------------------------------------------------------*/
+#define BATTLE_SETUP_TIMEOUT_TICKS  200u
 
 /* ---------------------------------------------------------------------------
  * fq_app_init
@@ -139,7 +145,8 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                             ctx->state = FQ_STATE_TRAINING;
                             break;
                         case FQ_HOME_MENU_BATTLE:
-                            ctx->state = FQ_STATE_BATTLE_SETUP;
+                            ctx->state                   = FQ_STATE_BATTLE_SETUP;
+                            ctx->battle_setup_start_tick = ctx->tick_count;
                             break;
                         case FQ_HOME_MENU_ITEMS:
                             ctx->inventory_cursor  = 0u;
@@ -301,13 +308,39 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_BATTLE_SETUP
+         *
+         * BTN_B: Cancel — return to HOME immediately.
+         * BLE_CONNECTED: Begin battle.
+         * BLE_DISCONNECTED: Return to HOME (no peer).
+         * TIMER_TICK: Auto-timeout after BATTLE_SETUP_TIMEOUT_TICKS ticks.
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE_SETUP:
             switch (evt->id) {
                 case FQ_EVT_BLE_CONNECTED:
-                    ctx->state         = FQ_STATE_BATTLE;
-                    ctx->combat_active = 1u;
+                    ctx->state                     = FQ_STATE_BATTLE;
+                    ctx->combat_active             = 1u;
+                    ctx->battle_setup_start_tick   = 0u;  /* clear for next use */
                     break;
+
+                case FQ_EVT_BTN_B_PRESS:
+                    /* Cancel: return HOME immediately. */
+                    go_home(ctx);
+                    break;
+
+                case FQ_EVT_BLE_DISCONNECTED:
+                    /* Peer disappeared before connecting — go HOME. */
+                    go_home(ctx);
+                    break;
+
+                case FQ_EVT_TIMER_TICK: {
+                    /* Auto-timeout: if tick_count has advanced >= TIMEOUT since entry. */
+                    uint32_t elapsed = ctx->tick_count - ctx->battle_setup_start_tick;
+                    if (elapsed >= BATTLE_SETUP_TIMEOUT_TICKS) {
+                        go_home(ctx);
+                    }
+                    break;
+                }
+
                 default:
                     break;
             }
@@ -317,6 +350,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
          * FQ_STATE_BATTLE
          *
          * Constitution Priority 0: ONLY this block may access ctx->combat.rng.
+         * BLE_DISCONNECTED: clean up and return HOME (no save).
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE:
             switch (evt->id) {
@@ -326,6 +360,13 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                         ctx->combat_active = 0u;
                     }
                     break;
+
+                case FQ_EVT_BLE_DISCONNECTED:
+                    /* Disconnect mid-combat: abort without saving. */
+                    ctx->combat_active = 0u;
+                    go_home(ctx);
+                    break;
+
                 default:
                     break;
             }
@@ -333,12 +374,25 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_BATTLE_RESULT
+         *
+         * BTN_A on win (is_dead==0)  → HOME.
+         * BTN_A on loss (is_dead==1) → REBIRTH.
+         * BLE_DISCONNECTED → HOME (peer disconnected on result screen).
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE_RESULT:
             switch (evt->id) {
                 case FQ_EVT_BTN_A_PRESS:
+                    if (ctx->player != NULL && ctx->player->is_dead == 1u) {
+                        ctx->state = FQ_STATE_REBIRTH;
+                    } else {
+                        go_home(ctx);
+                    }
+                    break;
+
+                case FQ_EVT_BLE_DISCONNECTED:
                     go_home(ctx);
                     break;
+
                 default:
                     break;
             }
@@ -395,9 +449,36 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
             break;
 
         /* -------------------------------------------------------------------
-         * FQ_STATE_REBIRTH, FQ_STATE_SETTINGS — no transitions yet.
+         * FQ_STATE_REBIRTH
+         *
+         * BTN_A: Spend one legacy token on next free tree node.
+         *        No-op if 0 tokens or tree full.
+         * BTN_B: Confirm rebirth — return HOME with auto-save trigger.
+         *        (App main wires the actual save; FSM only transitions.)
          * ------------------------------------------------------------------- */
         case FQ_STATE_REBIRTH:
+            switch (evt->id) {
+                case FQ_EVT_BTN_A_PRESS:
+                    /* Spend a token on next legacy node if available. */
+                    if (ctx->player != NULL) {
+                        fq_legacy_spend_token(ctx->player);
+                    }
+                    /* Stay in REBIRTH state — player may spend more tokens. */
+                    break;
+
+                case FQ_EVT_BTN_B_PRESS:
+                    /* Confirm rebirth — return HOME. */
+                    go_home(ctx);
+                    break;
+
+                default:
+                    break;
+            }
+            break;
+
+        /* -------------------------------------------------------------------
+         * FQ_STATE_SETTINGS — no transitions yet.
+         * ------------------------------------------------------------------- */
         case FQ_STATE_SETTINGS:
         case FQ_STATE_COUNT:
         default:

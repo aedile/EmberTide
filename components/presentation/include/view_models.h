@@ -256,4 +256,65 @@ typedef struct {
 _Static_assert(sizeof(fq_vm_training_t) == 24u,
                "fq_vm_training_t size changed — update layout comment and this assert");
 
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_battle_result_t — Battle result screen view model.
+ *
+ * Phase-20 addition.
+ *
+ * Field layout (no hidden padding — uint16_t first to avoid alignment gap):
+ *   uint16_t xp_earned          (2)  offset 0   — XP gained this fight
+ *   char     winner_name[13]   (13)  offset 2   — 12 chars + null terminator
+ *   uint8_t  you_won            (1)  offset 15  — 1=win, 0=loss
+ *   uint8_t  rounds_survived    (1)  offset 16  — number of rounds completed
+ *   uint8_t  player_sprite_base (1)  offset 17  — player sprite index
+ *   uint8_t  is_dead            (1)  offset 18  — 1 = player must rebirth
+ *   uint8_t  _pad[1]            (1)  offset 19  — explicit alignment pad
+ * Total: 20 bytes.
+ * ---------------------------------------------------------------------------*/
+typedef struct {
+    uint16_t xp_earned;          /**< XP awarded (0 on loss). */
+    char     winner_name[13];    /**< Name of the winner (12 chars + null). */
+    uint8_t  you_won;            /**< 1 = local player won, 0 = lost. */
+    uint8_t  rounds_survived;    /**< Number of rounds the fight lasted. */
+    uint8_t  player_sprite_base; /**< Player sprite base index for result display. */
+    uint8_t  is_dead;            /**< 1 = player is dead, BTN_A routes to REBIRTH. */
+    uint8_t  _pad[1];            /**< Explicit alignment pad. */
+} fq_vm_battle_result_t;
+
+_Static_assert(sizeof(fq_vm_battle_result_t) == 20u,
+               "fq_vm_battle_result_t size changed — update layout comment and this assert");
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_rebirth_t — Rebirth screen view model.
+ *
+ * Phase-20 addition.
+ *
+ * Field layout:
+ *   uint32_t legacy_tree        (4)  offset 0   — 32-bit bitmask of unlocked nodes
+ *   uint8_t  old_stats[4]       (4)  offset 4   — [STR,SPD,PRC,INT] before rebirth
+ *   uint8_t  new_stats[4]       (4)  offset 8   — [STR,SPD,PRC,INT] after rebirth
+ *   uint8_t  old_level          (1)  offset 12
+ *   uint8_t  new_level          (1)  offset 13
+ *   uint8_t  tokens_earned      (1)  offset 14
+ *   uint8_t  tokens_available   (1)  offset 15
+ *   uint8_t  next_node          (1)  offset 16  — index of next unset bit (0-31; 32=full)
+ *   uint8_t  _pad[3]            (3)  offset 17  — explicit alignment pad
+ * Total: 20 bytes.
+ * ---------------------------------------------------------------------------*/
+typedef struct {
+    uint32_t legacy_tree;        /**< Current legacy tree bitmask. */
+    uint8_t  old_stats[4];       /**< Pre-rebirth stats: [STR, SPD, PRC, INT]. */
+    uint8_t  new_stats[4];       /**< Post-rebirth stats: [STR, SPD, PRC, INT]. */
+    uint8_t  old_level;          /**< Character level before rebirth. */
+    uint8_t  new_level;          /**< Character level after rebirth (always 1). */
+    uint8_t  tokens_earned;      /**< Tokens earned this rebirth. */
+    uint8_t  tokens_available;   /**< Total unspent tokens. */
+    uint8_t  next_node;          /**< Index of the next available legacy node (32=full). */
+    uint8_t  _pad[3];            /**< Explicit alignment pad. */
+} fq_vm_rebirth_t;
+
+_Static_assert(sizeof(fq_vm_rebirth_t) == 20u,
+               "fq_vm_rebirth_t size changed — update layout comment and this assert");
+
 #endif /* FIESTAQUEST_PRESENTATION_VIEW_MODELS_H */

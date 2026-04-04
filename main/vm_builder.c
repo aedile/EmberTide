@@ -327,3 +327,87 @@ void fq_vm_build_training_session(fq_vm_training_t            *vm,
      * In a full integration, this would derive from the character level. */
     vm->difficulty = 0u;
 }
+
+/* ---------------------------------------------------------------------------
+ * Phase-20: fq_vm_build_battle_result, fq_vm_build_rebirth
+ * ---------------------------------------------------------------------------*/
+
+void fq_vm_build_battle_result(fq_vm_battle_result_t *vm,
+                                const fq_character_t  *player,
+                                const fq_character_t  *opponent,
+                                uint8_t                you_won,
+                                uint16_t               xp_earned,
+                                uint8_t                rounds_survived,
+                                uint8_t                is_dead)
+{
+    if (vm == NULL) {
+        return;
+    }
+
+    memset(vm, 0, sizeof(*vm));
+
+    vm->you_won         = you_won;
+    vm->xp_earned       = xp_earned;
+    vm->rounds_survived = rounds_survived;
+    vm->is_dead         = is_dead;
+
+    /* Winner name: player name if won, opponent name if lost. */
+    if (you_won) {
+        if (player != NULL) {
+            strncpy(vm->winner_name, player->name,
+                    sizeof(vm->winner_name) - 1u);
+            vm->winner_name[sizeof(vm->winner_name) - 1u] = '\0';
+            vm->player_sprite_base = player->sprite_base;
+        }
+    } else {
+        if (opponent != NULL) {
+            strncpy(vm->winner_name, opponent->name,
+                    sizeof(vm->winner_name) - 1u);
+            vm->winner_name[sizeof(vm->winner_name) - 1u] = '\0';
+        }
+        if (player != NULL) {
+            vm->player_sprite_base = player->sprite_base;
+        }
+    }
+}
+
+void fq_vm_build_rebirth(fq_vm_rebirth_t      *vm,
+                          const fq_character_t *ch,
+                          uint8_t               old_level,
+                          const uint8_t         old_stats[4],
+                          uint8_t               tokens_earned)
+{
+    if (vm == NULL) {
+        return;
+    }
+
+    memset(vm, 0, sizeof(*vm));
+
+    vm->old_level     = old_level;
+    vm->tokens_earned = tokens_earned;
+
+    if (old_stats != NULL) {
+        vm->old_stats[0] = old_stats[0];
+        vm->old_stats[1] = old_stats[1];
+        vm->old_stats[2] = old_stats[2];
+        vm->old_stats[3] = old_stats[3];
+    }
+
+    if (ch != NULL) {
+        vm->new_level         = ch->level;
+        vm->new_stats[0]      = ch->strength;
+        vm->new_stats[1]      = ch->speed;
+        vm->new_stats[2]      = ch->precision;
+        vm->new_stats[3]      = ch->intelligence;
+        vm->tokens_available  = ch->legacy_points;
+        vm->legacy_tree       = ch->legacy_tree;
+
+        /* Find the index of the next unset bit in legacy_tree. */
+        uint8_t  next = 0u;
+        uint32_t tree = ch->legacy_tree;
+        while (next < 32u && (tree & (1u << next)) != 0u) {
+            next++;
+        }
+        vm->next_node = next;  /* 32 means tree is full */
+    }
+}

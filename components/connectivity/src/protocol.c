@@ -316,3 +316,23 @@ uint32_t fq_protocol_derive_seed(uint32_t nonce_a, uint32_t nonce_b)
     }
     return seed;
 }
+
+/* ---------------------------------------------------------------------------
+ * Phase 20: fq_team_sync_clamp_equipped_count, fq_team_sync_validate
+ * ---------------------------------------------------------------------------*/
+
+uint8_t fq_team_sync_clamp_equipped_count(uint8_t count)
+{
+    return (count > 5u) ? 5u : count;
+}
+
+int fq_team_sync_validate(const fq_packet_team_sync_t *pkt)
+{
+    if (pkt == NULL) {
+        return 0;
+    }
+    if (pkt->hp_max == 0u) {
+        return 0;
+    }
+    return 1;
+}
