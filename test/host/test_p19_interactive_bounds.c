@@ -1,13 +1,15 @@
 /**
  * test_p19_interactive_bounds.c — Phase 19 Bound Tests
  *
- * Rule 22 BOUND RED: All 17 bound tests must FAIL before implementation.
+ * Rule 22 BOUND RED: All bound tests must FAIL before implementation.
  * They prove the system REJECTS out-of-bounds inputs before any feature
  * code exists.
  *
  * Tests 1-6:   Onboarding bounds (name_gen, FSM state, sizeof)
  * Tests 7-11:  Training session bounds (score clamp, XP at L99, PRNG isolation)
  * Tests 12-17: Inventory equip/unequip bounds (full slots, ID 0, duplicates)
+ * Tests 18-25: NULL pointer guard bounds (name_gen, training_session, equip)
+ * Tests 26-27: Double-tap B boundary (delta == 6 exits, delta == 7 stays)
  *
  * Architecture:
  *   - name_gen, training_session, equip_toggle all live in components/game/
@@ -200,9 +202,9 @@ static void test_app_ctx_sizeof_after_onboarding(void)
     /* The _Static_assert in app_fsm.h already enforces this at compile time.
      * This runtime test makes the constraint visible in ctest output. */
 #if __SIZEOF_POINTER__ == 8
-    TEST_ASSERT_EQUAL_UINT32(232u, (uint32_t)sizeof(fq_app_ctx_t));
+    TEST_ASSERT_EQUAL_UINT32(248u, (uint32_t)sizeof(fq_app_ctx_t));
 #elif __SIZEOF_POINTER__ == 4
-    TEST_ASSERT_EQUAL_UINT32(216u, (uint32_t)sizeof(fq_app_ctx_t));
+    TEST_ASSERT_EQUAL_UINT32(232u, (uint32_t)sizeof(fq_app_ctx_t));
 #endif
     printf("[TEST 6] test_app_ctx_sizeof_after_onboarding: PASS\n");
 }
@@ -318,9 +320,9 @@ static void test_training_zero_targets_zero_xp(void)
     TEST_ASSERT_EQUAL_UINT32(0u, xp);
 
     game_err_t err = fq_training_award_xp(&ts, &ch);
-    /* Level 5 won't level up on 0 XP; expect GAME_ERR_INVALID (not enough XP) or GAME_OK if xp=0 */
+    /* Level 5 with 0 XP: award is 0, xp unchanged, no level_up attempted. */
+    TEST_ASSERT_EQUAL_INT(GAME_OK, (int)err);
     TEST_ASSERT_EQUAL_UINT32(xp_before, ch.xp); /* no change */
-    (void)err;
     printf("[TEST 10] test_training_zero_targets_zero_xp: PASS\n");
 }
 
@@ -519,6 +521,186 @@ static void test_inventory_empty_no_crash(void)
 }
 
 /* ===========================================================================
+ * TESTS 18-25 — NULL pointer guard bounds
+ *
+ * All 3 new Phase-19 APIs must return GAME_ERR_NULL_PTR or GAME_ERR_INVALID
+ * for NULL/invalid inputs without crashing or corrupting state.
+ *
+ * fq_generate_name:
+ *   18: NULL rng → GAME_ERR_NULL_PTR
+ *   19: NULL out → GAME_ERR_NULL_PTR
+ *   20: max_len == 0 → GAME_ERR_INVALID
+ *
+ * fq_training_session_init / fq_training_award_xp:
+ *   21: NULL ts to init → GAME_ERR_NULL_PTR
+ *   22: NULL ts to award_xp → GAME_ERR_NULL_PTR
+ *   23: NULL ch to award_xp → GAME_ERR_NULL_PTR
+ *
+ * fq_equip_toggle:
+ *   24: NULL ch → GAME_ERR_NULL_PTR
+ *   25: NULL inv → GAME_ERR_NULL_PTR
+ * =========================================================================*/
+
+static void test_name_gen_null_rng(void)
+{
+    char buf[12];
+    memset(buf, 0xAA, sizeof(buf));
+    game_err_t err = fq_generate_name(NULL, buf, 12u);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_NULL_PTR, (int)err);
+    printf("[TEST 18] test_name_gen_null_rng: PASS\n");
+}
+
+static void test_name_gen_null_out(void)
+{
+    fq_prng_t rng;
+    fq_prng_init(&rng, 1u);
+    game_err_t err = fq_generate_name(&rng, NULL, 12u);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_NULL_PTR, (int)err);
+    printf("[TEST 19] test_name_gen_null_out: PASS\n");
+}
+
+static void test_name_gen_zero_max_len(void)
+{
+    fq_prng_t rng;
+    char      buf[12];
+    fq_prng_init(&rng, 1u);
+    game_err_t err = fq_generate_name(&rng, buf, 0u);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_INVALID, (int)err);
+    printf("[TEST 20] test_name_gen_zero_max_len: PASS\n");
+}
+
+static void test_training_init_null_ts(void)
+{
+    game_err_t err = fq_training_session_init(NULL, FQ_TS_SPEED);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_NULL_PTR, (int)err);
+    printf("[TEST 21] test_training_init_null_ts: PASS\n");
+}
+
+static void test_training_award_xp_null_ts(void)
+{
+    fq_character_t ch = make_char(FQ_CLASS_BRUISER, 5u);
+    game_err_t err = fq_training_award_xp(NULL, &ch);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_NULL_PTR, (int)err);
+    printf("[TEST 22] test_training_award_xp_null_ts: PASS\n");
+}
+
+static void test_training_award_xp_null_ch(void)
+{
+    fq_training_session_t ts;
+    memset(&ts, 0, sizeof(ts));
+    fq_training_session_init(&ts, FQ_TS_SPEED);
+    ts.state = FQ_TS_DONE;
+    game_err_t err = fq_training_award_xp(&ts, NULL);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_NULL_PTR, (int)err);
+    printf("[TEST 23] test_training_award_xp_null_ch: PASS\n");
+}
+
+static void test_equip_toggle_null_ch(void)
+{
+    fq_inventory_t inv = make_inv(1u);
+    game_err_t err = fq_equip_toggle(NULL, &inv, 0u);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_NULL_PTR, (int)err);
+    printf("[TEST 24] test_equip_toggle_null_ch: PASS\n");
+}
+
+static void test_equip_toggle_null_inv(void)
+{
+    fq_character_t ch = make_char(FQ_CLASS_BRUISER, 5u);
+    game_err_t err = fq_equip_toggle(&ch, NULL, 0u);
+    TEST_ASSERT_EQUAL_INT(GAME_ERR_NULL_PTR, (int)err);
+    printf("[TEST 25] test_equip_toggle_null_inv: PASS\n");
+}
+
+/* ===========================================================================
+ * TESTS 26-27 — Double-tap B inventory exit boundary
+ *
+ * The double-tap window is INV_DOUBLE_TAP_TICKS == 6 (defined in app_fsm.c).
+ * The FSM checks: ticks_since <= INV_DOUBLE_TAP_TICKS.
+ *   delta == 6 is within the window (6 <= 6) → exits to HOME.
+ *   delta == 7 is outside the window (7 <= 6 is false) → stays in INVENTORY.
+ *
+ * Setup:
+ *   - First B press at tick 0: cycles cursor, records inv_b_last_tick = 0,
+ *     inv_b_press_count = 1.
+ *   - Advance ctx.tick_count by delta.
+ *   - Second B press: ticks_since = delta; check exits vs. stays.
+ * =========================================================================*/
+
+static void test_inv_double_tap_b_boundary_inside(void)
+{
+    /* delta == 6: exactly at the double-tap window boundary. Must exit to HOME. */
+    fq_character_t player;
+    fq_inventory_t inv;
+    fq_app_ctx_t   ctx;
+    memset(&player, 0, sizeof(player));
+    memset(&inv,    0, sizeof(inv));
+    inv.count    = 3u;
+    inv.items[0] = 1u;
+    inv.items[1] = 2u;
+    inv.items[2] = 3u;
+    player.equipped_count = 4u;
+
+    fq_app_init(&ctx, &player, &inv);
+    ctx.state              = FQ_STATE_INVENTORY;
+    ctx.inventory_cursor   = 0u;
+    ctx.inv_b_press_count  = 0u;
+    ctx.tick_count         = 0u;
+    ctx.inv_b_last_tick    = 0u;
+
+    fq_event_t eb = { FQ_EVT_BTN_B_PRESS, 0u };
+
+    /* First B press — cycles cursor, records inv_b_last_tick = 0. */
+    fq_app_dispatch(&ctx, &eb);
+    TEST_ASSERT_EQUAL_INT(FQ_STATE_INVENTORY, (int)ctx.state); /* still in inventory */
+
+    /* Advance tick by exactly the boundary value (6). */
+    ctx.tick_count = 6u;
+
+    /* Second B press — ticks_since = 6 - 0 = 6 <= 6 → double-tap → HOME. */
+    fq_app_dispatch(&ctx, &eb);
+    TEST_ASSERT_EQUAL_INT(FQ_STATE_HOME, (int)ctx.state);
+
+    printf("[TEST 26] test_inv_double_tap_b_boundary_inside (delta=6): PASS\n");
+}
+
+static void test_inv_double_tap_b_boundary_outside(void)
+{
+    /* delta == 7: one tick past the window. Must stay in INVENTORY. */
+    fq_character_t player;
+    fq_inventory_t inv;
+    fq_app_ctx_t   ctx;
+    memset(&player, 0, sizeof(player));
+    memset(&inv,    0, sizeof(inv));
+    inv.count    = 3u;
+    inv.items[0] = 1u;
+    inv.items[1] = 2u;
+    inv.items[2] = 3u;
+    player.equipped_count = 4u;
+
+    fq_app_init(&ctx, &player, &inv);
+    ctx.state              = FQ_STATE_INVENTORY;
+    ctx.inventory_cursor   = 0u;
+    ctx.inv_b_press_count  = 0u;
+    ctx.tick_count         = 0u;
+    ctx.inv_b_last_tick    = 0u;
+
+    fq_event_t eb = { FQ_EVT_BTN_B_PRESS, 0u };
+
+    /* First B press — cycles cursor, records inv_b_last_tick = 0. */
+    fq_app_dispatch(&ctx, &eb);
+    TEST_ASSERT_EQUAL_INT(FQ_STATE_INVENTORY, (int)ctx.state); /* still in inventory */
+
+    /* Advance tick by boundary+1 (7). */
+    ctx.tick_count = 7u;
+
+    /* Second B press — ticks_since = 7 - 0 = 7 > 6 → NOT double-tap → stays. */
+    fq_app_dispatch(&ctx, &eb);
+    TEST_ASSERT_EQUAL_INT(FQ_STATE_INVENTORY, (int)ctx.state);
+
+    printf("[TEST 27] test_inv_double_tap_b_boundary_outside (delta=7): PASS\n");
+}
+
+/* ===========================================================================
  * main
  * =========================================================================*/
 int main(void)
@@ -544,6 +726,18 @@ int main(void)
     test_equip_count_clamp();
     test_inventory_cursor_bounds();
     test_inventory_empty_no_crash();
+
+    test_name_gen_null_rng();
+    test_name_gen_null_out();
+    test_name_gen_zero_max_len();
+    test_training_init_null_ts();
+    test_training_award_xp_null_ts();
+    test_training_award_xp_null_ch();
+    test_equip_toggle_null_ch();
+    test_equip_toggle_null_inv();
+
+    test_inv_double_tap_b_boundary_inside();
+    test_inv_double_tap_b_boundary_outside();
 
     printf("=== ALL BOUND TESTS PASSED ===\n");
     return 0;

@@ -61,9 +61,10 @@ static const char * const k_class_names[5u] = {
 };
 
 /* ---------------------------------------------------------------------------
- * Internal: class base stats table (mirrors character.c k_class_base).
- *
- * [strength, speed, precision, intelligence]
+ * Display-weight preview values for onboarding carousel stat bars.
+ * Intentionally different from the growth-rate table in character.c —
+ * these are scaled for visual readability on the 200x200 e-paper display.
+ * Format: { STR_preview, SPD_preview, PRC_preview, INT_preview }.
  * ---------------------------------------------------------------------------*/
 static const uint8_t k_class_base_stats[5u][4u] = {
     /* Bruiser   */ { 20u, 10u,  8u,  5u },

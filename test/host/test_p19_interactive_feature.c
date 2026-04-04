@@ -6,6 +6,7 @@
  * Item 1 — Onboarding (tests F1-F6)
  * Item 2 — Training Session (tests F7-F12)
  * Item 3 — Inventory Equip/Unequip (tests F13-F18)
+ * Item 4 — Double-tap B inventory exit positive path (test F19)
  */
 
 #include <stdio.h>
@@ -212,10 +213,9 @@ static void test_f8_training_session_step(void)
     fq_training_step(&ts);
     uint8_t pos_after = ts.target_pos;
 
-    /* target_pos must have advanced by target_speed (mod 101 or clamped). */
-    /* We just verify it changed. */
-    (void)pos_before; /* might be 0 initially — just check it moved */
-    (void)pos_after;
+    /* target_pos must have advanced by target_speed exactly. */
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)(pos_before + speed), pos_after);
+
     printf("[F8] training_session_step: PASS (speed=%u)\n", (unsigned)speed);
 }
 
@@ -398,7 +398,12 @@ static void test_f16_equipped_count_is_max_limit(void)
     printf("[F16] equipped_count is max limit: PASS\n");
 }
 
-/* F17 — FSM: in INVENTORY, BTN_B cycles cursor, BTN_A toggles equip. */
+/* F17 — FSM: in INVENTORY, BTN_B cycles cursor, BTN_A toggles equip.
+ *
+ * Note: consecutive BTN_B presses within 6 ticks trigger double-tap exit.
+ * To test cursor cycling without triggering double-tap, we advance
+ * ctx.tick_count by 10 between each press (>> double-tap threshold of 6).
+ */
 static void test_f17_inventory_fsm_buttons(void)
 {
     fq_character_t player;
@@ -418,14 +423,23 @@ static void test_f17_inventory_fsm_buttons(void)
     ctx.state = FQ_STATE_INVENTORY;
     ctx.inventory_cursor = 0u;
 
-    /* BTN_B cycles cursor: 0 -> 1. */
     fq_event_t eb = { FQ_EVT_BTN_B_PRESS, 0u };
+
+    /* BTN_B cycles cursor: 0 -> 1.
+     * tick_count starts at 0, inv_b_last_tick will be set to 0.
+     * Advance tick_count by 10 before next press to clear double-tap window. */
     fq_app_dispatch(&ctx, &eb);
     TEST_ASSERT_EQUAL_UINT8(1u, ctx.inventory_cursor);
+
+    /* Advance tick beyond double-tap window (> 6 ticks). */
+    ctx.tick_count += 10u;
 
     /* BTN_B cycles cursor: 1 -> 2. */
     fq_app_dispatch(&ctx, &eb);
     TEST_ASSERT_EQUAL_UINT8(2u, ctx.inventory_cursor);
+
+    /* Advance tick again. */
+    ctx.tick_count += 10u;
 
     /* BTN_B cycles cursor: 2 -> 0 (wrap at item_count=3). */
     fq_app_dispatch(&ctx, &eb);
@@ -456,6 +470,56 @@ static void test_f18_vm_inventory_size(void)
 }
 
 /* ===========================================================================
+ * ── ITEM 4: DOUBLE-TAP B POSITIVE FEATURE PATH ────────────────────────────
+ * =========================================================================*/
+
+/* F19 — Double-tap B with a clean tick delta exits INVENTORY to HOME.
+ *
+ * Positive path: two B presses with tick_count advancing by exactly 4 between
+ * them (comfortably inside the 6-tick window). The FSM must transition to HOME
+ * and reset home_menu_index to 0.
+ */
+static void test_f19_double_tap_b_exits_inventory(void)
+{
+    fq_character_t player;
+    fq_inventory_t inv;
+    fq_app_ctx_t   ctx;
+    memset(&player, 0, sizeof(player));
+    memset(&inv,    0, sizeof(inv));
+    inv.count    = 2u;
+    inv.items[0] = 5u;
+    inv.items[1] = 6u;
+    player.equipped_count = 4u;
+
+    fq_app_init(&ctx, &player, &inv);
+    ctx.state              = FQ_STATE_INVENTORY;
+    ctx.inventory_cursor   = 0u;
+    ctx.inv_b_press_count  = 0u;
+    ctx.tick_count         = 100u; /* arbitrary non-zero base */
+    ctx.inv_b_last_tick    = 100u;
+
+    fq_event_t eb = { FQ_EVT_BTN_B_PRESS, 0u };
+
+    /* First B press — cycles cursor (0 -> 1), records last_tick = 100.
+     * inv_b_press_count becomes 1. */
+    fq_app_dispatch(&ctx, &eb);
+    TEST_ASSERT_EQUAL_INT(FQ_STATE_INVENTORY, (int)ctx.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, ctx.inventory_cursor);
+
+    /* Advance tick by 4 — well within the 6-tick double-tap window. */
+    ctx.tick_count = 104u;
+
+    /* Second B press — ticks_since = 104 - 100 = 4 <= 6 → double-tap → HOME. */
+    fq_app_dispatch(&ctx, &eb);
+    TEST_ASSERT_EQUAL_INT(FQ_STATE_HOME, (int)ctx.state);
+
+    /* home_menu_index must be reset to 0 by go_home(). */
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.home_menu_index);
+
+    printf("[F19] double-tap B exits inventory: PASS\n");
+}
+
+/* ===========================================================================
  * main
  * =========================================================================*/
 int main(void)
@@ -482,6 +546,8 @@ int main(void)
     test_f16_equipped_count_is_max_limit();
     test_f17_inventory_fsm_buttons();
     test_f18_vm_inventory_size();
+
+    test_f19_double_tap_b_exits_inventory();
 
     printf("=== ALL FEATURE TESTS PASSED ===\n");
     return 0;
