@@ -3,8 +3,12 @@
  *
  * Section 1: Frozen 256-entry lookup table for fq_effective_stat().
  * Section 2: XP curve (fq_calc_xp_to_next) and level-up logic (fq_level_up).
+ * Section 3: fq_combat_award_xp — post-combat XP/win/loss accounting.
  *
  * Constitution Priority 0: No floating point. No <time.h>. No external entropy.
+ *
+ * Rebirth and legacy tree operations live in legacy.c / legacy.h.
+ * Use fq_rebirth() and fq_legacy_unlock_node() from that module.
  *
  * Table generation (offline Python, not compiled):
  *   import math
@@ -128,4 +132,50 @@ game_err_t fq_level_up(fq_character_t *ch)
     ch->intelligence = fq_sat8_add(ch->intelligence,  k_class_stat_gains[cls][3]);
 
     return GAME_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Section 3: fq_combat_award_xp
+ *
+ * Rebirth and legacy tree management are in legacy.c / legacy.h.
+ * Use fq_rebirth() and fq_legacy_unlock_node() from that module.
+ * ---------------------------------------------------------------------------*/
+
+void fq_combat_award_xp(fq_character_t *ch,
+                         uint8_t         opponent_level,
+                         uint8_t         won)
+{
+    if (ch == NULL) {
+        return;
+    }
+
+    if (won) {
+        /* Saturating win counter */
+        if (ch->wins < UINT16_MAX) {
+            ch->wins++;
+        }
+
+        /* XP formula: 50 + opponent_level * 10. Use uint32_t arithmetic. */
+        uint32_t xp_award = 50u + (uint32_t)opponent_level * 10u;
+
+        /* Saturating XP addition */
+        if (xp_award > (UINT32_MAX - ch->xp)) {
+            ch->xp = UINT32_MAX;
+        } else {
+            ch->xp += xp_award;
+        }
+
+        /* Process any pending level-ups */
+        while (ch->level < 99u &&
+               fq_calc_xp_to_next(ch->level) > 0u &&
+               ch->xp >= fq_calc_xp_to_next(ch->level)) {
+            fq_level_up(ch);
+        }
+    } else {
+        /* Saturating loss counter */
+        if (ch->losses < UINT16_MAX) {
+            ch->losses++;
+        }
+        /* 0 XP on loss */
+    }
 }

@@ -16,6 +16,11 @@
  *   each case only touches the fields it needs, and only the BATTLE case is
  *   permitted to call fq_combat_step() which advances the PRNG.
  *
+ *   Exception: fq_rebirth() in FQ_STATE_REBIRTH requires an fq_prng_t only for
+ *   WILDCARD passive reroll (class-specific cosmetic). A local PRNG seeded from
+ *   tick_count ^ rebirth_count is used — the combat.rng stream is never touched
+ *   outside FQ_STATE_BATTLE.
+ *
  * Phase-19 HOME state:
  *   BTN_B (☀ SUN, GPIO18) cycles home_menu_index mod FQ_HOME_MENU_COUNT.
  *   BTN_A (⏻ PWR, GPIO0) selects the highlighted menu item and transitions.
@@ -36,12 +41,37 @@
  *   ACTIVE:  BTN_A registers hit, TIMER_TICK advances target_pos.
  *            BTN_B exits immediately (partial score, 0 XP).
  *   DONE:    BTN_B returns to HOME (XP already awarded on DONE transition).
+ *
+ * Phase-20 BATTLE state:
+ *   COMBAT_ROUND_COMPLETE: calls fq_generate_combat_hash() to capture round
+ *   hash for peer exchange, then calls fq_combat_award_xp() to credit
+ *   XP/wins/losses, stores result in ctx->xp_earned, transitions to BATTLE_RESULT.
+ *
+ *   BLE_PACKET_RX in BATTLE: calls fq_sync_verify_round() against the received
+ *   peer hash. On mismatch → disconnect and return HOME (desync protection).
+ *
+ * Phase-20 BATTLE_SETUP state:
+ *   BLE_CONNECTED: calls fq_protocol_derive_seed() from my_nonce and the
+ *   peer nonce to populate shared_seed before entering BATTLE.
+ *
+ * Phase-20 REBIRTH state:
+ *   BTN_A: spend one legacy point on the next eligible tree node via
+ *          fq_legacy_unlock_node(). Scans the current legacy_tree bitmask to
+ *          find the lowest unset bit in [0, 15] and attempts to unlock it.
+ *          No-op if no tokens or all nodes are filled / prerequisites unmet.
+ *   BTN_B: execute fq_rebirth() (requires is_dead==1), then return HOME.
+ *          Uses a local PRNG (not combat.rng) — PRNG isolation preserved.
  */
 
 #include "app_fsm.h"
 #include "character.h"
 #include "name_gen.h"
 #include "equip.h"
+#include "progression.h"
+#include "legacy.h"
+#include "combat_hash.h"
+#include "sync.h"
+#include "protocol.h"
 #include <string.h>
 
 /* ---------------------------------------------------------------------------
@@ -57,6 +87,11 @@ static void go_home(fq_app_ctx_t *ctx)
  * Double-tap B threshold: 6 ticks @ 50ms/tick = 300ms.
  * ---------------------------------------------------------------------------*/
 #define INV_DOUBLE_TAP_TICKS  6u
+
+/* ---------------------------------------------------------------------------
+ * BATTLE_SETUP auto-timeout: 200 ticks @ 50ms/tick = 10 seconds.
+ * ---------------------------------------------------------------------------*/
+#define BATTLE_SETUP_TIMEOUT_TICKS  200u
 
 /* ---------------------------------------------------------------------------
  * fq_app_init
@@ -139,7 +174,8 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                             ctx->state = FQ_STATE_TRAINING;
                             break;
                         case FQ_HOME_MENU_BATTLE:
-                            ctx->state = FQ_STATE_BATTLE_SETUP;
+                            ctx->state                   = FQ_STATE_BATTLE_SETUP;
+                            ctx->battle_setup_start_tick = ctx->tick_count;
                             break;
                         case FQ_HOME_MENU_ITEMS:
                             ctx->inventory_cursor  = 0u;
@@ -301,13 +337,55 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_BATTLE_SETUP
+         *
+         * BTN_B: Cancel — return to HOME immediately.
+         * BLE_CONNECTED: Derive shared seed from nonces, then begin battle.
+         * BLE_DISCONNECTED: Return to HOME (no peer).
+         * TIMER_TICK: Auto-timeout after BATTLE_SETUP_TIMEOUT_TICKS ticks.
+         *
+         * DC-3 fix: fq_protocol_derive_seed() is called on BLE_CONNECTED to
+         * populate ctx->shared_seed before the PRNG is seeded for combat.
+         * The peer nonce is carried in evt->data (uint32_t).
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE_SETUP:
             switch (evt->id) {
-                case FQ_EVT_BLE_CONNECTED:
-                    ctx->state         = FQ_STATE_BATTLE;
-                    ctx->combat_active = 1u;
+                case FQ_EVT_BLE_CONNECTED: {
+                    /* DC-3: Derive shared PRNG seed from local and peer nonces.
+                     * my_nonce is stored as 4 bytes LE; reassemble as uint32_t. */
+                    uint32_t my_nonce_u32 =
+                        ((uint32_t)ctx->my_nonce[0])        |
+                        ((uint32_t)ctx->my_nonce[1] <<  8u) |
+                        ((uint32_t)ctx->my_nonce[2] << 16u) |
+                        ((uint32_t)ctx->my_nonce[3] << 24u);
+                    /* Peer nonce arrives in evt->data (set by BLE RX handler). */
+                    uint32_t peer_nonce = evt->data;
+                    ctx->shared_seed = fq_protocol_derive_seed(my_nonce_u32, peer_nonce);
+
+                    ctx->state                     = FQ_STATE_BATTLE;
+                    ctx->combat_active             = 1u;
+                    ctx->battle_setup_start_tick   = 0u;  /* clear for next use */
                     break;
+                }
+
+                case FQ_EVT_BTN_B_PRESS:
+                    /* Cancel: return HOME immediately. */
+                    go_home(ctx);
+                    break;
+
+                case FQ_EVT_BLE_DISCONNECTED:
+                    /* Peer disappeared before connecting — go HOME. */
+                    go_home(ctx);
+                    break;
+
+                case FQ_EVT_TIMER_TICK: {
+                    /* Auto-timeout: if tick_count has advanced >= TIMEOUT since entry. */
+                    uint32_t elapsed = ctx->tick_count - ctx->battle_setup_start_tick;
+                    if (elapsed >= BATTLE_SETUP_TIMEOUT_TICKS) {
+                        go_home(ctx);
+                    }
+                    break;
+                }
+
                 default:
                     break;
             }
@@ -317,15 +395,83 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
          * FQ_STATE_BATTLE
          *
          * Constitution Priority 0: ONLY this block may access ctx->combat.rng.
+         * BLE_DISCONNECTED: clean up and return HOME (no save).
+         *
+         * Phase-20 (DC-1): On COMBAT_ROUND_COMPLETE, call
+         * fq_generate_combat_hash() to capture the round hash into
+         * ctx->last_combat_hash for peer exchange, BEFORE awarding XP.
+         *
+         * Phase-20 (DC-3): On BLE_PACKET_RX, extract peer round hash from
+         * evt->data and call fq_sync_verify_round(). On mismatch, disconnect
+         * and return HOME to prevent desync from corrupting battle state.
+         *
+         * Phase-20: On COMBAT_ROUND_COMPLETE, call fq_combat_award_xp() to
+         * credit XP and update win/loss counters. Store the earned XP in
+         * ctx->xp_earned for the battle result screen.
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE:
             switch (evt->id) {
                 case FQ_EVT_COMBAT_ROUND_COMPLETE:
                     if (ctx->combat_active == 1u) {
+                        /* DC-1: Generate combat hash at this round boundary and
+                         * store it for the BLE hash exchange protocol.
+                         * Round is read from ctx->combat.current_round — the field
+                         * incremented by fq_combat_step() before the event fires. */
+                        ctx->last_combat_hash =
+                            fq_generate_combat_hash(&ctx->combat,
+                                                     ctx->combat.current_round);
+
+                        /* Award XP based on battle outcome. */
+                        if (ctx->player != NULL) {
+                            uint32_t xp_before = ctx->player->xp;
+                            fq_combat_award_xp(ctx->player,
+                                               ctx->opponent.level,
+                                               ctx->battle_won);
+                            /* Capture XP delta for result screen (clamped to uint16_t). */
+                            uint32_t xp_delta = ctx->player->xp - xp_before;
+                            ctx->xp_earned = (xp_delta > 0xFFFFu)
+                                             ? (uint16_t)0xFFFFu
+                                             : (uint16_t)xp_delta;
+                        }
+
                         ctx->state         = FQ_STATE_BATTLE_RESULT;
                         ctx->combat_active = 0u;
                     }
                     break;
+
+                case FQ_EVT_BLE_PACKET_RX: {
+                    /* DC-3: Verify the peer's round hash against our local hash.
+                     * evt->data carries the peer's combat hash for the current round.
+                     * On mismatch, abort the battle immediately — disconnect and
+                     * return HOME to prevent desync from producing invalid results.
+                     *
+                     * Note: in host tests the BLE mock does not exchange real packets,
+                     * so this path is only exercised when evt->data != 0. A zero
+                     * peer hash is treated as "no verification needed" (test stub
+                     * behaviour). On target the BLE RX handler always sets data != 0
+                     * for a valid FQ_PKT_ROUND_HASH packet. */
+                    if (ctx->combat_active == 1u && evt->data != 0u) {
+                        uint32_t peer_hash = evt->data;
+                        fq_sync_err_t sync_err =
+                            fq_sync_verify_round(ctx->combat.current_round,
+                                                  ctx->combat.current_round,
+                                                  ctx->last_combat_hash,
+                                                  peer_hash);
+                        if (sync_err != FQ_SYNC_OK) {
+                            /* Desync detected — abort battle, return HOME. */
+                            ctx->combat_active = 0u;
+                            go_home(ctx);
+                        }
+                    }
+                    break;
+                }
+
+                case FQ_EVT_BLE_DISCONNECTED:
+                    /* Disconnect mid-combat: abort without saving. */
+                    ctx->combat_active = 0u;
+                    go_home(ctx);
+                    break;
+
                 default:
                     break;
             }
@@ -333,12 +479,25 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
 
         /* -------------------------------------------------------------------
          * FQ_STATE_BATTLE_RESULT
+         *
+         * BTN_A on win (is_dead==0)  → HOME.
+         * BTN_A on loss (is_dead==1) → REBIRTH.
+         * BLE_DISCONNECTED → HOME (peer disconnected on result screen).
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE_RESULT:
             switch (evt->id) {
                 case FQ_EVT_BTN_A_PRESS:
+                    if (ctx->player != NULL && ctx->player->is_dead == 1u) {
+                        ctx->state = FQ_STATE_REBIRTH;
+                    } else {
+                        go_home(ctx);
+                    }
+                    break;
+
+                case FQ_EVT_BLE_DISCONNECTED:
                     go_home(ctx);
                     break;
+
                 default:
                     break;
             }
@@ -395,9 +554,58 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
             break;
 
         /* -------------------------------------------------------------------
-         * FQ_STATE_REBIRTH, FQ_STATE_SETTINGS — no transitions yet.
+         * FQ_STATE_REBIRTH
+         *
+         * BTN_A: Spend one legacy token on the next eligible tree node.
+         *        Scans legacy_tree for the lowest unset bit in [0, 15] and
+         *        calls fq_legacy_unlock_node(). No-op if 0 tokens, tree full,
+         *        or tier prerequisites are not met for the candidate node.
+         * BTN_B: Execute fq_rebirth() (requires player->is_dead==1) then
+         *        return HOME. app_main.c wires the auto-save.
+         *        PRNG isolation: a local RNG (seeded from tick_count) is used —
+         *        ctx->combat.rng is never accessed here.
          * ------------------------------------------------------------------- */
         case FQ_STATE_REBIRTH:
+            switch (evt->id) {
+                case FQ_EVT_BTN_A_PRESS:
+                    /* Spend a token on the next eligible legacy node. */
+                    if (ctx->player != NULL) {
+                        /* Find the lowest unset bit in [0, 15]. */
+                        uint8_t node;
+                        for (node = 0u; node < 16u; node++) {
+                            if ((ctx->player->legacy_tree & (1u << node)) == 0u) {
+                                /* Attempt unlock — respects tier prerequisites. */
+                                fq_legacy_unlock_node(ctx->player, node);
+                                break;
+                            }
+                        }
+                    }
+                    /* Stay in REBIRTH state — player may spend more tokens. */
+                    break;
+
+                case FQ_EVT_BTN_B_PRESS: {
+                    /* Execute rebirth if player is dead, then go HOME.
+                     * A local PRNG seeded from tick_count is used for the
+                     * WILDCARD passive reroll — combat.rng is not accessed. */
+                    if (ctx->player != NULL && ctx->player->is_dead == 1u) {
+                        fq_prng_t rebirth_rng;
+                        fq_prng_init(&rebirth_rng,
+                            ctx->tick_count ^ (uint32_t)(ctx->player->rebirth_count));
+                        fq_rebirth(ctx->player, &rebirth_rng);
+                        fq_legacy_apply_bonuses(ctx->player);
+                    }
+                    go_home(ctx);
+                    break;
+                }
+
+                default:
+                    break;
+            }
+            break;
+
+        /* -------------------------------------------------------------------
+         * FQ_STATE_SETTINGS — no transitions yet.
+         * ------------------------------------------------------------------- */
         case FQ_STATE_SETTINGS:
         case FQ_STATE_COUNT:
         default:

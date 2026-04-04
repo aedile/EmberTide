@@ -129,4 +129,43 @@ void fq_vm_build_onboarding(fq_vm_onboarding_t   *vm,
 void fq_vm_build_training_session(fq_vm_training_t            *vm,
                                    const fq_training_session_t *ts);
 
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_build_battle_result() — Build the battle result screen view model.
+ *
+ * Phase-20 addition.
+ *
+ * @param vm              Output view model. NULL-safe: returns immediately if NULL.
+ * @param player          Local player character. NULL-safe.
+ * @param opponent        Opponent character. NULL-safe.
+ * @param you_won         1 = player won, 0 = player lost.
+ * @param xp_earned       XP awarded this fight.
+ * @param rounds_survived Number of rounds the fight lasted.
+ * @param is_dead         1 = player is dead and must rebirth.
+ * ---------------------------------------------------------------------------*/
+void fq_vm_build_battle_result(fq_vm_battle_result_t *vm,
+                                const fq_character_t  *player,
+                                const fq_character_t  *opponent,
+                                uint8_t                you_won,
+                                uint16_t               xp_earned,
+                                uint8_t                rounds_survived,
+                                uint8_t                is_dead);
+
+/* ---------------------------------------------------------------------------
+ * fq_vm_build_rebirth() — Build the rebirth screen view model.
+ *
+ * Phase-20 addition.
+ *
+ * @param vm           Output view model. NULL-safe: returns immediately if NULL.
+ * @param ch           Character AFTER rebirth has been applied. NULL-safe.
+ * @param old_level    Character level BEFORE rebirth.
+ * @param old_stats    [STR,SPD,PRC,INT] BEFORE rebirth (caller supplies; 4 bytes).
+ * @param tokens_earned Tokens earned this rebirth (for display).
+ * ---------------------------------------------------------------------------*/
+void fq_vm_build_rebirth(fq_vm_rebirth_t      *vm,
+                          const fq_character_t *ch,
+                          uint8_t               old_level,
+                          const uint8_t         old_stats[4],
+                          uint8_t               tokens_earned);
+
 #endif /* FIESTAQUEST_MAIN_VM_BUILDER_H */

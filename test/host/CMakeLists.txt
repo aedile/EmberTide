@@ -456,6 +456,7 @@ function(add_app_test target source)
         "${GAME_INCLUDE}"
         "${PRES_INCLUDE}"
         "${MAIN_INCLUDE}"
+        "${CONN_INCLUDE}"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     if(GAME_SOURCES)
         target_sources(${target} PRIVATE ${GAME_SOURCES})
@@ -474,6 +475,9 @@ function(add_app_test target source)
     endif()
     if(EXISTS "${APP_FSM_SOURCE}")
         target_sources(${target} PRIVATE "${APP_FSM_SOURCE}")
+    endif()
+    if(CONN_SOURCES)
+        target_sources(${target} PRIVATE ${CONN_SOURCES})
     endif()
     add_test(NAME ${target} COMMAND ${target})
 endfunction()
@@ -794,3 +798,61 @@ add_app_test(test_p19_interactive_feature
 # ---------------------------------------------------------------------------
 add_app_test(test_p19_training_b_exit
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_training_b_exit.c")
+
+# ---------------------------------------------------------------------------
+# Phase-20: BLE Combat, Battle Result, Rebirth
+#
+# add_p20_test(<target> <source>)
+#
+# Links game + presentation (screens/) + vm_builder + event_bus + app_fsm
+# + connectivity protocol/sync (for fq_team_sync_validate and
+# fq_team_sync_clamp_equipped_count used in bounds tests).
+# Includes GAME_INCLUDE, PRES_INCLUDE, MAIN_INCLUDE, CONN_INCLUDE.
+# ---------------------------------------------------------------------------
+function(add_p20_test target source)
+    add_executable(${target} ${source})
+    target_include_directories(${target} PRIVATE
+        "${GAME_INCLUDE}"
+        "${PRES_INCLUDE}"
+        "${MAIN_INCLUDE}"
+        "${CONN_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    if(PRES_SOURCES)
+        target_sources(${target} PRIVATE ${PRES_SOURCES})
+    endif()
+    if(PRES_SCREEN_SOURCES)
+        target_sources(${target} PRIVATE ${PRES_SCREEN_SOURCES})
+    endif()
+    if(EXISTS "${PROJECT_ROOT}/main/vm_builder.c")
+        target_sources(${target} PRIVATE "${PROJECT_ROOT}/main/vm_builder.c")
+    endif()
+    if(EXISTS "${EVENT_BUS_SOURCE}")
+        target_sources(${target} PRIVATE "${EVENT_BUS_SOURCE}")
+    endif()
+    if(EXISTS "${APP_FSM_SOURCE}")
+        target_sources(${target} PRIVATE "${APP_FSM_SOURCE}")
+    endif()
+    if(CONN_SOURCES)
+        target_sources(${target} PRIVATE ${CONN_SOURCES})
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Phase-20 Bound tests (Rule 22 Phase A — BOUND RED)
+# Covers: combat hash determinism, PRNG isolation, XP saturation, rebirth
+# underflow guards, legacy saturation, wins/losses saturation, team sync
+# validation, FSM disconnect handling, BATTLE_RESULT routing, BATTLE_SETUP
+# cancel/timeout, and legacy tree full no-op.
+# ---------------------------------------------------------------------------
+add_p20_test(test_p20_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p20_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-20 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_p20_test(test_p20_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p20_feature.c")

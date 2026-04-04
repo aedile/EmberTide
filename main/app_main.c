@@ -71,6 +71,8 @@
 #include "screens/screen_training.h"
 #include "screens/screen_onboarding.h"
 #include "screens/screen_idle.h"
+#include "screens/screen_battle_result.h"
+#include "screens/screen_rebirth.h"
 #include "asset_data.h"
 #include "sprite_util.h"
 
@@ -129,8 +131,10 @@ static int64_t  s_last_anim_us;
  */
 static uint8_t is_idle_forbidden(fq_app_state_t state)
 {
-    return (state == FQ_STATE_BATTLE       ||
+    return (state == FQ_STATE_BATTLE        ||
             state == FQ_STATE_BATTLE_SETUP  ||
+            state == FQ_STATE_BATTLE_RESULT ||
+            state == FQ_STATE_REBIRTH       ||
             state == FQ_STATE_TITLE         ||
             state == FQ_STATE_ONBOARDING)
            ? 1u : 0u;
@@ -272,6 +276,33 @@ static void render_current_state(fq_app_ctx_t   *app,
             fq_vm_onboarding_t vm_ob;
             fq_vm_build_onboarding(&vm_ob, player, app->onboarding_class_index);
             fq_render_onboarding(fb, &vm_ob);
+            break;
+        }
+        case FQ_STATE_BATTLE_RESULT: {
+            fq_vm_battle_result_t vm_result;
+            fq_vm_build_battle_result(&vm_result, player, &app->opponent,
+                                       app->battle_won,
+                                       app->xp_earned,
+                                       app->rounds_survived,
+                                       player->is_dead);
+            fq_render_battle_result(fb, &vm_result);
+            break;
+        }
+        case FQ_STATE_REBIRTH: {
+            /* Capture pre-rebirth stats from opponent snapshot if available.
+             * Use player's current (post-rebirth) stats as new_stats. */
+            uint8_t old_stats[4] = {
+                player->strength,
+                player->speed,
+                player->precision,
+                player->intelligence
+            };
+            fq_vm_rebirth_t vm_rebirth;
+            fq_vm_build_rebirth(&vm_rebirth, player,
+                                 player->level,
+                                 old_stats,
+                                 (uint8_t)(app->xp_earned > 0u ? 1u : 0u));
+            fq_render_rebirth(fb, &vm_rebirth);
             break;
         }
         default:
@@ -477,6 +508,18 @@ void app_main(void)
                         app.state = FQ_STATE_ONBOARDING;
                         ESP_LOGW(TAG, "Onboarding save failed — re-entering");
                     }
+                }
+
+                /* ── AC-1: Auto-save on BATTLE_RESULT → HOME. ────────── */
+                if (last_state == FQ_STATE_BATTLE_RESULT &&
+                    app.state  == FQ_STATE_HOME) {
+                    do_auto_save(&app, &player, &inventory);
+                }
+
+                /* ── AC-1: Auto-save on REBIRTH → HOME. ──────────────── */
+                if (last_state == FQ_STATE_REBIRTH &&
+                    app.state  == FQ_STATE_HOME) {
+                    do_auto_save(&app, &player, &inventory);
                 }
 
                 needs_redraw     = 1u;

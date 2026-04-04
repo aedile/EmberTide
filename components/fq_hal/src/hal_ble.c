@@ -19,6 +19,10 @@
  * real nimble_port_init(), ble_hs_cfg, ble_svc_gatt_init() calls.
  *
  * Guard order for hal_ble_send(): NULL -> MTU -> init -> connected -> send.
+ *
+ * Phase-20 audit fix (DC-2): hal_ble_get_mac() added. Stub returns fixed
+ * test address {0x01, 0x02, 0x03, 0x04, 0x05, 0x06}. On target, replace
+ * stub body with esp_read_mac(mac_out, ESP_MAC_BT).
  */
 
 #include "hal_ble.h"
@@ -27,6 +31,11 @@
 static hal_ble_rx_callback_t s_rx_callback;
 static uint8_t               s_initialized;
 static hal_ble_state_t       s_state;
+
+/** Fixed stub MAC address (target: replace with esp_read_mac). */
+static const uint8_t k_stub_mac[HAL_BLE_MAC_LEN] = {
+    0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u
+};
 
 hal_ble_err_t hal_ble_init(hal_ble_rx_callback_t rx_cb)
 {
@@ -84,6 +93,21 @@ hal_ble_err_t hal_ble_send(const uint8_t *data, uint16_t len)
 hal_ble_state_t hal_ble_get_state(void)
 {
     return s_state;
+}
+
+hal_ble_err_t hal_ble_get_mac(uint8_t mac_out[6])
+{
+    if (!mac_out) {
+        return HAL_BLE_ERR_NULL;
+    }
+    /*
+     * TODO (ESP-IDF wiring): esp_read_mac(mac_out, ESP_MAC_BT);
+     * The esp_read_mac call populates the 6-byte BLE public address from
+     * the device efuse. Return HAL_BLE_OK on success, HAL_BLE_ERR_INIT
+     * if the BT MAC is not available.
+     */
+    memcpy(mac_out, k_stub_mac, HAL_BLE_MAC_LEN);
+    return HAL_BLE_OK;
 }
 
 hal_ble_err_t hal_ble_disconnect(void)

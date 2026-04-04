@@ -13,6 +13,8 @@ idf_component_register(
         "src/screens/screen_combat.c"
         "src/screens/screen_training.c"
         "src/screens/screen_onboarding.c"
+        "src/screens/screen_battle_result.c"
+        "src/screens/screen_rebirth.c"
     INCLUDE_DIRS
         "include"
     # presentation/ does NOT depend on game/ — view model construction happens

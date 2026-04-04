@@ -189,4 +189,35 @@ fq_packet_err_t fq_packet_parse(const uint8_t *buf, size_t buf_size,
  */
 uint32_t fq_protocol_derive_seed(uint32_t nonce_a, uint32_t nonce_b);
 
+
+
+/* ---------------------------------------------------------------------------
+ * fq_team_sync_clamp_equipped_count() — Clamp equipped_count to [0, 5].
+ *
+ * Phase 20: Validates the equipped_count field received from a peer before
+ * using it to index into the equipped[] array (max length 5). Values > 5
+ * are silently clamped to 5. This prevents any OOB array access.
+ *
+ * Pure function — no side effects.
+ *
+ * @param count  Received equipped_count value from fq_packet_team_sync_t.
+ * @return       Clamped value in [0, 5].
+ * ---------------------------------------------------------------------------*/
+uint8_t fq_team_sync_clamp_equipped_count(uint8_t count);
+
+/* ---------------------------------------------------------------------------
+ * fq_team_sync_validate() — Basic validity check for a team sync packet.
+ *
+ * Phase 20: Called before using a received fq_packet_team_sync_t to initialise
+ * a combat context. Rejects packets that would cause undefined behaviour.
+ *
+ * Validation rules:
+ *   - pkt must not be NULL.
+ *   - pkt->hp_max must be > 0 (a zero HP character cannot fight).
+ *
+ * @param pkt  Packet to validate. NULL returns 0 (invalid).
+ * @return     1 if valid, 0 if invalid.
+ * ---------------------------------------------------------------------------*/
+int fq_team_sync_validate(const fq_packet_team_sync_t *pkt);
+
 #endif /* FIESTAQUEST_CONNECTIVITY_PROTOCOL_H */

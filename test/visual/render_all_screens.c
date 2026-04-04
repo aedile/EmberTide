@@ -38,6 +38,8 @@
 #include "screens/screen_training.h"
 #include "screens/screen_idle.h"
 #include "screens/screen_onboarding.h"
+#include "screens/screen_battle_result.h"
+#include "screens/screen_rebirth.h"
 #include "ui_widgets.h"
 #include "vm_builder.h"
 #include "types.h"
@@ -516,6 +518,64 @@ int main(void)
             return EXIT_FAILURE;
         }
         printf("render_all_screens: output/scene_onboarding.png written successfully\n");
+    }
+
+
+    /* -----------------------------------------------------------------------
+     * Screen 12: scene_battle_result.png — Win result: Ember beat Shadow.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_vm_battle_result_t vm_result;
+        memset(&vm_result, 0, sizeof(vm_result));
+
+        strncpy(vm_result.winner_name, "Ember",
+                sizeof(vm_result.winner_name) - 1u);
+        vm_result.you_won           = 1u;
+        vm_result.xp_earned         = 150u;   /* 50 + 10*10 */
+        vm_result.rounds_survived   = 5u;
+        vm_result.player_sprite_base = 0u;
+        vm_result.is_dead           = 0u;
+
+        fq_fb_clear(&framebuffer);
+        fq_render_battle_result(&framebuffer, &vm_result);
+
+        printf("render_all_screens: writing output/scene_battle_result.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_battle_result.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_battle_result.png written successfully\n");
+    }
+
+    /* -----------------------------------------------------------------------
+     * Screen 13: scene_rebirth.png — First rebirth, level 10 -> 1.
+     * ----------------------------------------------------------------------- */
+    {
+        fq_vm_rebirth_t vm_rebirth;
+        memset(&vm_rebirth, 0, sizeof(vm_rebirth));
+
+        vm_rebirth.old_level        = 10u;
+        vm_rebirth.new_level        = 1u;
+        vm_rebirth.old_stats[0]     = 60u;   /* STR before */
+        vm_rebirth.old_stats[1]     = 30u;   /* SPD before */
+        vm_rebirth.old_stats[2]     = 20u;   /* PRC before */
+        vm_rebirth.old_stats[3]     = 15u;   /* INT before */
+        vm_rebirth.new_stats[0]     = 30u;   /* STR after (halved) */
+        vm_rebirth.new_stats[1]     = 15u;
+        vm_rebirth.new_stats[2]     = 10u;
+        vm_rebirth.new_stats[3]     = 7u;
+        vm_rebirth.tokens_earned    = 1u;
+        vm_rebirth.tokens_available = 1u;
+        vm_rebirth.legacy_tree      = 0u;    /* no nodes unlocked yet */
+        vm_rebirth.next_node        = 0u;
+
+        fq_fb_clear(&framebuffer);
+        fq_render_rebirth(&framebuffer, &vm_rebirth);
+
+        printf("render_all_screens: writing output/scene_rebirth.png ...\n");
+        if (write_framebuffer_png(&framebuffer, "output/scene_rebirth.png") != 0) {
+            return EXIT_FAILURE;
+        }
+        printf("render_all_screens: output/scene_rebirth.png written successfully\n");
     }
 
     printf("render_all_screens: ALL SCREENS OK\n");
