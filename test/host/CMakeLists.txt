@@ -856,3 +856,54 @@ add_p20_test(test_p20_bounds
 # ---------------------------------------------------------------------------
 add_p20_test(test_p20_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p20_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-21: I2S Audio Engine + sfxr-c Sound Effects
+#
+# add_p21_test(<target> <source>)
+#
+# Links HAL mock (mock_hal_audio.c) + game sources (which include sfxr.c and
+# sfx.c once they exist) + game/lib sources.
+# Includes HAL_INCLUDE (for hal_audio.h) and GAME_INCLUDE (for sfx.h, types.h).
+#
+# Architecture: sfx.h lives in game/include; sfxr.h/sfxr.c live in game/lib.
+# sfxr.c is picked up by GAME_SOURCES glob (or added explicitly below).
+# ---------------------------------------------------------------------------
+set(GAME_LIB_DIR "${PROJECT_ROOT}/components/game/lib")
+
+function(add_p21_test target source)
+    add_executable(${target} ${source}
+        "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_audio.c")
+    target_include_directories(${target} PRIVATE
+        "${HAL_INCLUDE}"
+        "${GAME_INCLUDE}"
+        "${GAME_LIB_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    # Explicitly add game/lib sources (sfxr.c, sfx.c) — not covered by GAME_SOURCES glob.
+    if(EXISTS "${GAME_LIB_DIR}/sfxr.c")
+        target_sources(${target} PRIVATE "${GAME_LIB_DIR}/sfxr.c")
+    endif()
+    if(EXISTS "${PROJECT_ROOT}/components/game/src/sfx.c")
+        target_sources(${target} PRIVATE
+            "${PROJECT_ROOT}/components/game/src/sfx.c")
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Phase-21 Bound tests (Rule 22 Phase A — BOUND RED)
+# Covers: ABI pinning (ERR_NULL=3, ERR_OVERFLOW=4), write-before-init,
+# null-buffer, freq-zero, duration-clamp, ring-overflow, invalid sfx id,
+# sample-count bound, sfx return-type contract.
+# ---------------------------------------------------------------------------
+add_p21_test(test_p21_audio_sfx_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p21_audio_sfx_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-21 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_p21_test(test_p21_audio_sfx_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p21_audio_sfx_feature.c")
