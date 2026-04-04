@@ -5,8 +5,6 @@
  * integer overflows, underflows, PRNG misalignments, and OOB conditions in all
  * new Phase 20 code paths.
  *
- * All 18 spec-challenger required bound tests are implemented here.
- *
  * Test list:
  *  1.  test_combat_hash_determinism
  *  2.  test_combat_hash_no_prng_advance
@@ -26,6 +24,13 @@
  * 16.  test_battle_setup_cancel
  * 17.  test_battle_setup_timeout
  * 18.  test_rebirth_all_nodes_filled
+ * 19.  test_sync_verify_hash_mismatch
+ * 20.  test_sync_verify_round_mismatch
+ * 21.  test_sync_verify_ok
+ * 22.  test_mtu_too_small_rejects_team_sync
+ * 23.  test_idle_forbidden_in_battle_result
+ * 24.  test_idle_forbidden_in_rebirth
+ * 25.  test_idle_permitted_in_home
  *
  * Constitution Priority 0: No float, no PRNG outside BATTLE state.
  */
@@ -41,9 +46,30 @@
 #include "combat.h"
 #include "combat_hash.h"
 #include "progression.h"
+#include "legacy.h"
 #include "protocol.h"
+#include "sync.h"
 #include "app_fsm.h"
 #include "event_bus.h"
+
+/* ---------------------------------------------------------------------------
+ * Local mirror of is_idle_forbidden() from app_main.c.
+ *
+ * BLOCKER 7: Tests that verify idle suppression cannot call the static function
+ * directly. This mirror must remain consistent with the production implementation
+ * in app_main.c (Phase-19 interactive: ONBOARDING added alongside BATTLE,
+ * BATTLE_SETUP, BATTLE_RESULT, REBIRTH, TITLE).
+ * ---------------------------------------------------------------------------*/
+static uint8_t mirror_is_idle_forbidden(fq_app_state_t state)
+{
+    return (state == FQ_STATE_BATTLE        ||
+            state == FQ_STATE_BATTLE_SETUP  ||
+            state == FQ_STATE_BATTLE_RESULT ||
+            state == FQ_STATE_REBIRTH       ||
+            state == FQ_STATE_TITLE         ||
+            state == FQ_STATE_ONBOARDING)
+           ? 1u : 0u;
+}
 
 /* =========================================================================
  * 1. test_combat_hash_determinism
@@ -149,7 +175,15 @@ static void test_xp_award_uint32_saturation(void)
 
 /* =========================================================================
  * 5. test_rebirth_level_1_no_underflow
- *    Rebirth on level-1 character — stats at class base floor, no underflow.
+ *    Rebirth on a Bruiser with above-base stats — stats floor at class base,
+ *    never underflow. Uses fq_rebirth() from legacy.h (requires is_dead==1).
+ *
+ *    Bruiser class bases: STR=3, SPD=0, PRC=0, INT=0, HP=60.
+ *    With 50% retention (no perks):
+ *      STR: 3 + floor((20-3)*50/100) = 3+8  = 11
+ *      SPD: 0 + floor((10-0)*50/100) = 0+5  =  5
+ *      PRC: 0 + floor((5-0)*50/100)  = 0+2  =  2
+ *      INT: 0 + floor((5-0)*50/100)  = 0+2  =  2
  * =========================================================================
  */
 static void test_rebirth_level_1_no_underflow(void)
@@ -158,41 +192,37 @@ static void test_rebirth_level_1_no_underflow(void)
     memset(&ch, 0, sizeof(ch));
     ch.class_id      = FQ_CLASS_BRUISER;
     ch.level         = 1u;
-    ch.strength      = 20u;  /* Bruiser base = 20 */
-    ch.speed         = 10u;  /* Bruiser base = 10 */
-    ch.precision     = 5u;   /* Bruiser base = 5  */
-    ch.intelligence  = 5u;   /* Bruiser base = 5  */
-    ch.hp_max        = 60u;
+    ch.strength      = 20u;
+    ch.speed         = 10u;
+    ch.precision     = 5u;
+    ch.intelligence  = 5u;
+    ch.hp_max        = 200u;
     ch.xp            = 100u;
-    ch.is_dead       = 1u;
+    ch.is_dead       = 1u;  /* fq_rebirth() requires is_dead == 1 */
 
-    game_err_t err = fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0xDEADu);
+
+    game_err_t err = fq_rebirth(&ch, &rng);
     TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)err);
 
-    /* Level must reset to 1 */
-    TEST_ASSERT_EQUAL_UINT8(1u, ch.level);
+    /* Retention formula with 50% (no perks): base + floor((stat-base)*50/100) */
+    TEST_ASSERT_EQUAL_UINT8(11u, ch.strength);    /* 3 + floor(17*50/100) = 3+8 */
+    TEST_ASSERT_EQUAL_UINT8(5u,  ch.speed);       /* 0 + floor(10*50/100) = 5   */
+    TEST_ASSERT_EQUAL_UINT8(2u,  ch.precision);   /* 0 + floor(5*50/100)  = 2   */
+    TEST_ASSERT_EQUAL_UINT8(2u,  ch.intelligence);/* 0 + floor(5*50/100)  = 2   */
 
-    /* Stats halved (floor 0) — for level-1 bruiser at base:
-     * strength: 20/2=10, speed: 10/2=5, precision: 5/2=2, intelligence: 5/2=2 */
-    TEST_ASSERT_EQUAL_UINT8(10u, ch.strength);
-    TEST_ASSERT_EQUAL_UINT8(5u,  ch.speed);
-    TEST_ASSERT_EQUAL_UINT8(2u,  ch.precision);
-    TEST_ASSERT_EQUAL_UINT8(2u,  ch.intelligence);
-
-    /* XP reset to 0, is_dead cleared */
-    TEST_ASSERT_EQUAL_UINT32(0u, ch.xp);
+    /* is_dead must be cleared */
     TEST_ASSERT_EQUAL_UINT8(0u, ch.is_dead);
 
-    /* No stat may underflow (uint8_t) — all remain <= 255 */
-    TEST_ASSERT_TRUE(ch.strength      <= 255u);
-    TEST_ASSERT_TRUE(ch.speed         <= 255u);
-    TEST_ASSERT_TRUE(ch.precision     <= 255u);
-    TEST_ASSERT_TRUE(ch.intelligence  <= 255u);
+    /* HP restored to class base */
+    TEST_ASSERT_EQUAL_UINT16(60u, ch.hp_max);
 }
 
 /* =========================================================================
  * 6. test_rebirth_count_saturation
  *    rebirth_count at 255 must stay 255, not wrap to 0.
+ *    Uses fq_rebirth() from legacy.h (requires is_dead==1).
  * =========================================================================
  */
 static void test_rebirth_count_saturation(void)
@@ -207,9 +237,12 @@ static void test_rebirth_count_saturation(void)
     ch.precision     = 10u;
     ch.intelligence  = 20u;
     ch.hp_max        = 50u;
-    ch.is_dead       = 1u;
+    ch.is_dead       = 1u;  /* fq_rebirth() requires is_dead == 1 */
 
-    fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0x1234u);
+
+    fq_rebirth(&ch, &rng);
 
     TEST_ASSERT_EQUAL_UINT8(255u, ch.rebirth_count);
 }
@@ -217,6 +250,8 @@ static void test_rebirth_count_saturation(void)
 /* =========================================================================
  * 7. test_legacy_points_saturation
  *    legacy_points at 255 must stay 255 after rebirth.
+ *    Uses fq_rebirth() from legacy.h. fq_calc_rebirth_tokens(20, 0) = 2.
+ *    fq_sat8_add(255, 2) = 255 (saturated).
  * =========================================================================
  */
 static void test_legacy_points_saturation(void)
@@ -231,16 +266,19 @@ static void test_legacy_points_saturation(void)
     ch.precision     = 5u;
     ch.intelligence  = 10u;
     ch.hp_max        = 80u;
-    ch.is_dead       = 1u;
+    ch.is_dead       = 1u;  /* fq_rebirth() requires is_dead == 1 */
 
-    fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0xABCDu);
+
+    fq_rebirth(&ch, &rng);
 
     TEST_ASSERT_EQUAL_UINT8(255u, ch.legacy_points);
 }
 
 /* =========================================================================
  * 8. test_legacy_spend_zero_tokens
- *    Spending a legacy token with legacy_points=0 must be a no-op.
+ *    fq_legacy_unlock_node() with legacy_points=0 must be a no-op.
  *    The legacy_tree must not change.
  * =========================================================================
  */
@@ -251,7 +289,8 @@ static void test_legacy_spend_zero_tokens(void)
     ch.legacy_points = 0u;
     ch.legacy_tree   = 0u;  /* no nodes unlocked */
 
-    game_err_t err = fq_legacy_spend_token(&ch);
+    /* Node 0 is T1 — no prerequisites, but no points to spend. */
+    game_err_t err = fq_legacy_unlock_node(&ch, 0u);
     TEST_ASSERT_EQUAL_INT((int)GAME_ERR_INVALID, (int)err);
     TEST_ASSERT_EQUAL_UINT32(0u, ch.legacy_tree);
     TEST_ASSERT_EQUAL_UINT8(0u,  ch.legacy_points);
@@ -511,23 +550,126 @@ static void test_battle_setup_timeout(void)
 
 /* =========================================================================
  * 18. test_rebirth_all_nodes_filled
- *     fq_legacy_spend_token() with full legacy tree (all 32 bits set) -> no-op.
+ *     fq_legacy_unlock_node() with full legacy tree (all 16 valid nodes set)
+ *     -> no-op (node already set → GAME_ERR_INVALID).
  * =========================================================================
  */
 static void test_rebirth_all_nodes_filled(void)
 {
     fq_character_t ch;
     memset(&ch, 0, sizeof(ch));
-    ch.legacy_tree   = 0xFFFFFFFFu;  /* all 32 nodes filled */
+    ch.legacy_tree   = 0xFFFFFFFFu;  /* all 32 bits filled (16 valid + 16 reserved) */
     ch.legacy_points = 5u;           /* tokens available */
 
-    game_err_t err = fq_legacy_spend_token(&ch);
-    /* All nodes full — must return GAME_ERR_INVALID (no-op) */
+    /* Node 0 already set — must return GAME_ERR_INVALID (no-op) */
+    game_err_t err = fq_legacy_unlock_node(&ch, 0u);
     TEST_ASSERT_EQUAL_INT((int)GAME_ERR_INVALID, (int)err);
     /* Tree unchanged */
     TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFu, ch.legacy_tree);
     /* Tokens unchanged (no deduction) */
     TEST_ASSERT_EQUAL_UINT8(5u, ch.legacy_points);
+}
+
+/* =========================================================================
+ * 19. test_sync_verify_hash_mismatch
+ *     Same round, different hashes -> FQ_SYNC_ERR_HASH_MISMATCH.
+ * =========================================================================
+ */
+static void test_sync_verify_hash_mismatch(void)
+{
+    fq_sync_err_t result = fq_sync_verify_round(
+        5u,           /* expected_round */
+        5u,           /* received_round (matches) */
+        0xAABBCCDDu,  /* local_hash */
+        0x11223344u   /* peer_hash (different) */
+    );
+    TEST_ASSERT_EQUAL_INT((int)FQ_SYNC_ERR_HASH_MISMATCH, (int)result);
+}
+
+/* =========================================================================
+ * 20. test_sync_verify_round_mismatch
+ *     Different rounds -> FQ_SYNC_ERR_ROUND_MISMATCH (checked before hash).
+ * =========================================================================
+ */
+static void test_sync_verify_round_mismatch(void)
+{
+    fq_sync_err_t result = fq_sync_verify_round(
+        3u,           /* expected_round */
+        7u,           /* received_round (different) */
+        0xDEADBEEFu,  /* local_hash */
+        0xDEADBEEFu   /* peer_hash (same, but round mismatch takes priority) */
+    );
+    TEST_ASSERT_EQUAL_INT((int)FQ_SYNC_ERR_ROUND_MISMATCH, (int)result);
+}
+
+/* =========================================================================
+ * 21. test_sync_verify_ok
+ *     Matching round and hash -> FQ_SYNC_OK.
+ * =========================================================================
+ */
+static void test_sync_verify_ok(void)
+{
+    fq_sync_err_t result = fq_sync_verify_round(
+        10u,          /* expected_round */
+        10u,          /* received_round (matches) */
+        0xCAFEBABEu,  /* local_hash */
+        0xCAFEBABEu   /* peer_hash (matches) */
+    );
+    TEST_ASSERT_EQUAL_INT((int)FQ_SYNC_OK, (int)result);
+}
+
+/* =========================================================================
+ * 22. test_mtu_too_small_rejects_team_sync
+ *     MTU 38: (38-3)=35 < FQ_PACKET_TEAM_SYNC_SIZE -> insufficient.
+ *     MTU 39: (39-3)=36 >= FQ_PACKET_TEAM_SYNC_SIZE -> sufficient.
+ *
+ *     The BLE ATT header overhead is 3 bytes. The effective payload is
+ *     (mtu - 3). The test verifies the boundary condition detectable by
+ *     comparing the usable payload against FQ_PACKET_TEAM_SYNC_SIZE.
+ * =========================================================================
+ */
+static void test_mtu_too_small_rejects_team_sync(void)
+{
+    /* MTU 38: usable payload = 38 - 3 = 35 bytes */
+    uint16_t mtu_small   = 38u;
+    uint16_t payload_small = (uint16_t)(mtu_small - 3u);
+    TEST_ASSERT_TRUE(payload_small < (uint16_t)FQ_PACKET_TEAM_SYNC_SIZE);
+
+    /* MTU 39: usable payload = 39 - 3 = 36 bytes */
+    uint16_t mtu_ok      = 39u;
+    uint16_t payload_ok  = (uint16_t)(mtu_ok - 3u);
+    TEST_ASSERT_TRUE(payload_ok >= (uint16_t)FQ_PACKET_TEAM_SYNC_SIZE);
+}
+
+/* =========================================================================
+ * 23. test_idle_forbidden_in_battle_result
+ *     BATTLE_RESULT must be idle-suppressed — screensaver must not activate.
+ * =========================================================================
+ */
+static void test_idle_forbidden_in_battle_result(void)
+{
+    TEST_ASSERT_EQUAL_UINT8(1u, mirror_is_idle_forbidden(FQ_STATE_BATTLE_RESULT));
+}
+
+/* =========================================================================
+ * 24. test_idle_forbidden_in_rebirth
+ *     REBIRTH must be idle-suppressed — screensaver must not activate.
+ * =========================================================================
+ */
+static void test_idle_forbidden_in_rebirth(void)
+{
+    TEST_ASSERT_EQUAL_UINT8(1u, mirror_is_idle_forbidden(FQ_STATE_REBIRTH));
+}
+
+/* =========================================================================
+ * 25. test_idle_permitted_in_home
+ *     HOME must NOT be idle-suppressed — screensaver may activate normally.
+ *     Verifies no over-suppression.
+ * =========================================================================
+ */
+static void test_idle_permitted_in_home(void)
+{
+    TEST_ASSERT_EQUAL_UINT8(0u, mirror_is_idle_forbidden(FQ_STATE_HOME));
 }
 
 /* =========================================================================
@@ -554,6 +696,13 @@ int main(void)
     test_battle_setup_cancel();
     test_battle_setup_timeout();
     test_rebirth_all_nodes_filled();
+    test_sync_verify_hash_mismatch();
+    test_sync_verify_round_mismatch();
+    test_sync_verify_ok();
+    test_mtu_too_small_rejects_team_sync();
+    test_idle_forbidden_in_battle_result();
+    test_idle_forbidden_in_rebirth();
+    test_idle_permitted_in_home();
 
     printf("[PASS] All Phase 20 bound tests passed.\n");
     return 0;

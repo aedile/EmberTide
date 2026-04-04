@@ -4,6 +4,20 @@
  * Happy-path and integration tests verifying the Phase 20 features work correctly.
  * All tests are host-compilable (no hal_*.h, no ESP-IDF).
  *
+ * Rebirth uses fq_rebirth() from legacy.h (correct legacy API):
+ *   - Requires is_dead == 1.
+ *   - Applies retention formula: base + floor((stat - base) * rate / 100).
+ *   - Default retention rate: 50%. SOFT_LANDING: 60%. PHOENIX_FLAME: 75%.
+ *   - Stats floor at class base (never below).
+ *   - Increments rebirth_count (saturate at 255).
+ *   - Awards tokens via fq_calc_rebirth_tokens(level, wins) = level/10 + wins/100.
+ *   - Restores hp_max to class base. Clears is_dead.
+ *
+ * Legacy tree uses fq_legacy_unlock_node() from legacy.h (correct legacy API):
+ *   - Requires legacy_points >= 1.
+ *   - Respects tier prerequisites.
+ *   - Sets the bit for node_index in legacy_tree, decrements legacy_points.
+ *
  * Test groups:
  *   A) combat hash function
  *   B) XP award and win/loss counters
@@ -26,6 +40,7 @@
 #include "combat.h"
 #include "combat_hash.h"
 #include "progression.h"
+#include "legacy.h"
 #include "protocol.h"
 #include "app_fsm.h"
 #include "event_bus.h"
@@ -52,9 +67,8 @@ static void test_combat_hash_returns_nonzero_for_valid_ctx(void)
     memset(&ctx, 0, sizeof(ctx));
     fq_combat_init(&ctx, &c1, &c2, 0xA1B2C3D4u);
 
-    /* Call must complete without crash. Value is implementation-defined. */
     uint32_t hash = fq_generate_combat_hash(&ctx, 1u);
-    (void)hash;
+    TEST_ASSERT_TRUE(hash != 0u);
     printf("[PASS] test_combat_hash_returns_nonzero_for_valid_ctx\n");
 }
 
@@ -156,48 +170,76 @@ static void test_xp_award_triggers_level_up_when_threshold_met(void)
 
 /* =========================================================================
  * C. Rebirth formula and legacy tree
+ *
+ * Uses fq_rebirth() from legacy.h. Key contract:
+ *   - is_dead must be 1 before call.
+ *   - Applies retention formula (50% default): base + floor((stat-base)*50/100).
+ *   - Stats floor at class base.
+ *   - hp_max restored to class base value.
+ *   - rebirth_count incremented (saturate at 255).
+ *   - Tokens = fq_calc_rebirth_tokens(level, wins) = level/10 + wins/100.
+ *   - is_dead cleared.
  * =========================================================================
  */
 
-static void test_rebirth_resets_level_and_xp(void)
+static void test_rebirth_clears_dead_and_awards_tokens(void)
 {
     fq_character_t ch;
     memset(&ch, 0, sizeof(ch));
     ch.class_id      = FQ_CLASS_WILDCARD;
-    ch.level         = 15u;
+    ch.level         = 20u;
     ch.xp            = 5000u;
-    ch.strength      = 40u;
-    ch.speed         = 30u;
-    ch.precision     = 20u;
-    ch.intelligence  = 10u;
+    ch.strength      = 10u;   /* Wildcard base = 1 */
+    ch.speed         = 10u;   /* Wildcard base = 1 */
+    ch.precision     = 10u;   /* Wildcard base = 1 */
+    ch.intelligence  = 5u;    /* Wildcard base = 0 */
     ch.hp_max        = 150u;
+    ch.legacy_points = 0u;
+    ch.wins          = 0u;
     ch.is_dead       = 1u;
 
-    fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0x5A5Au);
 
-    TEST_ASSERT_EQUAL_UINT8(1u,  ch.level);
-    TEST_ASSERT_EQUAL_UINT32(0u, ch.xp);
-    TEST_ASSERT_EQUAL_UINT8(0u,  ch.is_dead);
+    game_err_t err = fq_rebirth(&ch, &rng);
+    TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)err);
+
+    /* is_dead cleared */
+    TEST_ASSERT_EQUAL_UINT8(0u, ch.is_dead);
+
+    /* Tokens: fq_calc_rebirth_tokens(20, 0) = 20/10 + 0/100 = 2 */
+    TEST_ASSERT_EQUAL_UINT8(2u, ch.legacy_points);
+
+    /* hp_max restored to Wildcard class base = 50 */
+    TEST_ASSERT_EQUAL_UINT16(50u, ch.hp_max);
 }
 
-static void test_rebirth_stats_halved(void)
+static void test_rebirth_applies_retention_formula(void)
 {
     fq_character_t ch;
     memset(&ch, 0, sizeof(ch));
     ch.class_id      = FQ_CLASS_BRUISER;
     ch.level         = 10u;
-    ch.strength      = 60u;
-    ch.speed         = 40u;
-    ch.precision     = 20u;
-    ch.intelligence  = 16u;
+    ch.strength      = 60u;   /* Bruiser base = 3 */
+    ch.speed         = 40u;   /* Bruiser base = 0 */
+    ch.precision     = 20u;   /* Bruiser base = 0 */
+    ch.intelligence  = 16u;   /* Bruiser base = 0 */
     ch.hp_max        = 200u;
     ch.is_dead       = 1u;
 
-    fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0x9999u);
 
-    TEST_ASSERT_EQUAL_UINT8(30u, ch.strength);
+    fq_rebirth(&ch, &rng);
+
+    /* 50% retention: base + floor((stat - base) * 50 / 100) */
+    /* STR: 3 + floor((60-3)*50/100) = 3 + floor(57*50/100) = 3+28 = 31 */
+    TEST_ASSERT_EQUAL_UINT8(31u, ch.strength);
+    /* SPD: 0 + floor(40*50/100) = 20 */
     TEST_ASSERT_EQUAL_UINT8(20u, ch.speed);
+    /* PRC: 0 + floor(20*50/100) = 10 */
     TEST_ASSERT_EQUAL_UINT8(10u, ch.precision);
+    /* INT: 0 + floor(16*50/100) = 8 */
     TEST_ASSERT_EQUAL_UINT8(8u,  ch.intelligence);
 }
 
@@ -213,32 +255,40 @@ static void test_rebirth_tokens_earned_level_over_10(void)
     ch.intelligence  = 20u;
     ch.hp_max        = 70u;
     ch.legacy_points = 0u;
+    ch.wins          = 0u;
     ch.is_dead       = 1u;
 
-    fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0x1111u);
 
-    /* tokens = max(1, 20/10) = max(1, 2) = 2 */
+    fq_rebirth(&ch, &rng);
+
+    /* tokens = 20/10 + 0/100 = 2 */
     TEST_ASSERT_EQUAL_UINT8(2u, ch.legacy_points);
 }
 
-static void test_rebirth_tokens_min_1_for_low_level(void)
+static void test_rebirth_tokens_zero_for_low_level(void)
 {
     fq_character_t ch;
     memset(&ch, 0, sizeof(ch));
     ch.class_id      = FQ_CLASS_TRICKSTER;
-    ch.level         = 5u;    /* level/10 = 0, min should be 1 */
+    ch.level         = 5u;    /* level/10 = 0, wins/100 = 0 → 0 tokens */
     ch.strength      = 5u;
     ch.speed         = 15u;
     ch.precision     = 10u;
     ch.intelligence  = 5u;
     ch.hp_max        = 60u;
     ch.legacy_points = 0u;
+    ch.wins          = 0u;
     ch.is_dead       = 1u;
 
-    fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0x2222u);
 
-    /* tokens = max(1, 5/10) = max(1, 0) = 1 */
-    TEST_ASSERT_EQUAL_UINT8(1u, ch.legacy_points);
+    fq_rebirth(&ch, &rng);
+
+    /* fq_calc_rebirth_tokens(5, 0) = 5/10 + 0/100 = 0 + 0 = 0 */
+    TEST_ASSERT_EQUAL_UINT8(0u, ch.legacy_points);
 }
 
 static void test_rebirth_count_increments(void)
@@ -255,41 +305,62 @@ static void test_rebirth_count_increments(void)
     ch.hp_max        = 80u;
     ch.is_dead       = 1u;
 
-    fq_rebirth_reset(&ch);
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0x3333u);
+
+    fq_rebirth(&ch, &rng);
 
     TEST_ASSERT_EQUAL_UINT8(4u, ch.rebirth_count);
 }
 
-static void test_legacy_spend_token_sets_next_bit(void)
+static void test_rebirth_requires_is_dead(void)
+{
+    fq_character_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.class_id = FQ_CLASS_BRUISER;
+    ch.is_dead  = 0u;  /* alive — rebirth must be rejected */
+    ch.hp_max   = 60u;
+
+    fq_prng_t rng;
+    fq_prng_init(&rng, 0x4444u);
+
+    game_err_t err = fq_rebirth(&ch, &rng);
+    TEST_ASSERT_EQUAL_INT((int)GAME_ERR_INVALID, (int)err);
+}
+
+static void test_legacy_unlock_node_sets_bit(void)
 {
     fq_character_t ch;
     memset(&ch, 0, sizeof(ch));
     ch.legacy_points = 3u;
     ch.legacy_tree   = 0u;
 
-    /* Spend first token -> bit 0 set */
-    game_err_t err = fq_legacy_spend_token(&ch);
+    /* Unlock T1 node 0 (no prerequisites) */
+    game_err_t err = fq_legacy_unlock_node(&ch, 0u);
     TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)err);
     TEST_ASSERT_EQUAL_UINT32(0x00000001u, ch.legacy_tree);
     TEST_ASSERT_EQUAL_UINT8(2u, ch.legacy_points);
 
-    /* Spend second token -> bit 1 set */
-    err = fq_legacy_spend_token(&ch);
+    /* Unlock T1 node 1 */
+    err = fq_legacy_unlock_node(&ch, 1u);
     TEST_ASSERT_EQUAL_INT((int)GAME_OK, (int)err);
     TEST_ASSERT_EQUAL_UINT32(0x00000003u, ch.legacy_tree);
     TEST_ASSERT_EQUAL_UINT8(1u, ch.legacy_points);
 }
 
-static void test_legacy_spend_token_skips_already_set_bits(void)
+static void test_legacy_unlock_node_rejects_already_set(void)
 {
     fq_character_t ch;
     memset(&ch, 0, sizeof(ch));
     ch.legacy_points = 2u;
     ch.legacy_tree   = 0x00000007u;  /* bits 0,1,2 already set */
 
-    /* Next unset bit is bit 3 */
-    fq_legacy_spend_token(&ch);
-    TEST_ASSERT_EQUAL_UINT32(0x0000000Fu, ch.legacy_tree);
+    /* Attempt to re-unlock bit 0 — must reject */
+    game_err_t err = fq_legacy_unlock_node(&ch, 0u);
+    TEST_ASSERT_EQUAL_INT((int)GAME_ERR_INVALID, (int)err);
+    /* Tree and points unchanged */
+    TEST_ASSERT_EQUAL_UINT32(0x00000007u, ch.legacy_tree);
+    TEST_ASSERT_EQUAL_UINT8(2u, ch.legacy_points);
 }
 
 /* =========================================================================
@@ -376,7 +447,9 @@ static void test_rebirth_state_btn_b_goes_home(void)
     memset(&inventory, 0, sizeof(inventory));
     memset(&app,       0, sizeof(app));
 
-    player.hp_max = 100u;
+    player.hp_max  = 100u;
+    player.is_dead = 1u;  /* fq_rebirth() requires is_dead == 1 */
+
     fq_app_init(&app, &player, &inventory);
     app.state = FQ_STATE_REBIRTH;
 
@@ -410,7 +483,8 @@ static void test_rebirth_state_btn_a_spends_token(void)
     evt.data = 0u;
     fq_app_dispatch(&app, &evt);
 
-    /* Token spent -> bit 0 set, legacy_points decremented */
+    /* fq_legacy_unlock_node(player, 0): T1 node, no prereqs, token spent.
+     * Bit 0 set, legacy_points decremented from 2 to 1. */
     TEST_ASSERT_EQUAL_UINT32(0x00000001u, player.legacy_tree);
     TEST_ASSERT_EQUAL_UINT8(1u, player.legacy_points);
     /* Still in REBIRTH state */
@@ -599,14 +673,15 @@ int main(void)
     test_xp_award_loss_increments_losses();
     test_xp_award_triggers_level_up_when_threshold_met();
 
-    /* C. Rebirth */
-    test_rebirth_resets_level_and_xp();
-    test_rebirth_stats_halved();
+    /* C. Rebirth (uses fq_rebirth() from legacy.h) */
+    test_rebirth_clears_dead_and_awards_tokens();
+    test_rebirth_applies_retention_formula();
     test_rebirth_tokens_earned_level_over_10();
-    test_rebirth_tokens_min_1_for_low_level();
+    test_rebirth_tokens_zero_for_low_level();
     test_rebirth_count_increments();
-    test_legacy_spend_token_sets_next_bit();
-    test_legacy_spend_token_skips_already_set_bits();
+    test_rebirth_requires_is_dead();
+    test_legacy_unlock_node_sets_bit();
+    test_legacy_unlock_node_rejects_already_set();
 
     /* D. FSM orchestration */
     test_battle_setup_connects_to_battle();

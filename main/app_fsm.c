@@ -16,6 +16,11 @@
  *   each case only touches the fields it needs, and only the BATTLE case is
  *   permitted to call fq_combat_step() which advances the PRNG.
  *
+ *   Exception: fq_rebirth() in FQ_STATE_REBIRTH requires an fq_prng_t only for
+ *   WILDCARD passive reroll (class-specific cosmetic). A local PRNG seeded from
+ *   tick_count ^ rebirth_count is used — the combat.rng stream is never touched
+ *   outside FQ_STATE_BATTLE.
+ *
  * Phase-19 HOME state:
  *   BTN_B (☀ SUN, GPIO18) cycles home_menu_index mod FQ_HOME_MENU_COUNT.
  *   BTN_A (⏻ PWR, GPIO0) selects the highlighted menu item and transitions.
@@ -36,6 +41,18 @@
  *   ACTIVE:  BTN_A registers hit, TIMER_TICK advances target_pos.
  *            BTN_B exits immediately (partial score, 0 XP).
  *   DONE:    BTN_B returns to HOME (XP already awarded on DONE transition).
+ *
+ * Phase-20 BATTLE state:
+ *   COMBAT_ROUND_COMPLETE: calls fq_combat_award_xp() to credit XP/wins/losses,
+ *   stores result in ctx->xp_earned, then transitions to BATTLE_RESULT.
+ *
+ * Phase-20 REBIRTH state:
+ *   BTN_A: spend one legacy point on the next eligible tree node via
+ *          fq_legacy_unlock_node(). Scans the current legacy_tree bitmask to
+ *          find the lowest unset bit in [0, 15] and attempts to unlock it.
+ *          No-op if no tokens or all nodes are filled / prerequisites unmet.
+ *   BTN_B: execute fq_rebirth() (requires is_dead==1), then return HOME.
+ *          Uses a local PRNG (not combat.rng) — PRNG isolation preserved.
  */
 
 #include "app_fsm.h"
@@ -43,6 +60,7 @@
 #include "name_gen.h"
 #include "equip.h"
 #include "progression.h"
+#include "legacy.h"
 #include <string.h>
 
 /* ---------------------------------------------------------------------------
@@ -351,11 +369,28 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
          *
          * Constitution Priority 0: ONLY this block may access ctx->combat.rng.
          * BLE_DISCONNECTED: clean up and return HOME (no save).
+         *
+         * Phase-20: On COMBAT_ROUND_COMPLETE, call fq_combat_award_xp() to
+         * credit XP and update win/loss counters. Store the earned XP in
+         * ctx->xp_earned for the battle result screen.
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE:
             switch (evt->id) {
                 case FQ_EVT_COMBAT_ROUND_COMPLETE:
                     if (ctx->combat_active == 1u) {
+                        /* Award XP based on battle outcome. */
+                        if (ctx->player != NULL) {
+                            uint32_t xp_before = ctx->player->xp;
+                            fq_combat_award_xp(ctx->player,
+                                               ctx->opponent.level,
+                                               ctx->battle_won);
+                            /* Capture XP delta for result screen (clamped to uint16_t). */
+                            uint32_t xp_delta = ctx->player->xp - xp_before;
+                            ctx->xp_earned = (xp_delta > 0xFFFFu)
+                                             ? (uint16_t)0xFFFFu
+                                             : (uint16_t)xp_delta;
+                        }
+
                         ctx->state         = FQ_STATE_BATTLE_RESULT;
                         ctx->combat_active = 0u;
                     }
@@ -451,25 +486,47 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         /* -------------------------------------------------------------------
          * FQ_STATE_REBIRTH
          *
-         * BTN_A: Spend one legacy token on next free tree node.
-         *        No-op if 0 tokens or tree full.
-         * BTN_B: Confirm rebirth — return HOME with auto-save trigger.
-         *        (App main wires the actual save; FSM only transitions.)
+         * BTN_A: Spend one legacy token on the next eligible tree node.
+         *        Scans legacy_tree for the lowest unset bit in [0, 15] and
+         *        calls fq_legacy_unlock_node(). No-op if 0 tokens, tree full,
+         *        or tier prerequisites are not met for the candidate node.
+         * BTN_B: Execute fq_rebirth() (requires player->is_dead==1) then
+         *        return HOME. app_main.c wires the auto-save.
+         *        PRNG isolation: a local RNG (seeded from tick_count) is used —
+         *        ctx->combat.rng is never accessed here.
          * ------------------------------------------------------------------- */
         case FQ_STATE_REBIRTH:
             switch (evt->id) {
                 case FQ_EVT_BTN_A_PRESS:
-                    /* Spend a token on next legacy node if available. */
+                    /* Spend a token on the next eligible legacy node. */
                     if (ctx->player != NULL) {
-                        fq_legacy_spend_token(ctx->player);
+                        /* Find the lowest unset bit in [0, 15]. */
+                        uint8_t node;
+                        for (node = 0u; node < 16u; node++) {
+                            if ((ctx->player->legacy_tree & (1u << node)) == 0u) {
+                                /* Attempt unlock — respects tier prerequisites. */
+                                fq_legacy_unlock_node(ctx->player, node);
+                                break;
+                            }
+                        }
                     }
                     /* Stay in REBIRTH state — player may spend more tokens. */
                     break;
 
-                case FQ_EVT_BTN_B_PRESS:
-                    /* Confirm rebirth — return HOME. */
+                case FQ_EVT_BTN_B_PRESS: {
+                    /* Execute rebirth if player is dead, then go HOME.
+                     * A local PRNG seeded from tick_count is used for the
+                     * WILDCARD passive reroll — combat.rng is not accessed. */
+                    if (ctx->player != NULL && ctx->player->is_dead == 1u) {
+                        fq_prng_t rebirth_rng;
+                        fq_prng_init(&rebirth_rng,
+                            ctx->tick_count ^ (uint32_t)(ctx->player->rebirth_count));
+                        fq_rebirth(ctx->player, &rebirth_rng);
+                        fq_legacy_apply_bonuses(ctx->player);
+                    }
                     go_home(ctx);
                     break;
+                }
 
                 default:
                     break;
