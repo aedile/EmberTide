@@ -174,6 +174,7 @@ _Static_assert(ANIM_FRAME_US > 0ULL,
 static uint8_t *s_mod_buf;  /* SPIRAM-allocated in do_music_load() */
 static size_t  s_mod_buf_len;
 static fq_music_ctx_t s_music_ctx; /* Application-layer owner of music player state. */
+static fq_app_state_t s_music_loaded_state = (fq_app_state_t)0xFFu; /* Tracks which state we last attempted music load for — prevents retry spam when .mod files are absent. */
 
 /* -------------------------------------------------------------------------
  * clamp16 — Clamp int32 to signed 16-bit range.
@@ -262,6 +263,13 @@ static void do_music_load(fq_app_state_t state, uint32_t tick_count)
     if (!s_app || !s_app->music_enabled) {
         return;
     }
+
+    /* Don't retry music load for the same state — prevents spam when
+     * .mod files are absent from the flash partition. */
+    if (state == s_music_loaded_state) {
+        return;
+    }
+    s_music_loaded_state = state;
 
     fq_music_cat_t cat = music_cat_for_state(state);
     if ((unsigned)cat >= (unsigned)FQ_MUSIC_CAT_COUNT) {
@@ -776,7 +784,9 @@ void app_main(void)
                 last_state       = app.state;
                 last_menu_index  = app.home_menu_index;
 
-                /* Phase-22: Resume music on idle wake. */
+                /* Phase-22: Resume music on idle wake. Reset guard so
+                 * do_music_load retries for the same state after idle. */
+                s_music_loaded_state = (fq_app_state_t)0xFFu;
                 do_music_load(app.state, app.tick_count);
             }
 
@@ -874,11 +884,12 @@ void app_main(void)
                 needs_redraw = 1u;
             } else if (app.state == FQ_STATE_TRAINING) {
                 needs_redraw = 1u;
-            } else if (app.state == FQ_STATE_ONBOARDING) {
-                /* Bug 1 fix: BTN_A in ONBOARDING only changes class_index,
-                 * not app.state, so app.state != last_state is always false.
-                 * Force a redraw on every dispatch while in ONBOARDING so the
-                 * class carousel redraws after each BTN_A press. */
+            } else if (app.state == FQ_STATE_ONBOARDING &&
+                       (evt.id == FQ_EVT_BTN_A_PRESS ||
+                        evt.id == FQ_EVT_BTN_B_PRESS)) {
+                /* Only redraw onboarding on BUTTON events, not TIMER_TICK.
+                 * TIMER_TICK fires every 50ms and would cause continuous
+                 * e-paper refreshes (~1.8s each) making the screen unusable. */
                 needs_redraw = 1u;
             }
 
