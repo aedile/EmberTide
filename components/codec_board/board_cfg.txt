@@ -1,0 +1,8 @@
+# FiestaQuest board configuration — audio path only.
+# Only the S3_ePaper_1_54 entry is required; all other board entries have been
+# stripped to keep binary footprint minimal.
+
+Board: S3_ePaper_1_54
+i2c: {sda: 47, scl: 48}
+i2s: {bclk: 15, ws: 38, dout: 45, din: 16, mclk: 14}
+in_out: {codec: ES8311, pa: 46, use_mclk: 1, pa_gain:6}
