@@ -807,6 +807,34 @@ add_app_test(test_p19_training_b_exit
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p19_training_b_exit.c")
 
 # ---------------------------------------------------------------------------
+# Onboarding UX Bug Fixes: redraw on class-cycle, save-fail loop, partial
+# refresh (fix/onboarding-ux-redraw-savefail-partial).
+#
+# Bound tests cover:
+#   - BTN_A state invariant (state never changes, only class_index)
+#   - class_index range guard (never >= FQ_CLASS_COUNT)
+#   - BTN_B fresh (save_failed=0) -> HOME
+#   - BTN_B with save_failed=1 -> stays ONBOARDING (FSM guard)
+#   - max-index wrap (FQ_CLASS_COUNT-1 + 1 -> 0)
+#   - fq_vm_onboarding_t size pinned at 24 bytes (no new fields needed)
+#   - TIMER_TICK in ONBOARDING does not mutate state or class_index
+#
+# Feature tests cover:
+#   - BTN_A increments class_index, state stays ONBOARDING (Bug 1 contract)
+#   - Full 5-press carousel cycle visits all classes
+#   - BTN_B confirms -> HOME + creates character
+#   - class_index -> correct sprite_base in view model
+#   - All class VMs have non-zero total stats and non-empty class names
+#   - Clearing save_failed flag re-enables BTN_B -> HOME transition
+#   - Sequential BTN_A presses advance class_index correctly
+# ---------------------------------------------------------------------------
+add_app_test(test_onboarding_ux_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_onboarding_ux_bounds.c")
+
+add_app_test(test_onboarding_ux_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_onboarding_ux_feature.c")
+
+# ---------------------------------------------------------------------------
 # Phase-20: BLE Combat, Battle Result, Rebirth
 #
 # add_p20_test(<target> <source>)

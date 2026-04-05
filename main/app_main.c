@@ -40,8 +40,18 @@
  *
  *   Partial refresh:
  *     - Animation redraws use hal_epaper_flush_partial() (fast, no flicker).
+ *     - Onboarding class-carousel BTN_A redraws use hal_epaper_flush_partial().
  *     - HAL internally forces a full refresh every EPD_FULL_REFRESH_INTERVAL.
  *     - State-change redraws continue to use hal_epaper_flush() (full).
+ *
+ *   Onboarding UX fixes (hardware test):
+ *     - Bug 1: BTN_A in ONBOARDING added to special-case needs_redraw block
+ *       (state never changes on class-cycle so app.state!=last_state is false).
+ *     - Bug 2: Save-fail no longer forces state back to ONBOARDING. Character
+ *       is valid in memory; the user stays in HOME and can play immediately.
+ *     - Partial refresh: class carousel uses render_onboarding_partial().
+ *     - LittleFS note: format_if_mount_failed=true in hal_flash_init() handles
+ *       first-boot partition formatting automatically (no manual intervention).
  *
  * Phase 21: I2S audio init and SFX wiring.
  *   - hal_audio_init() called during HAL init.
@@ -582,6 +592,32 @@ static void render_home_partial(fq_app_ctx_t   *app,
 }
 
 /* -------------------------------------------------------------------------
+ * render_onboarding_partial -- Re-render the onboarding screen with partial
+ * refresh. Used when BTN_A cycles the class selection carousel so the display
+ * updates immediately without the full-refresh flicker.
+ * -------------------------------------------------------------------------
+ */
+static void render_onboarding_partial(fq_app_ctx_t   *app,
+                                       fq_fb_t        *fb,
+                                       fq_character_t *player)
+{
+    hal_epaper_err_t err;
+
+    fq_fb_clear(fb);
+
+    fq_vm_onboarding_t vm_ob;
+    fq_vm_build_onboarding(&vm_ob, player, app->onboarding_class_index);
+    fq_render_onboarding(fb, &vm_ob);
+
+    err = hal_epaper_flush_partial(fb->pixels, FQ_FB_SIZE);
+    if (err != HAL_EPAPER_OK) {
+        ESP_LOGE(TAG, "render_onboarding_partial flush failed: %d -- falling back to full",
+                 (int)err);
+        hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
+    }
+}
+
+/* -------------------------------------------------------------------------
  * render_idle -- Render the idle screensaver with partial refresh.
  * -------------------------------------------------------------------------
  */
@@ -800,8 +836,12 @@ void app_main(void)
                     app.state  == FQ_STATE_HOME) {
                     do_auto_save(&app, &player, &inventory);
                     if (app.onboarding_save_failed) {
-                        app.state = FQ_STATE_ONBOARDING;
-                        ESP_LOGW(TAG, "Onboarding save failed -- re-entering");
+                        /* Save failed on first boot (e.g. flash error). Character
+                         * is already created in memory -- stay in HOME so the user
+                         * can play. A retry will occur on the next auto-save trigger.
+                         * Do NOT force state back to ONBOARDING: that causes a
+                         * hard-refresh loop on every TIMER_TICK event. */
+                        ESP_LOGW(TAG, "Onboarding save failed -- staying HOME, will retry");
                     }
                 }
 
@@ -834,6 +874,12 @@ void app_main(void)
                 needs_redraw = 1u;
             } else if (app.state == FQ_STATE_TRAINING) {
                 needs_redraw = 1u;
+            } else if (app.state == FQ_STATE_ONBOARDING) {
+                /* Bug 1 fix: BTN_A in ONBOARDING only changes class_index,
+                 * not app.state, so app.state != last_state is always false.
+                 * Force a redraw on every dispatch while in ONBOARDING so the
+                 * class carousel redraws after each BTN_A press. */
+                needs_redraw = 1u;
             }
 
             was_inventory = (app.state == FQ_STATE_INVENTORY) ? 1u : 0u;
@@ -862,6 +908,19 @@ void app_main(void)
             s_last_anim_us = now_us;
             needs_redraw   = 0u;
             render_home_partial(&app, &framebuffer, &player);
+        }
+
+        /* Onboarding partial refresh: class carousel update via BTN_A.
+         * Only fires when state is ONBOARDING AND it is NOT a fresh state-change
+         * (state-change redraws go through render_current_state for full refresh).
+         * app.state == last_state here because ONBOARDING state never changes on
+         * BTN_A — only class_index changes. The needs_redraw flag is set by the
+         * ONBOARDING special-case block above. */
+        if (needs_redraw && !s_idle_active &&
+            app.state == FQ_STATE_ONBOARDING &&
+            app.state == last_state) {
+            render_onboarding_partial(&app, &framebuffer, &player);
+            needs_redraw = 0u;
         }
 
         /* Full redraw if flagged (skip if idle). */
