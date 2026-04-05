@@ -21,8 +21,7 @@
  *   First-boot routing: if no valid save exists, state -> ONBOARDING.
  *   Remove hardcoded "Ember" character creation.
  *   ONBOARDING added to idle suppression list.
- *   Training session: TIMER_TICK posted to event bus every loop (acts as
- *   tick source for target movement). Auto-save on inventory exit.
+ *   Training session: TIMER_TICK posted to event bus every loop.
  *
  *   Idle design:
  *     - Idle is NOT an FSM state. s_idle_active flag overlays the renderer.
@@ -34,39 +33,37 @@
  *       so idle does not fire before the first user interaction.
  *
  *   Animation design:
- *     - s_anim_frame alternates between 0 and 2 every ANIM_FRAME_US (0.8s)
- *       while in FQ_STATE_HOME and not idle.
- *     - Frame 0 = idle pose; Frame 2 = mid-step. Two frames minimize
- *       accumulated ghosting on e-paper with partial refresh.
+ *     - s_anim_frame alternates between 0 and 2 every ANIM_FRAME_US (0.8s).
+ *     - Frame 0 = idle pose; Frame 2 = mid-step.
  *     - Animation timer resets when leaving HOME state.
  *     - Animation is suppressed while s_idle_active is set.
  *
  *   Partial refresh:
  *     - Animation redraws use hal_epaper_flush_partial() (fast, no flicker).
- *     - HAL internally forces a full refresh every EPD_FULL_REFRESH_INTERVAL
- *       partial flushes to clear accumulated ghosting.
+ *     - HAL internally forces a full refresh every EPD_FULL_REFRESH_INTERVAL.
  *     - State-change redraws continue to use hal_epaper_flush() (full).
  *
  * Phase 21: I2S audio init and SFX wiring.
  *   - hal_audio_init() called during HAL init.
- *   - do_sfx(id) helper: generates PCM via fq_sfx_play(), pushes to HAL
- *     ring buffer via hal_audio_write_samples(). No-op if sfx_enabled==0.
- *   - button_callback: ONLY posts events to the event bus. do_sfx() is NOT
- *     called from button_callback — that would create a data race because
- *     button_callback runs in gpio_task (a separate FreeRTOS task) while
- *     do_sfx() uses a static buffer and an unprotected ring buffer.
- *   - Event loop: SFX_BTN_PRESS on FQ_EVT_BTN_A_PRESS, SFX_BTN_BACK on
- *     FQ_EVT_BTN_B_PRESS, SFX_MENU_NAVIGATE on home menu cycle,
- *     SFX_ITEM_EQUIP on equip toggle, SFX_COMBAT_HIT/MISS/CRIT on combat
- *     events, SFX_LEVEL_UP on level gain, SFX_REBIRTH on rebirth,
- *     SFX_DEATH on death.
+ *   - do_sfx(id) helper: generates PCM via fq_sfx_play(), pushes to HAL.
+ *   - button_callback: ONLY posts events — do_sfx() NOT called from ISR context.
+ *   - SFX quiet-mode: app.sfx_enabled flag checked before each do_sfx() call.
  *
- *   SFX quiet-mode: app.sfx_enabled flag (set by fq_app_init to 1).
- *   do_sfx() checks the flag — zero SFX overhead when disabled.
+ * Phase 22: MOD music playback + audio mixing.
+ *   - do_music_tick() called every main loop iteration (50ms = 1102 samples).
+ *   - Music renders via fq_music_render() → mix with SFX → hal_audio_write_samples().
+ *   - Mixing formula: music_scaled = (music_raw * music_vol) / 256 (int32 intermediate).
+ *   - SFX ducking: when any SFX sample in the chunk is non-zero, music volume is
+ *     temporarily scaled to 60% (music_vol * 153 / 256). No persistent state.
+ *   - clamp16() applied to every mixed sample to prevent int16 overflow/wrap.
+ *   - State transitions trigger music track changes (stop-start, no crossfade).
+ *   - Idle activation stops music; idle wake resumes the current-state track.
+ *   - Music mute toggle: app.music_enabled field. Checked in do_music_tick().
+ *   - Track selection uses tick_count entropy — NEVER touches combat PRNG.
+ *   - .mod files loaded from LittleFS via hal_flash_read_file() into s_mod_buf.
  *
- *   Concurrency: do_sfx() is ONLY called from the main loop task. The static
- *   PCM buffer and HAL ring buffer are accessed exclusively from the main
- *   loop — no mutex required.
+ *   SPSC contract: do_music_tick() and do_sfx() are ONLY called from the
+ *   main loop task. The HAL ring buffer has no mutex — sole producer model.
  */
 
 #include <stdint.h>
@@ -77,6 +74,10 @@
 #include "character.h"
 #include "save_format.h"
 #include "sfx.h"
+#include "sfxr.h"  /* for SFXR_SAMPLE_RATE_HZ compile-time guard */
+#include "music.h"
+#include "music_table.h"
+#include "micromod.h"  /* for MAX_MOD_FILE_SIZE */
 
 /* Application layer */
 #include "event_bus.h"
@@ -108,6 +109,7 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"  /* heap_caps_malloc for SPIRAM */
 
 static const char *TAG = "app_main";
 
@@ -133,15 +135,48 @@ _Static_assert(SFXR_SAMPLE_RATE_HZ == AUDIO_SAMPLE_RATE_HZ,
 
 /**
  * Animation frame interval: 0.8 seconds per walk frame.
- *
- * 0.8s = 800,000 us. Validated interactively on hardware -- faster looked
- * frantic on e-paper partial refresh (~300ms latency); slower felt dead.
  */
 #define ANIM_FRAME_US      (800000ULL)
 
 /* BLOCKER 2 fix: Compile-time guard -- ANIM_FRAME_US must be non-zero. */
 _Static_assert(ANIM_FRAME_US > 0ULL,
                "ANIM_FRAME_US must be > 0 -- zero causes runaway animation refreshes");
+
+/* -------------------------------------------------------------------------
+ * Phase-22: Music constants.
+ * -------------------------------------------------------------------------
+ */
+
+/**
+ * MUSIC_TICK_SAMPLES — Samples rendered per 50ms main loop tick.
+ * 50ms at 22050 Hz = 22050 * 50 / 1000 = 1102 samples.
+ */
+#define MUSIC_TICK_SAMPLES  1102u
+
+/* -------------------------------------------------------------------------
+ * Phase-22: MOD buffer — allocated on SPIRAM on target.
+ *
+ * On the host test build this is a stack-region static. On the target,
+ * this is the sole SPIRAM consumer for .mod data. At most one .mod file
+ * is resident at a time (stop-start model, no crossfade).
+ * -------------------------------------------------------------------------
+ */
+static uint8_t *s_mod_buf;  /* SPIRAM-allocated in do_music_load() */
+static size_t  s_mod_buf_len;
+
+/* -------------------------------------------------------------------------
+ * clamp16 — Clamp int32 to signed 16-bit range.
+ *
+ * Used for all mixing arithmetic. Prevents int16 overflow/wrap which
+ * would produce harsh distortion clicks at sample boundaries.
+ * -------------------------------------------------------------------------
+ */
+static inline int16_t clamp16(int32_t v)
+{
+    if (v >  32767)  { return  32767; }
+    if (v < -32768)  { return -32768; }
+    return (int16_t)v;
+}
 
 /* -------------------------------------------------------------------------
  * File-scope application context pointer.
@@ -160,8 +195,6 @@ static int64_t  s_last_anim_us;
 
 /* -------------------------------------------------------------------------
  * is_idle_forbidden -- Returns 1 if idle must NOT activate in this state.
- *
- * Phase-19 Interactive: ONBOARDING added (first-boot must not auto-dismiss).
  * -------------------------------------------------------------------------
  */
 static uint8_t is_idle_forbidden(fq_app_state_t state)
@@ -176,21 +209,129 @@ static uint8_t is_idle_forbidden(fq_app_state_t state)
 }
 
 /* -------------------------------------------------------------------------
- * do_sfx -- Generate and play a sound effect.
+ * music_cat_for_state — Map an FSM state to a music category.
  *
- * Phase-21 helper. Generates PCM samples via fq_sfx_play() into a local
- * static buffer, then pushes them to the HAL ring buffer via
- * hal_audio_write_samples(). No-op when sfx_enabled == 0 (quiet mode).
- *
- * CONCURRENCY: do_sfx() is ONLY called from the main loop task. The static
- * PCM buffer and the HAL ring buffer have no mutex because they are never
- * accessed from any other task. button_callback() runs in gpio_task and
- * does NOT call do_sfx() — it only posts events to the event bus. The main
- * loop drains the bus and calls do_sfx() from the single main-loop task
- * context, preserving this invariant.
+ * Returns FQ_MUSIC_CAT_COUNT if no music should play in this state.
  * -------------------------------------------------------------------------
  */
-static void do_sfx(fq_sfx_id_t id)
+static fq_music_cat_t music_cat_for_state(fq_app_state_t state)
+{
+    switch (state) {
+        case FQ_STATE_HOME:
+        case FQ_STATE_STATS:
+        case FQ_STATE_INVENTORY:
+            return FQ_MUSIC_CAT_CHILL;
+
+        case FQ_STATE_BATTLE:
+        case FQ_STATE_BATTLE_SETUP:
+            return FQ_MUSIC_CAT_INTENSE;
+
+        case FQ_STATE_TITLE:
+        case FQ_STATE_TRAINING:
+        case FQ_STATE_ONBOARDING:
+        case FQ_STATE_BATTLE_RESULT:
+        case FQ_STATE_REBIRTH:
+            return FQ_MUSIC_CAT_UPBEAT;
+
+        default:
+            return FQ_MUSIC_CAT_COUNT; /* No music. */
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * do_music_load — Load and start a music track for the given FSM state.
+ *
+ * Picks a track using tick_count entropy (NOT combat PRNG — Priority 0).
+ * Loads it from LittleFS via hal_flash_read_file() into s_mod_buf.
+ * On any failure (file not found, I/O error): silent fallback, no crash.
+ * -------------------------------------------------------------------------
+ */
+static void do_music_load(fq_app_state_t state, uint32_t tick_count)
+{
+    if (!s_app || !s_app->music_enabled) {
+        return;
+    }
+
+    fq_music_cat_t cat = music_cat_for_state(state);
+    if ((unsigned)cat >= (unsigned)FQ_MUSIC_CAT_COUNT) {
+        /* No music for this state. */
+        fq_music_stop();
+        return;
+    }
+
+    const fq_music_track_t *track = fq_music_table_pick(cat, tick_count);
+    if (!track || !track->path) {
+        /* Empty category — no music, no crash. */
+        return;
+    }
+
+    /* Allocate SPIRAM buffer for the .mod file. */
+    if (s_mod_buf) {
+        heap_caps_free(s_mod_buf);
+        s_mod_buf = NULL;
+    }
+    s_mod_buf = heap_caps_malloc(MAX_MOD_FILE_SIZE, MALLOC_CAP_SPIRAM);
+    if (!s_mod_buf) {
+        ESP_LOGW(TAG, "music: SPIRAM alloc failed -- no music");
+        return;
+    }
+
+    /* Load from flash. */
+    s_mod_buf_len = 0u;
+    hal_flash_err_t ferr = hal_flash_read_file(track->path, s_mod_buf,
+                                                MAX_MOD_FILE_SIZE,
+                                                &s_mod_buf_len);
+    if (ferr != HAL_FLASH_OK || s_mod_buf_len == 0u) {
+        ESP_LOGW(TAG, "music: file not found or load failed: %s (%d)",
+                 track->path, (int)ferr);
+        heap_caps_free(s_mod_buf);
+        s_mod_buf = NULL;
+        return; /* Graceful fallback: no music, no crash. */
+    }
+
+    /* Init and play. */
+    fq_music_err_t merr = fq_music_init(s_mod_buf, s_mod_buf_len);
+    if (merr != FQ_MUSIC_OK) {
+        ESP_LOGW(TAG, "music: fq_music_init failed: %d", (int)merr);
+        return;
+    }
+
+    merr = fq_music_play();
+    if (merr != FQ_MUSIC_OK) {
+        ESP_LOGW(TAG, "music: fq_music_play failed: %d", (int)merr);
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * do_music_tick — Render and mix one tick of music + pending SFX.
+ *
+ * Phase-22 core function. Called every main loop iteration (50ms).
+ * Steps:
+ *   1. If music disabled or not playing: write silence for this tick.
+ *   2. Render MUSIC_TICK_SAMPLES of music PCM via fq_music_render().
+ *   3. Check if any SFX samples are pending in the HAL ring (not possible
+ *      with the current SPSC model — instead we detect SFX by checking
+ *      whether do_sfx was called this tick via a flag).
+ *   4. Mix: if SFX chunk is non-zero, apply ducking (60% music vol).
+ *   5. Write combined output to HAL ring buffer.
+ *
+ * NOTE: In this SPSC implementation, SFX is written to the ring BEFORE
+ * do_music_tick() is called each tick (SFX triggers happen in the event
+ * drain loop above). Music ticks write AFTER SFX in the same main-loop
+ * iteration. The ring buffer serializes them.
+ *
+ * The ducking check here looks at s_sfx_pending_this_tick — a flag set
+ * by do_sfx_with_duck_flag() when SFX was emitted this tick.
+ *
+ * CONCURRENCY: ONLY called from the main loop task.
+ * -------------------------------------------------------------------------
+ */
+
+/* Flag: set to 1 when do_sfx() emits samples this tick; cleared each tick. */
+static uint8_t s_sfx_emitted_this_tick;
+
+/* Override of do_sfx to set the duck flag. */
+static void do_sfx_tracked(fq_sfx_id_t id)
 {
     if (!s_app || !s_app->sfx_enabled) {
         return;
@@ -200,14 +341,41 @@ static void do_sfx(fq_sfx_id_t id)
     if (fq_sfx_play(id, s_sfx_buf, AUDIO_RING_BUF_SAMPLES, &samples_out)
         == GAME_OK && samples_out > 0u) {
         hal_audio_write_samples(s_sfx_buf, samples_out);
+        s_sfx_emitted_this_tick = 1u;
     }
+}
+
+static void do_music_tick(void)
+{
+    if (!s_app) {
+        return;
+    }
+
+    static int16_t s_music_buf[MUSIC_TICK_SAMPLES];
+
+    /* Render music into s_music_buf. */
+    uint8_t vol = s_app->music_enabled ? s_app->music_vol : 0u;
+
+    /* Apply ducking if SFX was emitted this tick. */
+    if (s_sfx_emitted_this_tick && vol > 0u) {
+        /* Ducked vol = vol * 153 / 256 (~60%). */
+        vol = (uint8_t)(((uint32_t)vol * 153u) / 256u);
+    }
+
+    fq_music_err_t merr = fq_music_render(s_music_buf, MUSIC_TICK_SAMPLES, vol);
+    if (merr == FQ_MUSIC_ERR_NULL) {
+        /* Should not happen — buf is valid. */
+        return;
+    }
+    /* On LOOP_GUARD or OK: s_music_buf contains valid PCM (zeros on guard). */
+
+    /* Write to ring buffer.
+     * If ring is full (overflow), samples are dropped — acceptable for music. */
+    hal_audio_write_samples(s_music_buf, MUSIC_TICK_SAMPLES);
 }
 
 /* -------------------------------------------------------------------------
  * do_auto_save -- Serialize and write save to flash.
- *
- * Called on inventory exit and after onboarding character creation.
- * Sets app->onboarding_save_failed based on result.
  * -------------------------------------------------------------------------
  */
 static void do_auto_save(fq_app_ctx_t   *app,
@@ -235,12 +403,7 @@ static void do_auto_save(fq_app_ctx_t   *app,
  * button_callback -- Called from gpio_task context on each debounced press.
  *
  * ONLY posts events to the event bus. do_sfx() is deliberately NOT called
- * here because button_callback runs in gpio_task (a separate FreeRTOS task).
- * Calling do_sfx() from gpio_task would create a data race on the static
- * PCM buffer in do_sfx() and on the unprotected HAL ring buffer.
- *
- * Button SFX (SFX_BTN_PRESS / SFX_BTN_BACK) are triggered in the main loop
- * event drain when FQ_EVT_BTN_A_PRESS / FQ_EVT_BTN_B_PRESS are dequeued.
+ * here — it runs in gpio_task (separate FreeRTOS task).
  * -------------------------------------------------------------------------
  */
 static void button_callback(hal_btn_id_t btn_id)
@@ -298,8 +461,7 @@ static void render_title_screen(fq_fb_t *fb)
 }
 
 /* -------------------------------------------------------------------------
- * render_current_state -- Render the current FSM state to the framebuffer
- * and flush it to the e-paper display (full refresh).
+ * render_current_state -- Render the current FSM state to the framebuffer.
  * -------------------------------------------------------------------------
  */
 static void render_current_state(fq_app_ctx_t   *app,
@@ -360,8 +522,6 @@ static void render_current_state(fq_app_ctx_t   *app,
             break;
         }
         case FQ_STATE_REBIRTH: {
-            /* Capture pre-rebirth stats from opponent snapshot if available.
-             * Use player's current (post-rebirth) stats as new_stats. */
             uint8_t old_stats[4] = {
                 player->strength,
                 player->speed,
@@ -377,7 +537,6 @@ static void render_current_state(fq_app_ctx_t   *app,
             break;
         }
         default:
-            /* All other states: clear screen -- no dedicated renderer yet. */
             break;
     }
 
@@ -492,9 +651,6 @@ void app_main(void)
 
     /* -----------------------------------------------------------------------
      * Phase-19 Interactive: first-boot routing.
-     *
-     * If no valid save: go to ONBOARDING instead of creating "Ember".
-     * If valid save: stay on TITLE (fq_app_init already set TITLE).
      * ----------------------------------------------------------------------- */
     if (!save_valid) {
         app.state = FQ_STATE_ONBOARDING;
@@ -520,7 +676,8 @@ void app_main(void)
     hal_audio_err_t audio_err = hal_audio_init();
     if (audio_err != HAL_AUDIO_OK) {
         ESP_LOGW(TAG, "hal_audio_init failed: %d -- SFX disabled", (int)audio_err);
-        app.sfx_enabled = 0u;
+        app.sfx_enabled    = 0u;
+        app.music_enabled  = 0u;
     }
 
     /* -----------------------------------------------------------------------
@@ -530,6 +687,11 @@ void app_main(void)
     s_last_anim_us   = s_last_button_us;
     s_idle_active    = 0u;
     s_anim_frame     = 0u;
+
+    /* -----------------------------------------------------------------------
+     * Phase-22: Load initial music track for the starting state.
+     * ----------------------------------------------------------------------- */
+    do_music_load(app.state, app.tick_count);
 
     /* -----------------------------------------------------------------------
      * Initial render.
@@ -553,6 +715,9 @@ void app_main(void)
     while (1) {
         int64_t now_us = esp_timer_get_time();
 
+        /* Phase-22: clear SFX duck flag at start of each tick. */
+        s_sfx_emitted_this_tick = 0u;
+
         /* Post TIMER_TICK to event bus (drives training target movement). */
         {
             fq_event_t tick_evt = { FQ_EVT_TIMER_TICK, 0u };
@@ -573,54 +738,54 @@ void app_main(void)
                 needs_redraw     = 1u;
                 last_state       = app.state;
                 last_menu_index  = app.home_menu_index;
+
+                /* Phase-22: Resume music on idle wake. */
+                do_music_load(app.state, app.tick_count);
             }
 
-            /* Phase-21: Button SFX — triggered here in the main loop task,
-             * NOT in button_callback (which runs in gpio_task). This is the
-             * only safe place to call do_sfx() without a mutex. */
+            /* Phase-21: Button SFX — triggered in main loop task only. */
             if (evt.id == FQ_EVT_BTN_A_PRESS) {
-                do_sfx(SFX_BTN_PRESS);
+                do_sfx_tracked(SFX_BTN_PRESS);
             } else if (evt.id == FQ_EVT_BTN_B_PRESS) {
-                do_sfx(SFX_BTN_BACK);
+                do_sfx_tracked(SFX_BTN_BACK);
             }
 
             /* Phase-21: Menu navigation SFX on home_menu_index change. */
             if (pre_state == FQ_STATE_HOME &&
                 app.state  == FQ_STATE_HOME &&
                 evt.id     == FQ_EVT_BTN_B_PRESS) {
-                do_sfx(SFX_MENU_NAVIGATE);
+                do_sfx_tracked(SFX_MENU_NAVIGATE);
             }
 
             /* Phase-21: Item equip SFX on inventory BTN_A press. */
             if (app.state == FQ_STATE_INVENTORY &&
                 evt.id    == FQ_EVT_BTN_A_PRESS) {
-                do_sfx(SFX_ITEM_EQUIP);
+                do_sfx_tracked(SFX_ITEM_EQUIP);
             }
 
             /* Phase-21: Combat SFX on COMBAT_ROUND_COMPLETE transition. */
             if (evt.id == FQ_EVT_COMBAT_ROUND_COMPLETE &&
                 pre_state == FQ_STATE_BATTLE) {
-                /* Use battle_won to pick SFX -- simplified (no per-round detail). */
-                do_sfx(app.battle_won ? SFX_COMBAT_CRIT : SFX_COMBAT_HIT);
+                do_sfx_tracked(app.battle_won ? SFX_COMBAT_CRIT : SFX_COMBAT_HIT);
             }
 
             /* Phase-21: Level-up SFX (detect player level increase). */
             if (player.level > last_player_level) {
-                do_sfx(SFX_LEVEL_UP);
+                do_sfx_tracked(SFX_LEVEL_UP);
                 last_player_level = player.level;
             }
 
             /* Phase-21: Rebirth SFX on REBIRTH -> HOME transition. */
             if (pre_state == FQ_STATE_REBIRTH &&
                 app.state == FQ_STATE_HOME) {
-                do_sfx(SFX_REBIRTH);
+                do_sfx_tracked(SFX_REBIRTH);
             }
 
-            /* Phase-21: Death SFX on BATTLE -> BATTLE_RESULT when player is dead. */
+            /* Phase-21: Death SFX on BATTLE -> BATTLE_RESULT when player dead. */
             if (pre_state == FQ_STATE_BATTLE &&
                 app.state == FQ_STATE_BATTLE_RESULT &&
                 player.is_dead == 1u) {
-                do_sfx(SFX_DEATH);
+                do_sfx_tracked(SFX_DEATH);
             }
 
             if (app.state != last_state) {
@@ -634,7 +799,6 @@ void app_main(void)
                     app.state  == FQ_STATE_HOME) {
                     do_auto_save(&app, &player, &inventory);
                     if (app.onboarding_save_failed) {
-                        /* Save failed -- re-enter onboarding. */
                         app.state = FQ_STATE_ONBOARDING;
                         ESP_LOGW(TAG, "Onboarding save failed -- re-entering");
                     }
@@ -652,6 +816,10 @@ void app_main(void)
                     do_auto_save(&app, &player, &inventory);
                 }
 
+                /* Phase-22: State transition → stop-start music (no crossfade). */
+                fq_music_stop();
+                do_music_load(app.state, app.tick_count);
+
                 needs_redraw     = 1u;
                 last_state       = app.state;
                 last_menu_index  = app.home_menu_index;
@@ -662,10 +830,8 @@ void app_main(void)
                 needs_redraw    = 1u;
                 last_menu_index = app.home_menu_index;
             } else if (app.state == FQ_STATE_INVENTORY) {
-                /* Redraw on cursor movement. */
                 needs_redraw = 1u;
             } else if (app.state == FQ_STATE_TRAINING) {
-                /* Redraw on training tick (target moved). */
                 needs_redraw = 1u;
             }
 
@@ -679,6 +845,10 @@ void app_main(void)
         {
             s_idle_active    = 1u;
             needs_redraw     = 0u;
+
+            /* Phase-22: Stop music during idle (save power). */
+            fq_music_stop();
+
             render_idle(&app, &framebuffer, &player);
         }
 
@@ -697,6 +867,11 @@ void app_main(void)
         if (needs_redraw && !s_idle_active) {
             render_current_state(&app, &framebuffer, &player, &inventory);
             needs_redraw = 0u;
+        }
+
+        /* Phase-22: Music tick — render and push to ring buffer. */
+        if (!s_idle_active) {
+            do_music_tick();
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));

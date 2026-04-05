@@ -16,6 +16,9 @@
  * Write atomicity: The real target implementation writes to a temporary
  * file ("save.tmp") then renames to "save.dat" to prevent half-written
  * state after a power loss mid-write.
+ *
+ * Phase 22: Added hal_flash_read_file() for loading .mod music files
+ * from the LittleFS partition into caller-provided buffers (SPIRAM).
  */
 
 #ifndef FIESTAQUEST_HAL_FLASH_H
@@ -91,6 +94,27 @@ hal_flash_err_t hal_flash_read_save(uint8_t *buf, size_t buf_size, size_t *bytes
  *         HAL_FLASH_ERR_WRITE on I/O failure.
  */
 hal_flash_err_t hal_flash_write_save(const uint8_t *buf, size_t size);
+
+/**
+ * hal_flash_read_file — Read an arbitrary file from the LittleFS partition.
+ *
+ * Phase 22: Supports loading .mod music files (and other assets) from
+ * LittleFS into caller-provided buffers (e.g. SPIRAM on the target).
+ *
+ * @param path       Absolute LittleFS path (e.g. "/littlefs/music/track1.mod").
+ *                   Must not be NULL.
+ * @param buf        Output buffer. Must not be NULL.
+ * @param buf_size   Size of buf in bytes. Must be > 0.
+ * @param bytes_read If non-NULL, set to the number of bytes actually read.
+ *                   Set to 0 on any error.
+ * @return HAL_FLASH_OK            on success.
+ *         HAL_FLASH_ERR_NULL      if path or buf is NULL.
+ *         HAL_FLASH_ERR_SIZE      if buf_size is 0.
+ *         HAL_FLASH_ERR_NOT_FOUND if the file does not exist.
+ *         HAL_FLASH_ERR_READ      on I/O failure.
+ */
+hal_flash_err_t hal_flash_read_file(const char *path, uint8_t *buf,
+                                     size_t buf_size, size_t *bytes_read);
 
 /**
  * hal_flash_deinit — Unmount the LittleFS partition and release resources.

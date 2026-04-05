@@ -116,7 +116,10 @@ game_err_t fq_app_init(fq_app_ctx_t   *ctx,
     ctx->home_menu_index = 0u;
 
     /* Phase-21: SFX enabled by default. */
-    ctx->sfx_enabled = 1u;
+    /* Phase-22: Music enabled by default at volume 200. */
+    ctx->sfx_enabled   = 1u;
+    ctx->music_enabled = 1u;
+    ctx->music_vol     = 200u;
 
     /* Automatic BOOT -> TITLE transition. */
     ctx->state = FQ_STATE_TITLE;
