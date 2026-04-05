@@ -67,13 +67,13 @@ typedef struct {
     uint8_t        _pad[2];      /**< Padding to 4-byte boundary. */
 } fq_music_ctx_t;
 
-/* Compile-time size pin — update if micromod_ctx_t layout changes. */
-/* The 4 named payload bytes (playing, initialised, _pad[2]) plus
- * compiler trailing padding round to sizeof(micromod_ctx_t) + 8 bytes.
- * Pin this so a micromod_ctx_t layout change is caught at compile time. */
-_Static_assert(sizeof(fq_music_ctx_t) ==
-               sizeof(micromod_ctx_t) + 8u,
-               "fq_music_ctx_t layout changed — update size assertion");
+/* Compile-time size check — the 4 named bytes (playing, initialised, _pad[2])
+ * plus any compiler-inserted trailing padding must not exceed 8 bytes beyond
+ * micromod_ctx_t. Exact delta varies by target (pointer size, alignment). */
+_Static_assert(sizeof(fq_music_ctx_t) >= sizeof(micromod_ctx_t) + 4u,
+               "fq_music_ctx_t too small — fields missing");
+_Static_assert(sizeof(fq_music_ctx_t) <= sizeof(micromod_ctx_t) + 8u,
+               "fq_music_ctx_t too large — unexpected padding");
 
 /* -------------------------------------------------------------------------
  * Public API
