@@ -775,8 +775,9 @@ void app_main(void)
             fq_app_state_t pre_state = app.state;
             fq_app_dispatch(&app, &evt);
 
-            /* Wake from idle on any button press. */
-            if (s_idle_active) {
+            /* Wake from idle on button press ONLY — not timer ticks. */
+            if (s_idle_active &&
+                (evt.id == FQ_EVT_BTN_A_PRESS || evt.id == FQ_EVT_BTN_B_PRESS)) {
                 s_idle_active    = 0u;
                 s_anim_frame     = 0u;
                 s_last_anim_us   = now_us;
