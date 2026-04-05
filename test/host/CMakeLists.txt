@@ -907,3 +907,48 @@ add_p21_test(test_p21_audio_sfx_bounds
 # ---------------------------------------------------------------------------
 add_p21_test(test_p21_audio_sfx_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p21_audio_sfx_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-22: MOD Music Playback + Audio Mixing
+#
+# add_p22_test(<target> <source>)
+#
+# Links:
+#   - HAL mock (mock_hal_flash.c) — for hal_flash_read_file()
+#   - game sources (game/src/*.c + game/lib/*.c — picks up micromod.c,
+#     music.c, music_table.c via glob)
+#   - HAL include + game include + game lib include
+#
+# Architecture: music.h + micromod.h live in game/ layer. The mixing
+# formula (clamp16) is tested directly in the test source (no app layer
+# dependency needed — it is a pure inline arithmetic contract).
+# ---------------------------------------------------------------------------
+function(add_p22_test target source)
+    add_executable(${target} ${source}
+        "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_flash.c")
+    target_include_directories(${target} PRIVATE
+        "${HAL_INCLUDE}"
+        "${GAME_INCLUDE}"
+        "${GAME_LIB_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Phase-22 Bound tests (Rule 22 Phase A — BOUND RED)
+# Covers: clamp16 overflow/underflow, volume-zero silence, vol-255+sfx clamp,
+# flash_read_file null/not-found/size-zero, music_init null/truncated/too-large,
+# music_render before init, PRNG isolation, save backward compat, ducking
+# no permanent reduction.
+# ---------------------------------------------------------------------------
+add_p22_test(test_p22_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p22_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-22 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_p22_test(test_p22_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p22_feature.c")

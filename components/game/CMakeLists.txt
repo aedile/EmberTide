@@ -22,6 +22,13 @@ idf_component_register(
         # 3. sfxr output (PCM samples) does not feed back into combat/PRNG state
         # See: docs/fiestaquest-architecture.md v2.20 Phase 21 amendment
         "lib/sfxr.c"
+        # Phase 22: MOD music playback.
+        # micromod.c is integer-only (no float ADR needed).
+        # music.c wraps micromod with play/stop/render API.
+        # music_table.c provides state→track category mapping.
+        "lib/micromod.c"
+        "src/music.c"
+        "src/music_table.c"
     INCLUDE_DIRS
         "include"
         "lib"

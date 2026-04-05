@@ -18,6 +18,9 @@
  *
  * Architecture constraint: This file is the BOTTOM layer.
  * It MUST NOT be included by game/, presentation/, or connectivity/.
+ *
+ * Phase 22: Added hal_flash_read_file() for loading arbitrary files
+ * (e.g., .mod music files) from LittleFS into caller-provided buffers.
  */
 
 #include "hal_flash.h"
@@ -148,6 +151,42 @@ hal_flash_err_t hal_flash_write_save(const uint8_t *buf, size_t size)
         return HAL_FLASH_ERR_WRITE;
     }
 
+    return HAL_FLASH_OK;
+}
+
+hal_flash_err_t hal_flash_read_file(const char *path, uint8_t *buf,
+                                     size_t buf_size, size_t *bytes_read)
+{
+    if (bytes_read) { *bytes_read = 0u; }
+
+    if (path == NULL || buf == NULL) {
+        return HAL_FLASH_ERR_NULL;
+    }
+    if (buf_size == 0u) {
+        return HAL_FLASH_ERR_SIZE;
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        if (errno == ENOENT) {
+            return HAL_FLASH_ERR_NOT_FOUND;
+        }
+        ESP_LOGE(TAG, "hal_flash_read_file: fopen(%s) failed: errno=%d",
+                 path, errno);
+        return HAL_FLASH_ERR_READ;
+    }
+
+    size_t n = fread(buf, 1u, buf_size, f);
+    fclose(f);
+
+    if (n == 0u) {
+        ESP_LOGE(TAG, "hal_flash_read_file: fread returned 0 for %s", path);
+        return HAL_FLASH_ERR_READ;
+    }
+
+    if (bytes_read) {
+        *bytes_read = n;
+    }
     return HAL_FLASH_OK;
 }
 
