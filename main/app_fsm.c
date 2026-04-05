@@ -22,13 +22,13 @@
  *   outside FQ_STATE_BATTLE.
  *
  * Phase-19 HOME state:
- *   BTN_B (☀ SUN, GPIO18) cycles home_menu_index mod FQ_HOME_MENU_COUNT.
- *   BTN_A (⏻ PWR, GPIO0) selects the highlighted menu item and transitions.
+ *   BTN_B (sun, GPIO18) cycles home_menu_index mod FQ_HOME_MENU_COUNT.
+ *   BTN_A (pwr, GPIO0) selects the highlighted menu item and transitions.
  *   home_menu_index is reset to 0 whenever any state transitions BACK to HOME.
  *
  * Phase-19 ONBOARDING state:
- *   BTN_A (⏻ PWR) cycles onboarding_class_index mod FQ_CLASS_COUNT.
- *   BTN_B (☀ SUN) confirms: creates character, saves (if save_failed==0),
+ *   BTN_A (pwr) cycles onboarding_class_index mod FQ_CLASS_COUNT.
+ *   BTN_B (sun) confirms: creates character, saves (if save_failed==0),
  *   transitions to HOME on success. If onboarding_save_failed==1, stays.
  *
  * Phase-19 INVENTORY state:
@@ -48,7 +48,7 @@
  *   XP/wins/losses, stores result in ctx->xp_earned, transitions to BATTLE_RESULT.
  *
  *   BLE_PACKET_RX in BATTLE: calls fq_sync_verify_round() against the received
- *   peer hash. On mismatch → disconnect and return HOME (desync protection).
+ *   peer hash. On mismatch -> disconnect and return HOME (desync protection).
  *
  * Phase-20 BATTLE_SETUP state:
  *   BLE_CONNECTED: calls fq_protocol_derive_seed() from my_nonce and the
@@ -60,7 +60,9 @@
  *          find the lowest unset bit in [0, 15] and attempts to unlock it.
  *          No-op if no tokens or all nodes are filled / prerequisites unmet.
  *   BTN_B: execute fq_rebirth() (requires is_dead==1), then return HOME.
- *          Uses a local PRNG (not combat.rng) — PRNG isolation preserved.
+ *          Uses a local PRNG (not combat.rng) -- PRNG isolation preserved.
+ *
+ * Phase-21: sfx_enabled initialised to 1 in fq_app_init() (SFX on by default).
  */
 
 #include "app_fsm.h"
@@ -75,7 +77,7 @@
 #include <string.h>
 
 /* ---------------------------------------------------------------------------
- * go_home — transition to HOME and reset the menu index.
+ * go_home -- transition to HOME and reset the menu index.
  * ---------------------------------------------------------------------------*/
 static void go_home(fq_app_ctx_t *ctx)
 {
@@ -113,7 +115,10 @@ game_err_t fq_app_init(fq_app_ctx_t   *ctx,
 
     ctx->home_menu_index = 0u;
 
-    /* Automatic BOOT → TITLE transition. */
+    /* Phase-21: SFX enabled by default. */
+    ctx->sfx_enabled = 1u;
+
+    /* Automatic BOOT -> TITLE transition. */
     ctx->state = FQ_STATE_TITLE;
 
     return GAME_OK;
@@ -213,7 +218,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                     uint32_t ticks_since = ctx->tick_count - ctx->inv_b_last_tick;
                     if (ctx->inv_b_press_count >= 1u &&
                         ticks_since <= INV_DOUBLE_TAP_TICKS) {
-                        /* Double-tap confirmed — exit to HOME. */
+                        /* Double-tap confirmed -- exit to HOME. */
                         ctx->inv_b_press_count = 0u;
                         go_home(ctx);
                         break;
@@ -305,7 +310,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                         /* B in WAITING: start the session. */
                         fq_training_session_start(&ctx->training);
                     } else if (ctx->training.state == (uint8_t)FQ_TS_ACTIVE) {
-                        /* B in ACTIVE: partial exit — award XP for score earned so far,
+                        /* B in ACTIVE: partial exit -- award XP for score earned so far,
                          * then return to HOME. Spec: "Button B exits training at any
                          * time (partial score, partial XP award)." */
                         if (ctx->player != NULL) {
@@ -338,7 +343,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         /* -------------------------------------------------------------------
          * FQ_STATE_BATTLE_SETUP
          *
-         * BTN_B: Cancel — return to HOME immediately.
+         * BTN_B: Cancel -- return to HOME immediately.
          * BLE_CONNECTED: Derive shared seed from nonces, then begin battle.
          * BLE_DISCONNECTED: Return to HOME (no peer).
          * TIMER_TICK: Auto-timeout after BATTLE_SETUP_TIMEOUT_TICKS ticks.
@@ -373,7 +378,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                     break;
 
                 case FQ_EVT_BLE_DISCONNECTED:
-                    /* Peer disappeared before connecting — go HOME. */
+                    /* Peer disappeared before connecting -- go HOME. */
                     go_home(ctx);
                     break;
 
@@ -415,7 +420,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                     if (ctx->combat_active == 1u) {
                         /* DC-1: Generate combat hash at this round boundary and
                          * store it for the BLE hash exchange protocol.
-                         * Round is read from ctx->combat.current_round — the field
+                         * Round is read from ctx->combat.current_round -- the field
                          * incremented by fq_combat_step() before the event fires. */
                         ctx->last_combat_hash =
                             fq_generate_combat_hash(&ctx->combat,
@@ -442,7 +447,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                 case FQ_EVT_BLE_PACKET_RX: {
                     /* DC-3: Verify the peer's round hash against our local hash.
                      * evt->data carries the peer's combat hash for the current round.
-                     * On mismatch, abort the battle immediately — disconnect and
+                     * On mismatch, abort the battle immediately -- disconnect and
                      * return HOME to prevent desync from producing invalid results.
                      *
                      * Note: in host tests the BLE mock does not exchange real packets,
@@ -458,7 +463,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                                                   ctx->last_combat_hash,
                                                   peer_hash);
                         if (sync_err != FQ_SYNC_OK) {
-                            /* Desync detected — abort battle, return HOME. */
+                            /* Desync detected -- abort battle, return HOME. */
                             ctx->combat_active = 0u;
                             go_home(ctx);
                         }
@@ -480,9 +485,9 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
         /* -------------------------------------------------------------------
          * FQ_STATE_BATTLE_RESULT
          *
-         * BTN_A on win (is_dead==0)  → HOME.
-         * BTN_A on loss (is_dead==1) → REBIRTH.
-         * BLE_DISCONNECTED → HOME (peer disconnected on result screen).
+         * BTN_A on win (is_dead==0)  -> HOME.
+         * BTN_A on loss (is_dead==1) -> REBIRTH.
+         * BLE_DISCONNECTED -> HOME (peer disconnected on result screen).
          * ------------------------------------------------------------------- */
         case FQ_STATE_BATTLE_RESULT:
             switch (evt->id) {
@@ -511,7 +516,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
          *        - If onboarding_save_failed == 1: stay in ONBOARDING.
          *        - Else: create character via fq_character_create(), set state
          *          HOME. (The actual save to flash is handled in app_main.c
-         *          via a post-dispatch hook — the FSM only tracks intent.)
+         *          via a post-dispatch hook -- the FSM only tracks intent.)
          * ------------------------------------------------------------------- */
         case FQ_STATE_ONBOARDING:
             switch (evt->id) {
@@ -525,7 +530,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                 case FQ_EVT_BTN_B_PRESS: {
                     /* If save previously failed, re-enter onboarding. */
                     if (ctx->onboarding_save_failed != 0u) {
-                        /* Stay in ONBOARDING — save failure re-entry. */
+                        /* Stay in ONBOARDING -- save failure re-entry. */
                         break;
                     }
 
@@ -562,7 +567,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
          *        or tier prerequisites are not met for the candidate node.
          * BTN_B: Execute fq_rebirth() (requires player->is_dead==1) then
          *        return HOME. app_main.c wires the auto-save.
-         *        PRNG isolation: a local RNG (seeded from tick_count) is used —
+         *        PRNG isolation: a local RNG (seeded from tick_count) is used --
          *        ctx->combat.rng is never accessed here.
          * ------------------------------------------------------------------- */
         case FQ_STATE_REBIRTH:
@@ -574,19 +579,19 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
                         uint8_t node;
                         for (node = 0u; node < 16u; node++) {
                             if ((ctx->player->legacy_tree & (1u << node)) == 0u) {
-                                /* Attempt unlock — respects tier prerequisites. */
+                                /* Attempt unlock -- respects tier prerequisites. */
                                 fq_legacy_unlock_node(ctx->player, node);
                                 break;
                             }
                         }
                     }
-                    /* Stay in REBIRTH state — player may spend more tokens. */
+                    /* Stay in REBIRTH state -- player may spend more tokens. */
                     break;
 
                 case FQ_EVT_BTN_B_PRESS: {
                     /* Execute rebirth if player is dead, then go HOME.
                      * A local PRNG seeded from tick_count is used for the
-                     * WILDCARD passive reroll — combat.rng is not accessed. */
+                     * WILDCARD passive reroll -- combat.rng is not accessed. */
                     if (ctx->player != NULL && ctx->player->is_dead == 1u) {
                         fq_prng_t rebirth_rng;
                         fq_prng_init(&rebirth_rng,
@@ -604,7 +609,7 @@ game_err_t fq_app_dispatch(fq_app_ctx_t     *ctx,
             break;
 
         /* -------------------------------------------------------------------
-         * FQ_STATE_SETTINGS — no transitions yet.
+         * FQ_STATE_SETTINGS -- no transitions yet.
          * ------------------------------------------------------------------- */
         case FQ_STATE_SETTINGS:
         case FQ_STATE_COUNT:

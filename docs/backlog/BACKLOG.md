@@ -110,7 +110,12 @@
 * **Item 2:** Battle result screen (winner, XP earned)
 * **Item 3:** Rebirth screen (stat penalty, legacy token spending)
 
-## Phase 21: Audio Engine
-* **Item 1:** LEDC PWM piezo driver (real hardware, non-blocking)
-* **Item 2:** Sound effect table (SFX IDs → frequency/duration pairs)
+## Phase 21: I2S Audio Engine + sfxr-c Sound Effects
+* **Item 1:** I2S Audio HAL — ES8311 codec driver (replaces LEDC PWM)
+* **Item 2:** sfxr-c integration — procedural retro sound effects
 * **Item 3:** Wire sound effects into gameplay (button press, combat hit, level up)
+
+## Phase 22: MOD Music Playback + Audio Mixing
+* **Item 1:** micromod integration — .mod tracker playback from LittleFS
+* **Item 2:** Audio mixing — music + SFX simultaneous output with ducking
+* **Item 3:** Music selection + gameplay integration (state-based track mapping)

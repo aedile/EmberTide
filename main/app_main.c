@@ -18,7 +18,7 @@
  * Phase 19.5: Idle screensaver, walk animation, partial e-paper refresh.
  *
  * Phase 19 Interactive:
- *   First-boot routing: if no valid save exists, state → ONBOARDING.
+ *   First-boot routing: if no valid save exists, state -> ONBOARDING.
  *   Remove hardcoded "Ember" character creation.
  *   ONBOARDING added to idle suppression list.
  *   Training session: TIMER_TICK posted to event bus every loop (acts as
@@ -46,6 +46,27 @@
  *     - HAL internally forces a full refresh every EPD_FULL_REFRESH_INTERVAL
  *       partial flushes to clear accumulated ghosting.
  *     - State-change redraws continue to use hal_epaper_flush() (full).
+ *
+ * Phase 21: I2S audio init and SFX wiring.
+ *   - hal_audio_init() called during HAL init.
+ *   - do_sfx(id) helper: generates PCM via fq_sfx_play(), pushes to HAL
+ *     ring buffer via hal_audio_write_samples(). No-op if sfx_enabled==0.
+ *   - button_callback: ONLY posts events to the event bus. do_sfx() is NOT
+ *     called from button_callback — that would create a data race because
+ *     button_callback runs in gpio_task (a separate FreeRTOS task) while
+ *     do_sfx() uses a static buffer and an unprotected ring buffer.
+ *   - Event loop: SFX_BTN_PRESS on FQ_EVT_BTN_A_PRESS, SFX_BTN_BACK on
+ *     FQ_EVT_BTN_B_PRESS, SFX_MENU_NAVIGATE on home menu cycle,
+ *     SFX_ITEM_EQUIP on equip toggle, SFX_COMBAT_HIT/MISS/CRIT on combat
+ *     events, SFX_LEVEL_UP on level gain, SFX_REBIRTH on rebirth,
+ *     SFX_DEATH on death.
+ *
+ *   SFX quiet-mode: app.sfx_enabled flag (set by fq_app_init to 1).
+ *   do_sfx() checks the flag — zero SFX overhead when disabled.
+ *
+ *   Concurrency: do_sfx() is ONLY called from the main loop task. The static
+ *   PCM buffer and HAL ring buffer are accessed exclusively from the main
+ *   loop — no mutex required.
  */
 
 #include <stdint.h>
@@ -55,6 +76,7 @@
 #include "types.h"
 #include "character.h"
 #include "save_format.h"
+#include "sfx.h"
 
 /* Application layer */
 #include "event_bus.h"
@@ -80,6 +102,7 @@
 #include "hal_epaper.h"
 #include "hal_flash.h"
 #include "hal_gpio.h"
+#include "hal_audio.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -87,6 +110,18 @@
 #include "esp_log.h"
 
 static const char *TAG = "app_main";
+
+/* -------------------------------------------------------------------------
+ * Compile-time sample-rate consistency guard.
+ *
+ * sfxr.h defines SFXR_SAMPLE_RATE_HZ; hal_audio.h defines AUDIO_SAMPLE_RATE_HZ.
+ * These must be identical — sfxr generates PCM that is fed directly into the
+ * HAL ring buffer. A mismatch would cause pitch distortion at runtime.
+ * -------------------------------------------------------------------------
+ */
+_Static_assert(SFXR_SAMPLE_RATE_HZ == AUDIO_SAMPLE_RATE_HZ,
+               "SFXR_SAMPLE_RATE_HZ must equal AUDIO_SAMPLE_RATE_HZ — "
+               "sfxr PCM is fed directly into the HAL audio ring buffer");
 
 /* -------------------------------------------------------------------------
  * Idle / animation timing constants.
@@ -99,14 +134,14 @@ static const char *TAG = "app_main";
 /**
  * Animation frame interval: 0.8 seconds per walk frame.
  *
- * 0.8s = 800,000 µs. Validated interactively on hardware — faster looked
+ * 0.8s = 800,000 us. Validated interactively on hardware -- faster looked
  * frantic on e-paper partial refresh (~300ms latency); slower felt dead.
  */
 #define ANIM_FRAME_US      (800000ULL)
 
-/* BLOCKER 2 fix: Compile-time guard — ANIM_FRAME_US must be non-zero. */
+/* BLOCKER 2 fix: Compile-time guard -- ANIM_FRAME_US must be non-zero. */
 _Static_assert(ANIM_FRAME_US > 0ULL,
-               "ANIM_FRAME_US must be > 0 — zero causes runaway animation refreshes");
+               "ANIM_FRAME_US must be > 0 -- zero causes runaway animation refreshes");
 
 /* -------------------------------------------------------------------------
  * File-scope application context pointer.
@@ -115,7 +150,7 @@ _Static_assert(ANIM_FRAME_US > 0ULL,
 static fq_app_ctx_t *s_app = NULL;
 
 /* -------------------------------------------------------------------------
- * Idle / animation state — file-scope, reset at startup.
+ * Idle / animation state -- file-scope, reset at startup.
  * -------------------------------------------------------------------------
  */
 static int64_t  s_last_button_us;
@@ -124,7 +159,7 @@ static uint8_t  s_anim_frame;
 static int64_t  s_last_anim_us;
 
 /* -------------------------------------------------------------------------
- * is_idle_forbidden — Returns 1 if idle must NOT activate in this state.
+ * is_idle_forbidden -- Returns 1 if idle must NOT activate in this state.
  *
  * Phase-19 Interactive: ONBOARDING added (first-boot must not auto-dismiss).
  * -------------------------------------------------------------------------
@@ -141,7 +176,35 @@ static uint8_t is_idle_forbidden(fq_app_state_t state)
 }
 
 /* -------------------------------------------------------------------------
- * do_auto_save — Serialize and write save to flash.
+ * do_sfx -- Generate and play a sound effect.
+ *
+ * Phase-21 helper. Generates PCM samples via fq_sfx_play() into a local
+ * static buffer, then pushes them to the HAL ring buffer via
+ * hal_audio_write_samples(). No-op when sfx_enabled == 0 (quiet mode).
+ *
+ * CONCURRENCY: do_sfx() is ONLY called from the main loop task. The static
+ * PCM buffer and the HAL ring buffer have no mutex because they are never
+ * accessed from any other task. button_callback() runs in gpio_task and
+ * does NOT call do_sfx() — it only posts events to the event bus. The main
+ * loop drains the bus and calls do_sfx() from the single main-loop task
+ * context, preserving this invariant.
+ * -------------------------------------------------------------------------
+ */
+static void do_sfx(fq_sfx_id_t id)
+{
+    if (!s_app || !s_app->sfx_enabled) {
+        return;
+    }
+    static int16_t s_sfx_buf[AUDIO_RING_BUF_SAMPLES];
+    size_t samples_out = 0u;
+    if (fq_sfx_play(id, s_sfx_buf, AUDIO_RING_BUF_SAMPLES, &samples_out)
+        == GAME_OK && samples_out > 0u) {
+        hal_audio_write_samples(s_sfx_buf, samples_out);
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * do_auto_save -- Serialize and write save to flash.
  *
  * Called on inventory exit and after onboarding character creation.
  * Sets app->onboarding_save_failed based on result.
@@ -169,7 +232,15 @@ static void do_auto_save(fq_app_ctx_t   *app,
 }
 
 /* -------------------------------------------------------------------------
- * button_callback — Called from gpio_task context on each debounced press.
+ * button_callback -- Called from gpio_task context on each debounced press.
+ *
+ * ONLY posts events to the event bus. do_sfx() is deliberately NOT called
+ * here because button_callback runs in gpio_task (a separate FreeRTOS task).
+ * Calling do_sfx() from gpio_task would create a data race on the static
+ * PCM buffer in do_sfx() and on the unprotected HAL ring buffer.
+ *
+ * Button SFX (SFX_BTN_PRESS / SFX_BTN_BACK) are triggered in the main loop
+ * event drain when FQ_EVT_BTN_A_PRESS / FQ_EVT_BTN_B_PRESS are dequeued.
  * -------------------------------------------------------------------------
  */
 static void button_callback(hal_btn_id_t btn_id)
@@ -186,7 +257,7 @@ static void button_callback(hal_btn_id_t btn_id)
 }
 
 /* -------------------------------------------------------------------------
- * render_title_screen — Draw the EmberTide title screen.
+ * render_title_screen -- Draw the EmberTide title screen.
  * -------------------------------------------------------------------------
  */
 static void render_title_screen(fq_fb_t *fb)
@@ -227,7 +298,7 @@ static void render_title_screen(fq_fb_t *fb)
 }
 
 /* -------------------------------------------------------------------------
- * render_current_state — Render the current FSM state to the framebuffer
+ * render_current_state -- Render the current FSM state to the framebuffer
  * and flush it to the e-paper display (full refresh).
  * -------------------------------------------------------------------------
  */
@@ -306,7 +377,7 @@ static void render_current_state(fq_app_ctx_t   *app,
             break;
         }
         default:
-            /* All other states: clear screen — no dedicated renderer yet. */
+            /* All other states: clear screen -- no dedicated renderer yet. */
             break;
     }
 
@@ -326,7 +397,7 @@ static void render_current_state(fq_app_ctx_t   *app,
 }
 
 /* -------------------------------------------------------------------------
- * render_home_partial — Re-render the home screen with partial refresh.
+ * render_home_partial -- Re-render the home screen with partial refresh.
  * -------------------------------------------------------------------------
  */
 static void render_home_partial(fq_app_ctx_t   *app,
@@ -345,13 +416,13 @@ static void render_home_partial(fq_app_ctx_t   *app,
 
     err = hal_epaper_flush_partial(fb->pixels, FQ_FB_SIZE);
     if (err != HAL_EPAPER_OK) {
-        ESP_LOGE(TAG, "hal_epaper_flush_partial failed: %d — falling back to full", (int)err);
+        ESP_LOGE(TAG, "hal_epaper_flush_partial failed: %d -- falling back to full", (int)err);
         hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
     }
 }
 
 /* -------------------------------------------------------------------------
- * render_idle — Render the idle screensaver with partial refresh.
+ * render_idle -- Render the idle screensaver with partial refresh.
  * -------------------------------------------------------------------------
  */
 static void render_idle(fq_app_ctx_t   *app,
@@ -368,13 +439,13 @@ static void render_idle(fq_app_ctx_t   *app,
 
     err = hal_epaper_flush_partial(fb->pixels, FQ_FB_SIZE);
     if (err != HAL_EPAPER_OK) {
-        ESP_LOGE(TAG, "idle flush_partial failed: %d — falling back to full", (int)err);
+        ESP_LOGE(TAG, "idle flush_partial failed: %d -- falling back to full", (int)err);
         hal_epaper_flush(fb->pixels, FQ_FB_SIZE);
     }
 }
 
 /* -------------------------------------------------------------------------
- * app_main — ESP-IDF application entry point.
+ * app_main -- ESP-IDF application entry point.
  * -------------------------------------------------------------------------
  */
 void app_main(void)
@@ -394,7 +465,7 @@ void app_main(void)
     uint8_t  save_valid = 0u;
     hal_flash_err_t flash_err = hal_flash_init();
     if (flash_err != HAL_FLASH_OK) {
-        ESP_LOGE(TAG, "hal_flash_init failed: %d — first-boot fallback", (int)flash_err);
+        ESP_LOGE(TAG, "hal_flash_init failed: %d -- first-boot fallback", (int)flash_err);
     } else {
         uint8_t save_buf[FQ_SAVE_MAX_SIZE];
         size_t  bytes_read = 0u;
@@ -406,7 +477,7 @@ void app_main(void)
                 ESP_LOGI(TAG, "Save loaded OK (%u bytes)", (unsigned)bytes_read);
                 save_valid = 1u;
             } else {
-                ESP_LOGW(TAG, "Save corrupt (%d) — first-boot fallback", (int)save_err);
+                ESP_LOGW(TAG, "Save corrupt (%d) -- first-boot fallback", (int)save_err);
                 memset(&player,    0, sizeof(player));
                 memset(&inventory, 0, sizeof(inventory));
             }
@@ -429,7 +500,7 @@ void app_main(void)
         app.state = FQ_STATE_ONBOARDING;
         app.onboarding_class_index = 0u;
         app.onboarding_save_failed = 0u;
-        ESP_LOGI(TAG, "First boot — entering ONBOARDING");
+        ESP_LOGI(TAG, "First boot -- entering ONBOARDING");
     }
 
     /* -----------------------------------------------------------------------
@@ -443,6 +514,13 @@ void app_main(void)
     hal_gpio_err_t gpio_err = hal_gpio_init(button_callback);
     if (gpio_err != HAL_GPIO_OK) {
         ESP_LOGE(TAG, "hal_gpio_init failed: %d", (int)gpio_err);
+    }
+
+    /* Phase-21: Audio init. */
+    hal_audio_err_t audio_err = hal_audio_init();
+    if (audio_err != HAL_AUDIO_OK) {
+        ESP_LOGW(TAG, "hal_audio_init failed: %d -- SFX disabled", (int)audio_err);
+        app.sfx_enabled = 0u;
     }
 
     /* -----------------------------------------------------------------------
@@ -459,7 +537,7 @@ void app_main(void)
     render_current_state(&app, &framebuffer, &player, &inventory);
 
     /* -----------------------------------------------------------------------
-     * Main event loop — 20 Hz poll (50 ms period).
+     * Main event loop -- 20 Hz poll (50 ms period).
      * ----------------------------------------------------------------------- */
     fq_event_t      evt;
     fq_app_state_t  last_state        = app.state;
@@ -469,18 +547,22 @@ void app_main(void)
     /* Track inventory state to detect exit (for auto-save). */
     uint8_t         was_inventory     = (app.state == FQ_STATE_INVENTORY) ? 1u : 0u;
 
+    /* Phase-21: track player level to detect level-up. */
+    uint8_t         last_player_level = player.level;
+
     while (1) {
         int64_t now_us = esp_timer_get_time();
 
-        /* ── Post TIMER_TICK to event bus (drives training target movement). */
+        /* Post TIMER_TICK to event bus (drives training target movement). */
         {
             fq_event_t tick_evt = { FQ_EVT_TIMER_TICK, 0u };
             fq_event_bus_post(&app.bus, FQ_EVT_TIMER_TICK, 0u);
             (void)tick_evt;
         }
 
-        /* ── Drain the event bus ─────────────────────────────────────────── */
+        /* Drain the event bus. */
         while (fq_event_bus_pop(&app.bus, &evt)) {
+            fq_app_state_t pre_state = app.state;
             fq_app_dispatch(&app, &evt);
 
             /* Wake from idle on any button press. */
@@ -493,30 +575,78 @@ void app_main(void)
                 last_menu_index  = app.home_menu_index;
             }
 
+            /* Phase-21: Button SFX — triggered here in the main loop task,
+             * NOT in button_callback (which runs in gpio_task). This is the
+             * only safe place to call do_sfx() without a mutex. */
+            if (evt.id == FQ_EVT_BTN_A_PRESS) {
+                do_sfx(SFX_BTN_PRESS);
+            } else if (evt.id == FQ_EVT_BTN_B_PRESS) {
+                do_sfx(SFX_BTN_BACK);
+            }
+
+            /* Phase-21: Menu navigation SFX on home_menu_index change. */
+            if (pre_state == FQ_STATE_HOME &&
+                app.state  == FQ_STATE_HOME &&
+                evt.id     == FQ_EVT_BTN_B_PRESS) {
+                do_sfx(SFX_MENU_NAVIGATE);
+            }
+
+            /* Phase-21: Item equip SFX on inventory BTN_A press. */
+            if (app.state == FQ_STATE_INVENTORY &&
+                evt.id    == FQ_EVT_BTN_A_PRESS) {
+                do_sfx(SFX_ITEM_EQUIP);
+            }
+
+            /* Phase-21: Combat SFX on COMBAT_ROUND_COMPLETE transition. */
+            if (evt.id == FQ_EVT_COMBAT_ROUND_COMPLETE &&
+                pre_state == FQ_STATE_BATTLE) {
+                /* Use battle_won to pick SFX -- simplified (no per-round detail). */
+                do_sfx(app.battle_won ? SFX_COMBAT_CRIT : SFX_COMBAT_HIT);
+            }
+
+            /* Phase-21: Level-up SFX (detect player level increase). */
+            if (player.level > last_player_level) {
+                do_sfx(SFX_LEVEL_UP);
+                last_player_level = player.level;
+            }
+
+            /* Phase-21: Rebirth SFX on REBIRTH -> HOME transition. */
+            if (pre_state == FQ_STATE_REBIRTH &&
+                app.state == FQ_STATE_HOME) {
+                do_sfx(SFX_REBIRTH);
+            }
+
+            /* Phase-21: Death SFX on BATTLE -> BATTLE_RESULT when player is dead. */
+            if (pre_state == FQ_STATE_BATTLE &&
+                app.state == FQ_STATE_BATTLE_RESULT &&
+                player.is_dead == 1u) {
+                do_sfx(SFX_DEATH);
+            }
+
             if (app.state != last_state) {
-                /* ── Auto-save on inventory exit. ─────────────────────── */
+                /* Auto-save on inventory exit. */
                 if (was_inventory && app.state != FQ_STATE_INVENTORY) {
                     do_auto_save(&app, &player, &inventory);
                 }
 
-                /* ── Auto-save on onboarding confirm (BTN_B → HOME). ─── */
+                /* Auto-save on onboarding confirm (BTN_B -> HOME). */
                 if (last_state == FQ_STATE_ONBOARDING &&
                     app.state  == FQ_STATE_HOME) {
                     do_auto_save(&app, &player, &inventory);
                     if (app.onboarding_save_failed) {
-                        /* Save failed — re-enter onboarding. */
+                        /* Save failed -- re-enter onboarding. */
                         app.state = FQ_STATE_ONBOARDING;
-                        ESP_LOGW(TAG, "Onboarding save failed — re-entering");
+                        ESP_LOGW(TAG, "Onboarding save failed -- re-entering");
                     }
                 }
 
-                /* ── AC-1: Auto-save on BATTLE_RESULT → HOME. ────────── */
+                /* AC-1: Auto-save on BATTLE_RESULT -> HOME. */
                 if (last_state == FQ_STATE_BATTLE_RESULT &&
                     app.state  == FQ_STATE_HOME) {
                     do_auto_save(&app, &player, &inventory);
                 }
 
-                /* ── AC-1: Auto-save on REBIRTH → HOME. ──────────────── */
+                /* AC-1: Auto-save on REBIRTH -> HOME. */
                 if (last_state == FQ_STATE_REBIRTH &&
                     app.state  == FQ_STATE_HOME) {
                     do_auto_save(&app, &player, &inventory);
@@ -542,7 +672,7 @@ void app_main(void)
             was_inventory = (app.state == FQ_STATE_INVENTORY) ? 1u : 0u;
         }
 
-        /* ── Idle timeout check ──────────────────────────────────────────── */
+        /* Idle timeout check. */
         if (!s_idle_active                                    &&
             !is_idle_forbidden(app.state)                    &&
             (now_us - s_last_button_us) > (int64_t)IDLE_TIMEOUT_US)
@@ -552,7 +682,7 @@ void app_main(void)
             render_idle(&app, &framebuffer, &player);
         }
 
-        /* ── Home screen animation tick ──────────────────────────────────── */
+        /* Home screen animation tick. */
         if (!s_idle_active                                    &&
             app.state == FQ_STATE_HOME                        &&
             (now_us - s_last_anim_us) > (int64_t)ANIM_FRAME_US)
@@ -563,7 +693,7 @@ void app_main(void)
             render_home_partial(&app, &framebuffer, &player);
         }
 
-        /* ── Full redraw if flagged (skip if idle) ───────────────────────── */
+        /* Full redraw if flagged (skip if idle). */
         if (needs_redraw && !s_idle_active) {
             render_current_state(&app, &framebuffer, &player, &inventory);
             needs_redraw = 0u;

@@ -19,6 +19,17 @@
  * implicit declaration warning to a hard error, guaranteeing the file cannot
  * compile successfully. This proves that float-using code is rejected at the
  * toolchain level before it could ever reach a game component.
+ *
+ * EXCEPTION NOTE (Phase 21):
+ * components/game/lib/sfxr.c is granted a documented float exemption.
+ * sfxr.c performs audio signal synthesis (envelope, oscillator phase, pitch
+ * slide) which is inherently floating-point in nature. It is NOT game logic
+ * and its output (PCM int16_t samples) does NOT feed back into combat or PRNG
+ * state. The ESP32-S3 has a hardware single-precision FPU so there is no
+ * performance penalty. This exemption is recorded in:
+ *   components/game/CMakeLists.txt (ADR comment near sfxr.c registration)
+ *   docs/fiestaquest-architecture.md v2.20 Phase 21 amendment
+ * The float ban tested here applies to ALL game/ code EXCEPT sfxr.c.
  */
 
 /* Intentionally calling undeclared function to force -Wimplicit-function-declaration */
