@@ -43,12 +43,15 @@ board_power_bsp_t board_div(EPD_PWR_PIN, Audio_PWR_PIN, VBAT_PWR_PIN);
 
 ## Buttons
 
-| Button | GPIO Constant | GPIO # | `user_config.h` Macro | HAL ID | Icon on Case | Physical Position |
-|--------|--------------|--------|-----------------------|--------|-------------|-------------------|
-| BOOT   | GPIO_NUM_0   | 0      | `BOOT_BUTTON_PIN`     | `HAL_BTN_A` | ⏻ (power) | Closest to USB-C |
-| PWR    | GPIO_NUM_18  | 18     | `PWR_BUTTON_PIN`      | `HAL_BTN_B` | ☀ (sun)   | Far from USB-C   |
+| Button | GPIO Constant | GPIO # | `user_config.h` Macro | HAL ID | Game Role | Icon on Case | Physical Position |
+|--------|--------------|--------|-----------------------|--------|-----------|-------------|-------------------|
+| BOOT   | GPIO_NUM_0   | 0      | `BOOT_BUTTON_PIN`     | `HAL_BTN_A` | Move/Cycle | ⏻ (power) | Closest to USB-C |
+| PWR    | GPIO_NUM_18  | 18     | `PWR_BUTTON_PIN`      | `HAL_BTN_B` | OK/Select  | ☀ (sun)   | Far from USB-C   |
 
-> **Case labelling note:** The silk-screen/icon on the physical case uses ⏻ (power symbol) for the GPIO0/BOOT button and ☀ (sun) for the GPIO18/PWR button. Despite the macro name `PWR_BUTTON_PIN` referring to GPIO18, the **⏻ power icon button is on GPIO0** — the one closest to the USB-C port. In all game documentation and UI text, "Press [PWR]" refers to the ⏻ button (GPIO0, `HAL_BTN_A`).
+> **Button mapping (verified in hardware lab session 2026-04-05):**
+> - The ⏻ (power icon) button closest to USB-C is GPIO0 / `HAL_BTN_A`. In-game this is the **Move/Cycle** button. UI text: `[PWR]`.
+> - The ☀ (sun icon) button far from USB-C is GPIO18 / `HAL_BTN_B`. In-game this is the **OK/Select/Confirm** button. UI text: `[SUN]`.
+> - The macro name `PWR_BUTTON_PIN` (GPIO18) is misleading — it refers to the ☀ sun button, not the ⏻ power icon button. This was confirmed by pressing each button and observing FSM events on serial monitor.
 
 > GPIO0 doubles as the low-power external wake-up pin (`ext_wakeup_pin_1`).
 
