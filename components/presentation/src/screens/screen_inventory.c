@@ -197,5 +197,5 @@ void fq_render_inventory(fq_fb_t *fb, const fq_vm_inventory_t *vm)
 
     /* ── Footer bar: 2×[SUN]=back hint ─────────────────────────────────── */
     fq_draw_header_bar(fb, font, INV_FOOTER_Y, INV_FOOTER_H,
-                       "[SUN]Cyc [PWR]Eq 2x[SUN]Back");
+                       "[PWR]Cyc [SUN]Eq 2x[PWR]Back");
 }

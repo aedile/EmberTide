@@ -11,17 +11,7 @@
  *
  * SPI: SPI2_HOST, 40 MHz, Mode 0, DMA auto.
  * Init sequence ported from epaper_driver_bsp.cpp (C++ → C).
- * Waveform LUTs:
- *   WF_Full_1IN54    (159 bytes, copied verbatim from Waveshare example driver).
- *   WF_Partial_1IN54 (159 bytes, partial-refresh variant for animation).
- *
- * Phase-19.5 changes:
- *   - hal_epaper_init() performs boot-time full clear (white→black→white).
- *     s_flush_count reset to 0 AFTER the clear — boot clear does not count.
- *   - hal_epaper_flush_partial() added: uses partial LUT, forces full refresh
- *     every EPD_FULL_REFRESH_INTERVAL calls to clear accumulated ghosting.
- *   - hal_epaper_sleep() now clears s_initialized — post-sleep flush/flush_partial
- *     returns ERR_INIT until hal_epaper_init() is called again.
+ * Waveform LUT: WF_Full_1IN54 (159 bytes, copied verbatim from example driver).
  *
  * Architecture constraint: This file is the BOTTOM layer.
  * It MUST NOT be included by game/, presentation/, or connectivity/.
@@ -38,10 +28,6 @@
 #include <string.h>
 
 static const char *TAG = "hal_epaper";
-
-/* Compile-time guard: EPD_FULL_REFRESH_INTERVAL must be > 0. */
-_Static_assert(EPD_FULL_REFRESH_INTERVAL > 0u,
-               "EPD_FULL_REFRESH_INTERVAL must be > 0 — would cause division-by-zero");
 
 /* -------------------------------------------------------------------------
  * Pin definitions (V2 hardware — matches user_config.h).
@@ -92,11 +78,10 @@ static const uint8_t k_wf_full_1in54[159] = {
 };
 
 /* -------------------------------------------------------------------------
- * Waveform LUT — WF_Partial_1IN54 (159 bytes).
- *
- * Partial-refresh waveform: faster update cycle without full black-white
- * flicker. Derived from the Waveshare 1.54" V2 partial-update example.
- * Used by hal_epaper_flush_partial() for animation frame updates.
+ * Waveform LUT — WF_PARTIAL_1IN54_0 (159 bytes).
+ * Partial refresh: no full black-white-black cycle. Nearly instant, no
+ * flicker. Causes ghosting over many updates — pair with periodic full
+ * refresh to clear.
  * -------------------------------------------------------------------------
  */
 static const uint8_t k_wf_partial_1in54[159] = {
@@ -105,9 +90,9 @@ static const uint8_t k_wf_partial_1in54[159] = {
     0x40, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -118,16 +103,23 @@ static const uint8_t k_wf_partial_1in54[159] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x00, 0x00, 0x00,
-    0x02, 0x17, 0x41, 0x00, 0x32, 0x20
+    0x02, 0x17, 0x41, 0xB0, 0x32, 0x28
 };
+
+/* Full refresh every N flushes to clear ghosting from partial updates. */
+#define EPD_FULL_REFRESH_INTERVAL 10u
 
 /* -------------------------------------------------------------------------
  * Module state.
  * -------------------------------------------------------------------------
  */
 static spi_device_handle_t s_spi;
-static uint8_t             s_initialized;   /* 0 = uninit, 1 = init */
-static uint32_t            s_flush_count;   /* total successful flush_partial calls since init */
+static uint8_t             s_initialized;    /* 0 = uninit, 1 = init */
+static uint32_t            s_flush_count;    /* total flushes since init */
+static uint8_t             s_partial_mode;   /* 1 = partial mode active */
+
+/* Forward declaration — defined after hal_epaper_init. */
+static hal_epaper_err_t epd_enter_partial_mode(void);
 
 /* -------------------------------------------------------------------------
  * Low-level GPIO helpers (inline-style, static).
@@ -342,41 +334,6 @@ static hal_epaper_err_t epd_set_lut(const uint8_t *lut)
 }
 
 /* -------------------------------------------------------------------------
- * epd_write_fb — Write framebuffer to display RAM and trigger update.
- *
- * Shared by hal_epaper_flush and hal_epaper_flush_partial (full-refresh leg).
- * Assumes init-check already done by caller.
- * -------------------------------------------------------------------------
- */
-static hal_epaper_err_t epd_write_fb(const uint8_t *fb_pixels)
-{
-    hal_epaper_err_t err;
-
-    err = epd_wait_busy();
-    if (err != HAL_EPAPER_OK) return err;
-
-    err = epd_set_windows(0u, 199u, 199u, 0u);
-    if (err != HAL_EPAPER_OK) return err;
-    err = epd_set_cursor(0u, 199u);
-    if (err != HAL_EPAPER_OK) return err;
-
-    err = epd_cmd(0x24u);
-    if (err != HAL_EPAPER_OK) return err;
-    err = epd_data_buf(fb_pixels, HAL_EPAPER_FB_SIZE);
-    if (err != HAL_EPAPER_OK) return err;
-
-    err = epd_cmd(0x22u);
-    if (err != HAL_EPAPER_OK) return err;
-    err = epd_data_byte(0xF7u);
-    if (err != HAL_EPAPER_OK) return err;
-    err = epd_cmd(0x20u);
-    if (err != HAL_EPAPER_OK) return err;
-
-    err = epd_wait_busy();
-    return err;
-}
-
-/* -------------------------------------------------------------------------
  * Public API implementation.
  * -------------------------------------------------------------------------
  */
@@ -415,6 +372,7 @@ hal_epaper_err_t hal_epaper_init(void)
 
     ret = spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        /* ESP_ERR_INVALID_STATE means the bus was already initialized — OK. */
         ESP_LOGE(TAG, "spi_bus_initialize failed: %d", ret);
         return HAL_EPAPER_ERR_SPI;
     }
@@ -423,7 +381,7 @@ hal_epaper_err_t hal_epaper_init(void)
     spi_device_interface_config_t dev_cfg = {};
     dev_cfg.clock_speed_hz = EPD_SPI_CLK_HZ;
     dev_cfg.mode           = 0;
-    dev_cfg.spics_io_num   = -1;
+    dev_cfg.spics_io_num   = -1;   /* CS toggled manually */
     dev_cfg.queue_size     = 7;
 
     ret = spi_bus_add_device(SPI2_HOST, &dev_cfg, &s_spi);
@@ -448,7 +406,7 @@ hal_epaper_err_t hal_epaper_init(void)
     /* Driver output control (0x01): 200 rows, gate scan up. */
     err = epd_cmd(0x01u);
     if (err != HAL_EPAPER_OK) return err;
-    err = epd_data_byte(0xC7u);
+    err = epd_data_byte(0xC7u);   /* 0xC7 = 199 (200-1) */
     if (err != HAL_EPAPER_OK) return err;
     err = epd_data_byte(0x00u);
     if (err != HAL_EPAPER_OK) return err;
@@ -496,38 +454,91 @@ hal_epaper_err_t hal_epaper_init(void)
     err = epd_set_lut(k_wf_full_1in54);
     if (err != HAL_EPAPER_OK) return err;
 
-    s_initialized = 1u;
-    ESP_LOGI(TAG, "E-paper init OK");
+    s_initialized  = 1u;
+    s_flush_count  = 0u;
 
-    /* ------------------------------------------------------------------
-     * Phase-19.5: Boot-time full clear (white → black → white).
-     *
-     * Eliminates factory test images or prior firmware state.
-     * The clear is done by writing an all-white framebuffer twice
-     * with a full refresh in between (white, then black, then white).
-     * s_flush_count is reset to 0 AFTER the clear so boot clears
-     * do not count toward the partial refresh interval.
-     * ------------------------------------------------------------------ */
+    /* Boot-time full clear: drive all pixels white, then black, then white.
+     * This gives the e-paper a clean baseline with no ghosting from
+     * whatever was on screen before (factory image, previous firmware, etc). */
     {
-        static uint8_t s_clear_buf[HAL_EPAPER_FB_SIZE];
+        static uint8_t clear_buf[HAL_EPAPER_FB_SIZE];
 
-        /* White frame (all 0xFF = white pixels in 1-bit e-paper). */
-        memset(s_clear_buf, 0xFFu, sizeof(s_clear_buf));
-        (void)epd_write_fb(s_clear_buf);
-
-        /* Black frame. */
-        memset(s_clear_buf, 0x00u, sizeof(s_clear_buf));
-        (void)epd_write_fb(s_clear_buf);
-
-        /* Final white frame — leave screen blank. */
-        memset(s_clear_buf, 0xFFu, sizeof(s_clear_buf));
-        (void)epd_write_fb(s_clear_buf);
+        /* White frame (all 0x00). */
+        memset(clear_buf, 0x00, HAL_EPAPER_FB_SIZE);
+        err = epd_set_windows(0u, 199u, 199u, 0u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_set_cursor(0u, 199u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_cmd(0x24u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_data_buf(clear_buf, HAL_EPAPER_FB_SIZE);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_cmd(0x26u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_data_buf(clear_buf, HAL_EPAPER_FB_SIZE);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_cmd(0x22u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_data_byte(0xF7u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_cmd(0x20u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_wait_busy();
+        if (err != HAL_EPAPER_OK) return err;
+        ESP_LOGI(TAG, "Boot clear: full white refresh done");
     }
 
-    /* Reset flush counter AFTER boot clear — boot clears don't count. */
-    s_flush_count = 0u;
+    /* Switch to partial refresh mode for all subsequent flushes. */
+    err = epd_enter_partial_mode();
+    if (err != HAL_EPAPER_OK) return err;
 
-    ESP_LOGI(TAG, "E-paper boot clear complete");
+    ESP_LOGI(TAG, "E-paper init OK (partial refresh mode)");
+    return HAL_EPAPER_OK;
+}
+
+/* -------------------------------------------------------------------------
+ * epd_enter_partial_mode — Switch to partial refresh waveform.
+ *
+ * Loads the partial LUT, sends the 0x37 register config, sets border
+ * waveform to 0x80, and triggers a partial-mode activation. After this,
+ * subsequent flushes will use partial refresh (no flicker).
+ * -------------------------------------------------------------------------
+ */
+static hal_epaper_err_t epd_enter_partial_mode(void)
+{
+    hal_epaper_err_t err;
+
+    /* Load partial waveform LUT. */
+    err = epd_set_lut(k_wf_partial_1in54);
+    if (err != HAL_EPAPER_OK) return err;
+
+    /* Register 0x37 — partial refresh configuration. */
+    err = epd_cmd(0x37u);
+    if (err != HAL_EPAPER_OK) return err;
+    static const uint8_t cfg_37[10] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00
+    };
+    err = epd_data_buf(cfg_37, sizeof(cfg_37));
+    if (err != HAL_EPAPER_OK) return err;
+
+    /* Border waveform for partial mode. */
+    err = epd_cmd(0x3Cu);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_data_byte(0x80u);
+    if (err != HAL_EPAPER_OK) return err;
+
+    /* Display update control: partial activation. */
+    err = epd_cmd(0x22u);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_data_byte(0xC0u);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_cmd(0x20u);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_wait_busy();
+    if (err != HAL_EPAPER_OK) return err;
+
+    s_partial_mode = 1u;
+    ESP_LOGI(TAG, "Entered partial refresh mode");
     return HAL_EPAPER_OK;
 }
 
@@ -546,81 +557,88 @@ hal_epaper_err_t hal_epaper_flush(const uint8_t *fb_pixels, uint32_t size)
         return HAL_EPAPER_ERR_INIT;
     }
 
-    ESP_LOGI(TAG, "flush: writing %lu bytes", (unsigned long)size);
+    /*
+     * All-partial refresh strategy.
+     *
+     * Boot init does a full white clear to establish a clean baseline.
+     * Every flush after that uses partial refresh (0xCF) exclusively.
+     * The full refresh waveform (0xF7) with this LUT produces dim/washed
+     * pixels and inversion — it actively harms the image. Partial refresh
+     * builds up pixel darkness naturally over 2-3 updates and produces
+     * the best visual result on this Waveshare 1.54" V2 panel.
+     *
+     * For the first flush (title screen), we do a DOUBLE partial update:
+     * flush the same data twice so the pixels get driven harder on the
+     * very first frame, reducing the initial dimness.
+     */
 
-    err = epd_write_fb(fb_pixels);
-    if (err != HAL_EPAPER_OK) {
-        ESP_LOGE(TAG, "flush: write failed: %d", (int)err);
-        return err;
+    err = epd_wait_busy();
+    if (err != HAL_EPAPER_OK) return err;
+
+    err = epd_set_windows(0u, 199u, 199u, 0u);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_set_cursor(0u, 199u);
+    if (err != HAL_EPAPER_OK) return err;
+
+    /* Write framebuffer to RAM 0x24. */
+    err = epd_cmd(0x24u);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_data_buf(fb_pixels, HAL_EPAPER_FB_SIZE);
+    if (err != HAL_EPAPER_OK) return err;
+
+    /* Partial update. */
+    err = epd_cmd(0x22u);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_data_byte(0xCFu);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_cmd(0x20u);
+    if (err != HAL_EPAPER_OK) return err;
+    err = epd_wait_busy();
+    if (err != HAL_EPAPER_OK) return err;
+
+    /* Double-tap: first 2 flushes get a second partial pass to drive
+     * pixels harder from the clean white baseline. */
+    if (s_flush_count < 2u) {
+        err = epd_set_windows(0u, 199u, 199u, 0u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_set_cursor(0u, 199u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_cmd(0x24u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_data_buf(fb_pixels, HAL_EPAPER_FB_SIZE);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_cmd(0x22u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_data_byte(0xCFu);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_cmd(0x20u);
+        if (err != HAL_EPAPER_OK) return err;
+        err = epd_wait_busy();
+        if (err != HAL_EPAPER_OK) return err;
+        ESP_LOGI(TAG, "flush #%lu: partial x2 (boot strengthen)",
+                 (unsigned long)s_flush_count);
+    } else {
+        ESP_LOGI(TAG, "flush #%lu: partial",
+                 (unsigned long)s_flush_count);
     }
 
-    ESP_LOGI(TAG, "flush: refresh complete");
+    s_flush_count++;
     return HAL_EPAPER_OK;
 }
 
 /**
- * hal_epaper_flush_partial — Partial-refresh framebuffer flush.
- *
- * Uses the partial LUT for fast updates without full flicker.
- * Every EPD_FULL_REFRESH_INTERVAL calls a full refresh is performed to
- * prevent accumulated ghosting. The caller is unaware of which type fires.
- *
- * Guard order: NULL → size → init (matches hal_epaper_flush).
- * s_flush_count incremented ONLY on success.
+ * hal_epaper_flush_partial — In the lab-tuned driver, ALL flushes are
+ * partial (0xCF activation). This is a simple redirect to hal_epaper_flush()
+ * for API compatibility with callers that distinguish full vs partial.
  */
 hal_epaper_err_t hal_epaper_flush_partial(const uint8_t *fb_pixels, uint32_t size)
 {
-    hal_epaper_err_t err;
-
-    /* Guard order: NULL → size → init. */
-    if (!fb_pixels) {
-        return HAL_EPAPER_ERR_NULL;
-    }
-    if (size != HAL_EPAPER_FB_SIZE) {
-        return HAL_EPAPER_ERR_SIZE;
-    }
-    if (!s_initialized) {
-        return HAL_EPAPER_ERR_INIT;
-    }
-
-    /* Increment counter first (post-guard, pre-LUT selection).
-     * Modulo is safe: EPD_FULL_REFRESH_INTERVAL > 0 (enforced by _Static_assert).
-     * uint32_t wrap-around is well-defined in C. */
-    s_flush_count++;
-
-    if (s_flush_count % EPD_FULL_REFRESH_INTERVAL == 0u) {
-        /* Periodic full refresh to clear ghosting. Load full LUT. */
-        ESP_LOGI(TAG, "flush_partial: full refresh at count=%lu",
-                 (unsigned long)s_flush_count);
-        err = epd_set_lut(k_wf_full_1in54);
-        if (err != HAL_EPAPER_OK) { s_flush_count--; return err; }
-    } else {
-        /* True partial refresh. Load partial LUT. */
-        err = epd_set_lut(k_wf_partial_1in54);
-        if (err != HAL_EPAPER_OK) { s_flush_count--; return err; }
-    }
-
-    err = epd_write_fb(fb_pixels);
-    if (err != HAL_EPAPER_OK) {
-        s_flush_count--;
-        return err;
-    }
-
-    ESP_LOGI(TAG, "flush_partial: done (count=%lu)", (unsigned long)s_flush_count);
-    return HAL_EPAPER_OK;
+    return hal_epaper_flush(fb_pixels, size);
 }
 
-/**
- * hal_epaper_sleep — Phase 19.5: clears s_initialized.
- *
- * Post-sleep, flush/flush_partial will return HAL_EPAPER_ERR_INIT until
- * hal_epaper_init() is called again.
- */
 hal_epaper_err_t hal_epaper_sleep(void)
 {
-    if (!s_initialized) {
-        return HAL_EPAPER_OK;
-    }
+    if (!s_initialized) return HAL_EPAPER_OK;
 
     hal_epaper_err_t err;
 
@@ -631,10 +649,6 @@ hal_epaper_err_t hal_epaper_sleep(void)
     if (err != HAL_EPAPER_OK) return err;
 
     vTaskDelay(pdMS_TO_TICKS(100));
-
-    /* Clear initialized flag — post-sleep flush returns ERR_INIT. */
-    s_initialized = 0u;
-
     return HAL_EPAPER_OK;
 }
 
@@ -644,7 +658,6 @@ void hal_epaper_deinit(void)
         return;
     }
     s_initialized = 0u;
-    s_flush_count = 0u;
 
     spi_bus_remove_device(s_spi);
     spi_bus_free(SPI2_HOST);

@@ -911,12 +911,7 @@ void app_main(void)
             render_idle(&app, &framebuffer, &player);
         }
 
-        /* Home screen animation tick.
-         * DISABLED: partial refresh on real hardware does a full refresh
-         * (SSD1681 partial mode needs border waveform + activation sequence
-         * tuning — requires lab session with hardware). The animation
-         * caused a continuous refresh loop on the e-paper display. */
-#if 0
+        /* Home screen animation tick — uses partial refresh (lab-tuned). */
         if (!s_idle_active                                    &&
             app.state == FQ_STATE_HOME                        &&
             (now_us - s_last_anim_us) > (int64_t)ANIM_FRAME_US)
@@ -926,7 +921,6 @@ void app_main(void)
             needs_redraw   = 0u;
             render_home_partial(&app, &framebuffer, &player);
         }
-#endif
 
         /* Onboarding partial refresh: class carousel update via BTN_A.
          * Only fires when state is ONBOARDING AND it is NOT a fresh state-change

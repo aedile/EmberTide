@@ -12,7 +12,7 @@
  *   y=114     : Separator line
  *   y=116..179: Navigation menu — 4 rows, each 16px tall, with cursor "> " prefix
  *               ☀ BTN_B cycles, ⏻ BTN_A selects
- *   y=178     : Nav hint y parameter — "[SUN] Move  [PWR] Select" visible ~y=187-199
+ *   y=178     : Nav hint y parameter — "[PWR] Move  [SUN] OK" visible ~y=187-199
  *
  * Menu layout (row_h=16, 4 rows from y=116 to y=180):
  *   Row 0 (y=116): TRAIN
@@ -224,7 +224,7 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
      * visible glyph content appears at y=187..199 — fully within the display.
      */
     {
-        static const char s_nav_hint[] = "SUN Move  PWR OK";
+        static const char s_nav_hint[] = "PWR Move  SUN OK";
         int16_t hint_w = fq_text_width(font, s_nav_hint);
         int16_t hint_x = (int16_t)((FQ_FB_WIDTH - hint_w) / 2);
         if (hint_x < 0) { hint_x = 0; }
