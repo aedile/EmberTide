@@ -15,7 +15,7 @@
  *   8.  test_music_init_valid_mod             — init with minimal valid MOD header
  *   9.  test_music_play_stop                  — play/stop flag contract
  *   10. test_music_render_silence_when_stopped — render after stop → zeros
- *   11. test_music_render_nonzero_when_playing — render after init+play → varies
+ *   11. test_music_render_no_crash_when_playing — render after init+play → no crash
  *   12. test_music_vol_scaling                — vol=128 produces ~50% amplitude
  *   13. test_flash_read_file_round_trip       — store and retrieve file data
  *   14. test_mix_music_only                   — SFX zero → output equals music
@@ -201,10 +201,12 @@ static void test_music_table_empty_cat_returns_null(void)
  */
 static void test_music_init_valid_mod(void)
 {
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     build_minimal_mod();
-    fq_music_err_t err = fq_music_init(s_minimal_mod, MINIMAL_MOD_SIZE);
+    fq_music_err_t err = fq_music_init(&ctx, s_minimal_mod, MINIMAL_MOD_SIZE);
     TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_OK, (int)err);
-    fq_music_stop();
+    fq_music_stop(&ctx);
 }
 
 /* -------------------------------------------------------------------------
@@ -213,17 +215,19 @@ static void test_music_init_valid_mod(void)
  */
 static void test_music_play_stop(void)
 {
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     build_minimal_mod();
-    fq_music_init(s_minimal_mod, MINIMAL_MOD_SIZE);
+    fq_music_init(&ctx, s_minimal_mod, MINIMAL_MOD_SIZE);
 
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_music_is_playing());
+    TEST_ASSERT_EQUAL_UINT8(0u, fq_music_is_playing(&ctx));
 
-    fq_music_err_t err = fq_music_play();
+    fq_music_err_t err = fq_music_play(&ctx);
     TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_OK, (int)err);
-    TEST_ASSERT_EQUAL_UINT8(1u, fq_music_is_playing());
+    TEST_ASSERT_EQUAL_UINT8(1u, fq_music_is_playing(&ctx));
 
-    fq_music_stop();
-    TEST_ASSERT_EQUAL_UINT8(0u, fq_music_is_playing());
+    fq_music_stop(&ctx);
+    TEST_ASSERT_EQUAL_UINT8(0u, fq_music_is_playing(&ctx));
 }
 
 /* -------------------------------------------------------------------------
@@ -232,14 +236,16 @@ static void test_music_play_stop(void)
  */
 static void test_music_render_silence_when_stopped(void)
 {
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     build_minimal_mod();
-    fq_music_init(s_minimal_mod, MINIMAL_MOD_SIZE);
-    fq_music_play();
-    fq_music_stop();
+    fq_music_init(&ctx, s_minimal_mod, MINIMAL_MOD_SIZE);
+    fq_music_play(&ctx);
+    fq_music_stop(&ctx);
 
     static int16_t buf[32];
     memset(buf, 0xAA, sizeof(buf));
-    fq_music_render(buf, 32u, 200u);
+    fq_music_render(&ctx, buf, 32u, 200u);
 
     for (size_t i = 0; i < 32u; i++) {
         TEST_ASSERT_EQUAL_INT(0, (int)buf[i]);
@@ -253,18 +259,20 @@ static void test_music_render_silence_when_stopped(void)
  * empty channels). We just verify no crash and OK return.
  * -------------------------------------------------------------------------
  */
-static void test_music_render_nonzero_when_playing(void)
+static void test_music_render_no_crash_when_playing(void)
 {
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     build_minimal_mod();
-    fq_music_init(s_minimal_mod, MINIMAL_MOD_SIZE);
-    fq_music_play();
+    fq_music_init(&ctx, s_minimal_mod, MINIMAL_MOD_SIZE);
+    fq_music_play(&ctx);
 
     static int16_t buf[64];
     memset(buf, 0, sizeof(buf));
-    fq_music_err_t err = fq_music_render(buf, 64u, 200u);
+    fq_music_err_t err = fq_music_render(&ctx, buf, 64u, 200u);
     TEST_ASSERT_TRUE(err == FQ_MUSIC_OK || err == FQ_MUSIC_ERR_LOOP_GUARD);
 
-    fq_music_stop();
+    fq_music_stop(&ctx);
 }
 
 /* -------------------------------------------------------------------------
@@ -403,14 +411,16 @@ static void test_mix_ducking_applied(void)
  */
 static void test_music_render_null_buf(void)
 {
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     build_minimal_mod();
-    fq_music_init(s_minimal_mod, MINIMAL_MOD_SIZE);
-    fq_music_play();
+    fq_music_init(&ctx, s_minimal_mod, MINIMAL_MOD_SIZE);
+    fq_music_play(&ctx);
 
-    fq_music_err_t err = fq_music_render(NULL, 64u, 200u);
+    fq_music_err_t err = fq_music_render(&ctx, NULL, 64u, 200u);
     TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_ERR_NULL, (int)err);
 
-    fq_music_stop();
+    fq_music_stop(&ctx);
 }
 
 /* -------------------------------------------------------------------------
@@ -429,7 +439,7 @@ int main(void)
     test_music_init_valid_mod();
     test_music_play_stop();
     test_music_render_silence_when_stopped();
-    test_music_render_nonzero_when_playing();
+    test_music_render_no_crash_when_playing();
     test_music_vol_scaling();
     test_flash_read_file_round_trip();
     test_mix_music_only();

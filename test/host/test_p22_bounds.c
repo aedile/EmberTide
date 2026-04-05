@@ -13,13 +13,16 @@
  *   5.  test_flash_read_file_null_path — ERR_NULL
  *   6.  test_flash_read_file_not_found — ERR_NOT_FOUND
  *   7.  test_flash_read_file_buf_size_zero — ERR_SIZE
- *   8.  test_music_init_null_data      — FQ_MUSIC_ERR_NULL
- *   9.  test_music_init_truncated      — FQ_MUSIC_ERR_FORMAT (or non-OK)
- *   10. test_music_init_exceeds_max    — FQ_MUSIC_ERR_TOO_LARGE
- *   11. test_music_render_before_init  — silence (no crash)
- *   12. test_music_prng_isolation      — combat PRNG unchanged after track pick
- *   13. test_save_backward_compat      — old save → wire format V1 preserved
- *   14. test_ducking_no_permanent_reduction — rapid SFX → volume recovers
+ *   8.  test_flash_read_file_null_buf  — ERR_NULL  (B3)
+ *   9.  test_music_init_null_data      — FQ_MUSIC_ERR_NULL
+ *   10. test_music_init_truncated      — FQ_MUSIC_ERR_FORMAT  (B1: exact code)
+ *   11. test_music_init_exceeds_max    — FQ_MUSIC_ERR_TOO_LARGE
+ *   12. test_music_init_null_buf_spiram_failure — NULL ctx buf → ERR_NULL (B2)
+ *   13. test_music_render_before_init  — silence (no crash)
+ *   14. test_music_prng_isolation      — combat PRNG unchanged after track pick
+ *   15. test_save_backward_compat      — old save → wire format V1 preserved
+ *   16. test_ducking_no_permanent_reduction — rapid SFX → volume recovers
+ *   17. test_music_stop_idempotent     — double-stop is safe (advisory)
  */
 
 #include <stdint.h>
@@ -156,53 +159,103 @@ static void test_flash_read_file_buf_size_zero(void)
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 8: fq_music_init with NULL data → FQ_MUSIC_ERR_NULL
+ * Bound test 8 (B3): hal_flash_read_file NULL buf → ERR_NULL
+ *
+ * A NULL buf represents a failed SPIRAM allocation at the caller level.
+ * The HAL must reject it with ERR_NULL before attempting any dereference.
+ * -------------------------------------------------------------------------
+ */
+static void test_flash_read_file_null_buf(void)
+{
+    mock_flash_reset();
+    hal_flash_init();
+
+    size_t  bytes_read = 0u;
+    hal_flash_err_t err = hal_flash_read_file("/littlefs/track.mod",
+                                               NULL, 64u, &bytes_read);
+    TEST_ASSERT_EQUAL_INT((int)HAL_FLASH_ERR_NULL, (int)err);
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)bytes_read);
+}
+
+/* -------------------------------------------------------------------------
+ * Bound test 9: fq_music_init with NULL data → FQ_MUSIC_ERR_NULL
  * -------------------------------------------------------------------------
  */
 static void test_music_init_null_data(void)
 {
-    fq_music_err_t err = fq_music_init(NULL, 128u);
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    fq_music_err_t err = fq_music_init(&ctx, NULL, 128u);
     TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_ERR_NULL, (int)err);
-    fq_music_stop();
+    fq_music_stop(&ctx);
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 9: fq_music_init with truncated (too-small) buffer → error
+ * Bound test 10 (B1): fq_music_init with truncated (too-small) buffer →
+ * FQ_MUSIC_ERR_FORMAT (exact code asserted).
  * -------------------------------------------------------------------------
  */
 static void test_music_init_truncated(void)
 {
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     static const uint8_t tiny_buf[100] = { 0 };
-    fq_music_err_t err = fq_music_init(tiny_buf, sizeof(tiny_buf));
-    TEST_ASSERT_TRUE(err != FQ_MUSIC_OK);
-    fq_music_stop();
+    fq_music_err_t err = fq_music_init(&ctx, tiny_buf, sizeof(tiny_buf));
+    TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_ERR_FORMAT, (int)err);
+    fq_music_stop(&ctx);
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 10: fq_music_init with data exceeding MAX_MOD_FILE_SIZE → error
+ * Bound test 11: fq_music_init with data exceeding MAX_MOD_FILE_SIZE → error
  * -------------------------------------------------------------------------
  */
 static void test_music_init_exceeds_max(void)
 {
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     static uint8_t dummy[4];
-    fq_music_err_t err = fq_music_init(dummy, MAX_MOD_FILE_SIZE + 1u);
+    fq_music_err_t err = fq_music_init(&ctx, dummy, MAX_MOD_FILE_SIZE + 1u);
     TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_ERR_TOO_LARGE, (int)err);
-    fq_music_stop();
+    fq_music_stop(&ctx);
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 11: fq_music_render before init → silence, no crash
+ * Bound test 12 (B2): fq_music_init with NULL ctx (simulates failed SPIRAM
+ * allocation at the caller level — the caller passes NULL when
+ * heap_caps_malloc returns NULL).
+ *
+ * Since the caller provides the buffer (no internal allocation), a failed
+ * SPIRAM alloc manifests as the caller passing NULL for mod_data.
+ * fq_music_init must return FQ_MUSIC_ERR_NULL and not crash.
+ * -------------------------------------------------------------------------
+ */
+static void test_music_init_null_buf_spiram_failure(void)
+{
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    /* NULL mod_data represents a failed heap_caps_malloc in the caller. */
+    fq_music_err_t err = fq_music_init(&ctx, NULL, MAX_MOD_FILE_SIZE);
+    TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_ERR_NULL, (int)err);
+    /* Context must not be left in an initialised state. */
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.initialised);
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.playing);
+}
+
+/* -------------------------------------------------------------------------
+ * Bound test 13: fq_music_render before init → silence, no crash
  * -------------------------------------------------------------------------
  */
 static void test_music_render_before_init(void)
 {
-    fq_music_stop(); /* ensure clean state */
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    fq_music_stop(&ctx); /* ensure clean state */
 
     static int16_t buf[64];
     /* Fill with non-zero sentinel to prove overwrite */
     memset(buf, 0xAB, sizeof(buf));
 
-    fq_music_err_t err = fq_music_render(buf, 64u, 128u);
+    fq_music_err_t err = fq_music_render(&ctx, buf, 64u, 128u);
     (void)err; /* OK or NOT_INIT are both acceptable */
 
     for (size_t i = 0u; i < 64u; i++) {
@@ -211,7 +264,7 @@ static void test_music_render_before_init(void)
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 12: combat PRNG isolation — track selection must not alter rng
+ * Bound test 14: combat PRNG isolation — track selection must not alter rng
  * -------------------------------------------------------------------------
  */
 static void test_music_prng_isolation(void)
@@ -247,7 +300,7 @@ static void test_music_prng_isolation(void)
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 13: save backward compatibility
+ * Bound test 15: save backward compatibility
  *
  * Verifies that the V1 save format serializes to the pinned size constant.
  * music_enabled is NOT in the save — it lives in fq_app_ctx_t and defaults
@@ -279,7 +332,7 @@ static void test_save_backward_compat(void)
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 14: ducking does not permanently reduce volume
+ * Bound test 16: ducking does not permanently reduce volume
  * -------------------------------------------------------------------------
  */
 static void test_ducking_no_permanent_reduction(void)
@@ -314,6 +367,36 @@ static void test_ducking_no_permanent_reduction(void)
 }
 
 /* -------------------------------------------------------------------------
+ * Advisory: fq_music_stop is idempotent
+ *
+ * Calling stop on an already-stopped (or never-started) context must not
+ * crash and must leave the context in the stopped state. Calling stop twice
+ * must be safe.
+ * -------------------------------------------------------------------------
+ */
+static void test_music_stop_idempotent(void)
+{
+    fq_music_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* First stop — never initialised */
+    fq_music_err_t err = fq_music_stop(&ctx);
+    TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_OK, (int)err);
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.playing);
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.initialised);
+
+    /* Second stop — already stopped */
+    err = fq_music_stop(&ctx);
+    TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_OK, (int)err);
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.playing);
+    TEST_ASSERT_EQUAL_UINT8(0u, ctx.initialised);
+
+    /* NULL ctx — must be safe no-op */
+    err = fq_music_stop(NULL);
+    TEST_ASSERT_EQUAL_INT((int)FQ_MUSIC_OK, (int)err);
+}
+
+/* -------------------------------------------------------------------------
  * main
  * -------------------------------------------------------------------------
  */
@@ -326,13 +409,16 @@ int main(void)
     test_flash_read_file_null_path();
     test_flash_read_file_not_found();
     test_flash_read_file_buf_size_zero();
+    test_flash_read_file_null_buf();
     test_music_init_null_data();
     test_music_init_truncated();
     test_music_init_exceeds_max();
+    test_music_init_null_buf_spiram_failure();
     test_music_render_before_init();
     test_music_prng_isolation();
     test_save_backward_compat();
     test_ducking_no_permanent_reduction();
+    test_music_stop_idempotent();
 
     printf("All Phase 22 bound tests passed.\n");
     return 0;

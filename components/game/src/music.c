@@ -2,13 +2,16 @@
  * music.c — FiestaQuest MOD Music Playback
  *
  * Wraps the micromod renderer with play/stop/render state management.
- * A single static micromod_ctx_t holds the player state. No malloc.
+ * All state is held in a caller-owned fq_music_ctx_t. No mutable statics.
  *
  * Constitution Priority 0: No floating point. No combat PRNG.
  *
  * Architecture boundary: This module is game/ layer. It MUST NOT include
  * any hal_*.h headers. The application layer (app_main.c) is responsible
  * for pushing the rendered PCM to hal_audio_write_samples().
+ *
+ * B4 (Architecture): mutable statics (s_ctx, s_playing, s_initialised)
+ * replaced with caller-owned fq_music_ctx_t passed by pointer.
  */
 
 #include "music.h"
@@ -16,22 +19,15 @@
 #include <string.h>
 
 /* -------------------------------------------------------------------------
- * Static player state.
- * -------------------------------------------------------------------------
- */
-static micromod_ctx_t s_ctx;
-static uint8_t        s_playing;    /* 1 = playing, 0 = stopped */
-static uint8_t        s_initialised; /* 1 = micromod_init succeeded */
-
-
-/* -------------------------------------------------------------------------
  * Public API
  * -------------------------------------------------------------------------
  */
 
-fq_music_err_t fq_music_init(const uint8_t *mod_data, size_t len)
+fq_music_err_t fq_music_init(fq_music_ctx_t *ctx,
+                              const uint8_t  *mod_data,
+                              size_t          len)
 {
-    if (mod_data == NULL) {
+    if (ctx == NULL || mod_data == NULL) {
         return FQ_MUSIC_ERR_NULL;
     }
     if (len > MAX_MOD_FILE_SIZE) {
@@ -39,11 +35,11 @@ fq_music_err_t fq_music_init(const uint8_t *mod_data, size_t len)
     }
 
     /* Stop any current playback first. */
-    s_playing     = 0u;
-    s_initialised = 0u;
+    ctx->playing     = 0u;
+    ctx->initialised = 0u;
 
-    micromod_err_t err = micromod_init(&s_ctx, mod_data, len,
-                                        (uint32_t)22050u);
+    micromod_err_t err = micromod_init(&ctx->mod_ctx, mod_data, len,
+                                       (uint32_t)22050u);
     if (err == MICROMOD_ERR_NULL || err == MICROMOD_ERR_TOO_SMALL) {
         return FQ_MUSIC_ERR_FORMAT;
     }
@@ -57,41 +53,51 @@ fq_music_err_t fq_music_init(const uint8_t *mod_data, size_t len)
         return FQ_MUSIC_ERR_FORMAT;
     }
 
-    s_initialised = 1u;
+    ctx->initialised = 1u;
     return FQ_MUSIC_OK;
 }
 
-fq_music_err_t fq_music_play(void)
+fq_music_err_t fq_music_play(fq_music_ctx_t *ctx)
 {
-    if (!s_initialised) {
+    if (ctx == NULL) {
+        return FQ_MUSIC_ERR_NULL;
+    }
+    if (!ctx->initialised) {
         return FQ_MUSIC_ERR_NOT_INIT;
     }
-    s_playing = 1u;
+    ctx->playing = 1u;
     return FQ_MUSIC_OK;
 }
 
-fq_music_err_t fq_music_stop(void)
+fq_music_err_t fq_music_stop(fq_music_ctx_t *ctx)
 {
-    s_playing     = 0u;
-    s_initialised = 0u;
-    memset(&s_ctx, 0, sizeof(s_ctx));
+    if (ctx == NULL) {
+        /* NULL is safe — idempotent no-op. */
+        return FQ_MUSIC_OK;
+    }
+    ctx->playing     = 0u;
+    ctx->initialised = 0u;
+    memset(&ctx->mod_ctx, 0, sizeof(ctx->mod_ctx));
     return FQ_MUSIC_OK;
 }
 
-fq_music_err_t fq_music_render(int16_t *buf, size_t count, uint8_t music_vol)
+fq_music_err_t fq_music_render(fq_music_ctx_t *ctx,
+                                int16_t        *buf,
+                                size_t          count,
+                                uint8_t         music_vol)
 {
-    if (buf == NULL) {
+    if (ctx == NULL || buf == NULL) {
         return FQ_MUSIC_ERR_NULL;
     }
 
     /* Not playing or not init: output silence. */
-    if (!s_playing || !s_initialised) {
+    if (!ctx->playing || !ctx->initialised) {
         memset(buf, 0, count * sizeof(int16_t));
         return FQ_MUSIC_OK;
     }
 
     /* Render raw PCM from micromod. */
-    micromod_err_t merr = micromod_render(&s_ctx, buf, count);
+    micromod_err_t merr = micromod_render(&ctx->mod_ctx, buf, count);
     if (merr == MICROMOD_ERR_LOOP_GUARD) {
         /* Loop guard tripped: buf was filled with zeros by micromod_render. */
         return FQ_MUSIC_ERR_LOOP_GUARD;
@@ -109,7 +115,10 @@ fq_music_err_t fq_music_render(int16_t *buf, size_t count, uint8_t music_vol)
     return FQ_MUSIC_OK;
 }
 
-uint8_t fq_music_is_playing(void)
+uint8_t fq_music_is_playing(const fq_music_ctx_t *ctx)
 {
-    return s_playing;
+    if (ctx == NULL) {
+        return 0u;
+    }
+    return ctx->playing;
 }

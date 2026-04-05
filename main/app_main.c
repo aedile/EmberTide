@@ -163,6 +163,7 @@ _Static_assert(ANIM_FRAME_US > 0ULL,
  */
 static uint8_t *s_mod_buf;  /* SPIRAM-allocated in do_music_load() */
 static size_t  s_mod_buf_len;
+static fq_music_ctx_t s_music_ctx; /* Application-layer owner of music player state. */
 
 /* -------------------------------------------------------------------------
  * clamp16 — Clamp int32 to signed 16-bit range.
@@ -255,7 +256,7 @@ static void do_music_load(fq_app_state_t state, uint32_t tick_count)
     fq_music_cat_t cat = music_cat_for_state(state);
     if ((unsigned)cat >= (unsigned)FQ_MUSIC_CAT_COUNT) {
         /* No music for this state. */
-        fq_music_stop();
+        fq_music_stop(&s_music_ctx);
         return;
     }
 
@@ -290,13 +291,13 @@ static void do_music_load(fq_app_state_t state, uint32_t tick_count)
     }
 
     /* Init and play. */
-    fq_music_err_t merr = fq_music_init(s_mod_buf, s_mod_buf_len);
+    fq_music_err_t merr = fq_music_init(&s_music_ctx, s_mod_buf, s_mod_buf_len);
     if (merr != FQ_MUSIC_OK) {
         ESP_LOGW(TAG, "music: fq_music_init failed: %d", (int)merr);
         return;
     }
 
-    merr = fq_music_play();
+    merr = fq_music_play(&s_music_ctx);
     if (merr != FQ_MUSIC_OK) {
         ESP_LOGW(TAG, "music: fq_music_play failed: %d", (int)merr);
     }
@@ -362,7 +363,7 @@ static void do_music_tick(void)
         vol = (uint8_t)(((uint32_t)vol * 153u) / 256u);
     }
 
-    fq_music_err_t merr = fq_music_render(s_music_buf, MUSIC_TICK_SAMPLES, vol);
+    fq_music_err_t merr = fq_music_render(&s_music_ctx, s_music_buf, MUSIC_TICK_SAMPLES, vol);
     if (merr == FQ_MUSIC_ERR_NULL) {
         /* Should not happen — buf is valid. */
         return;
@@ -817,7 +818,7 @@ void app_main(void)
                 }
 
                 /* Phase-22: State transition → stop-start music (no crossfade). */
-                fq_music_stop();
+                fq_music_stop(&s_music_ctx);
                 do_music_load(app.state, app.tick_count);
 
                 needs_redraw     = 1u;
@@ -847,7 +848,7 @@ void app_main(void)
             needs_redraw     = 0u;
 
             /* Phase-22: Stop music during idle (save power). */
-            fq_music_stop();
+            fq_music_stop(&s_music_ctx);
 
             render_idle(&app, &framebuffer, &player);
         }
