@@ -28,8 +28,11 @@
  *
  * Phase-19 ONBOARDING state:
  *   BTN_A (pwr) cycles onboarding_class_index mod FQ_CLASS_COUNT.
- *   BTN_B (sun) confirms: creates character, saves (if save_failed==0),
- *   transitions to HOME on success. If onboarding_save_failed==1, stays.
+ *   BTN_B (sun) confirms: creates character, transitions to HOME.
+ *   If onboarding_save_failed==1 (prior save error), BTN_B is blocked
+ *   until app_main.c clears the flag after a successful save retry.
+ *   Note: app_main.c no longer forces state back to ONBOARDING on save
+ *   failure — the character is valid in memory; the user can play.
  *
  * Phase-19 INVENTORY state:
  *   BTN_B cycles inventory_cursor mod inventory->count.

@@ -126,7 +126,7 @@ typedef struct {
     uint8_t         home_menu_index;       /**< Home menu cursor: 0=TRAIN,1=BATTLE,2=ITEMS,3=STATS. */
     /* Onboarding state */
     uint8_t         onboarding_class_index; /**< Selected class index [0, FQ_CLASS_COUNT-1]. */
-    uint8_t         onboarding_save_failed; /**< 1 = last save attempt failed; re-enter onboarding. */
+    uint8_t         onboarding_save_failed; /**< 1 = last save attempt failed; FSM blocks re-confirm until cleared. */
     /* Inventory state */
     uint8_t         inventory_cursor;      /**< Currently highlighted inventory slot. */
     uint8_t         inv_b_press_count;     /**< Double-tap B counter for inventory exit. */
