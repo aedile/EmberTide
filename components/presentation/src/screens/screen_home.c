@@ -199,18 +199,10 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
         int16_t row_y = (int16_t)(HOME_MENU_ORIGIN_Y + (int16_t)i * HOME_MENU_ROW_H);
 
         if (i == sel) {
-            /* Highlighted row: ">" cursor + label, with a thick border box
-             * around the entire row for clear visual selection. */
+            /* Highlighted row: ">" cursor + label. */
             fq_draw_text(fb, font, HOME_MENU_CURSOR_X, row_y, ">");
             fq_draw_text(fb, font, HOME_MENU_TEXT_X, row_y,
                          s_menu_labels[i]);
-            /* Thick selection box around this row. */
-            int16_t box_y = (int16_t)(row_y - 1);
-            int16_t box_h = (int16_t)(HOME_MENU_ROW_H + 2);
-            fq_fb_draw_rect(fb, 2, box_y,
-                            (int16_t)(FQ_FB_WIDTH - 4u), box_h, 1u);
-            fq_fb_draw_rect(fb, 3, (int16_t)(box_y + 1),
-                            (int16_t)(FQ_FB_WIDTH - 6u), (int16_t)(box_h - 2), 1u);
         } else {
             /* Normal row: plain black text with matching indent. */
             fq_draw_text(fb, font, HOME_MENU_TEXT_X, row_y,
