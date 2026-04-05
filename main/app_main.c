@@ -146,7 +146,7 @@ _Static_assert(SFXR_SAMPLE_RATE_HZ == AUDIO_SAMPLE_RATE_HZ,
 /**
  * Animation frame interval: 0.8 seconds per walk frame.
  */
-#define ANIM_FRAME_US      (800000ULL)
+#define ANIM_FRAME_US      (5000000ULL)  /* 5 seconds — partial refresh takes ~1.8s on real hardware */
 
 /* BLOCKER 2 fix: Compile-time guard -- ANIM_FRAME_US must be non-zero. */
 _Static_assert(ANIM_FRAME_US > 0ULL,
@@ -910,7 +910,12 @@ void app_main(void)
             render_idle(&app, &framebuffer, &player);
         }
 
-        /* Home screen animation tick. */
+        /* Home screen animation tick.
+         * DISABLED: partial refresh on real hardware does a full refresh
+         * (SSD1681 partial mode needs border waveform + activation sequence
+         * tuning — requires lab session with hardware). The animation
+         * caused a continuous refresh loop on the e-paper display. */
+#if 0
         if (!s_idle_active                                    &&
             app.state == FQ_STATE_HOME                        &&
             (now_us - s_last_anim_us) > (int64_t)ANIM_FRAME_US)
@@ -920,6 +925,7 @@ void app_main(void)
             needs_redraw   = 0u;
             render_home_partial(&app, &framebuffer, &player);
         }
+#endif
 
         /* Onboarding partial refresh: class carousel update via BTN_A.
          * Only fires when state is ONBOARDING AND it is NOT a fresh state-change
