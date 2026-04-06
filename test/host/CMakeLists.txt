@@ -980,3 +980,68 @@ add_p22_test(test_p22_bounds
 # ---------------------------------------------------------------------------
 add_p22_test(test_p22_feature
     "${CMAKE_CURRENT_SOURCE_DIR}/test_p22_feature.c")
+
+# ---------------------------------------------------------------------------
+# Phase-23: UX Hardware Fixes + Audio Foundation
+#
+# add_p23_test(<target> <source>)
+#
+# Bound tests (test_p23_bounds) link mock_hal_audio + game sources only:
+#   - hal_audio.h guard tests + ring_count accessor + stereo downmix math.
+# Feature tests (test_p23_feature) link vm_test dependencies + mock_hal_audio:
+#   - Screen button label rendering + ring count accuracy.
+# ---------------------------------------------------------------------------
+function(add_p23_bounds_test target source)
+    add_executable(${target} ${source}
+        "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_audio.c")
+    target_include_directories(${target} PRIVATE
+        "${HAL_INCLUDE}"
+        "${GAME_INCLUDE}"
+        "${GAME_LIB_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+function(add_p23_feature_test target source)
+    add_executable(${target} ${source}
+        "${CMAKE_CURRENT_SOURCE_DIR}/mock_hal_audio.c")
+    target_include_directories(${target} PRIVATE
+        "${HAL_INCLUDE}"
+        "${GAME_INCLUDE}"
+        "${PRES_INCLUDE}"
+        "${MAIN_INCLUDE}"
+        "${GAME_LIB_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(GAME_SOURCES)
+        target_sources(${target} PRIVATE ${GAME_SOURCES})
+    endif()
+    if(PRES_SOURCES)
+        target_sources(${target} PRIVATE ${PRES_SOURCES})
+    endif()
+    if(PRES_SCREEN_SOURCES)
+        target_sources(${target} PRIVATE ${PRES_SCREEN_SOURCES})
+    endif()
+    if(EXISTS "${PROJECT_ROOT}/main/vm_builder.c")
+        target_sources(${target} PRIVATE "${PROJECT_ROOT}/main/vm_builder.c")
+    endif()
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Phase-23 Bound tests (Rule 22 Phase A — BOUND RED)
+# Covers: ring_count never exceeds capacity, ring_count zero before init,
+# ring_count after stop, ring_count increments, stereo downmix no-overflow,
+# stereo downmix underflow, vol=0 silence, prefill threshold math,
+# write-null ERR_NULL, write-before-init ERR_INIT.
+# ---------------------------------------------------------------------------
+add_p23_bounds_test(test_p23_bounds
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p23_bounds.c")
+
+# ---------------------------------------------------------------------------
+# Phase-23 Feature tests (Rule 22 Phase B — FEATURE RED)
+# ---------------------------------------------------------------------------
+add_p23_feature_test(test_p23_feature
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_p23_feature.c")
