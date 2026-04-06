@@ -52,6 +52,25 @@ board_power_bsp_t board_div(EPD_PWR_PIN, Audio_PWR_PIN, VBAT_PWR_PIN);
 
 > GPIO0 doubles as the low-power external wake-up pin (`ext_wakeup_pin_1`).
 
+### Lab-Verified Game Button Mapping (2026-04-05)
+
+| In-Game Label | Icon | GPIO | HAL ID     | Action                    |
+|---------------|------|------|------------|---------------------------|
+| PWR           | ⏻   | 0    | HAL_BTN_A  | Move/Cycle menu selection |
+| SUN           | ☀   | 18   | HAL_BTN_B  | OK/Select/Confirm         |
+
+This mapping was verified on physical hardware on 2026-04-05 and is reflected in
+all Phase 23 screen button hint strings:
+- Home screen: `"PWR Move  SUN OK"`
+- Inventory: `"[PWR]Cyc [SUN]Eq 2x[PWR]Back"`
+- Onboarding: `"[SUN]Cycle [PWR]OK"`
+- Training idle: `"[SUN]Type [PWR]Start"`
+- Training active: `"[SUN]Hit  [PWR]Exit"`
+- Training done: `"[PWR] Back"`
+
+**Historical note:** Phases 1–22 had PWR and SUN swapped in the UI strings.
+Phase 23 corrects all four screen renderers to match the physical hardware layout.
+
 ---
 
 ## I2C Bus (I2C_NUM_0)
@@ -76,13 +95,18 @@ board_power_bsp_t board_div(EPD_PWR_PIN, Audio_PWR_PIN, VBAT_PWR_PIN);
 
 ## I2S — Audio (ES8311)
 
-| Signal | GPIO # |
-|--------|--------|
-| MCLK   | 14     |
-| SCLK   | 15     |
-| LRCK   | 16     |
-| DIN    | 38     |
-| DOUT   | 45     |
+| Signal | GPIO # | Notes                                   |
+|--------|--------|-----------------------------------------|
+| MCLK   | 14     |                                         |
+| SCLK   | 15     |                                         |
+| LRCK   | 38     | Lab-corrected in Phase 23 (was 16)      |
+| DIN    | 16     | Lab-corrected in Phase 23 (was 38)      |
+| DOUT   | 45     |                                         |
+
+> **Phase 23 correction:** LRCK and DIN were swapped in the original table.
+> Lab verification on 2026-04-05 confirmed: LRCK=GPIO38, DIN=GPIO16.
+> This matches `board_cfg.h` in the factory firmware example.
+> The codec_board component uses these pin numbers directly.
 
 ---
 

@@ -11,17 +11,16 @@
  *   y=100..113: W/L record — "W:N  L:N" centered
  *   y=114     : Separator line
  *   y=116..179: Navigation menu — 4 rows, each 16px tall, with cursor "> " prefix
- *               ☀ BTN_B cycles, ⏻ BTN_A selects
- *   y=178     : Nav hint y parameter — "[SUN] Move  [PWR] Select" visible ~y=187-199
+ *               ⏻ BTN_A cycles, ☀ BTN_B selects (lab-verified 2026-04-05)
+ *   y=178     : Nav hint y parameter — "[PWR] Move  [SUN] OK" visible ~y=187-199
  *
  * Menu layout (row_h=16, 4 rows from y=116 to y=180):
  *   Row 0 (y=116): TRAIN
  *   Row 1 (y=132): BATTLE
  *   Row 2 (y=148): ITEMS
  *   Row 3 (y=164): STATS
- *   Highlighted row: black fill_rect extending 1px above row baseline
- *                    + white (inverted) text with extra left indent + ">  " cursor
- *   Normal rows: plain black text with same indent
+ *   Highlighted row: ">" caret cursor + label (no selection box).
+ *   Normal rows: plain black text with same indent.
  *
  * Font note: FONT_REGS_12 has glyph_h=30 but off_y=9 for most glyphs,
  * so visible content appears at (y + 9) to (y + 21) — 12px of visible text.
@@ -36,6 +35,10 @@
  * application layer should only supply 0 or 2, but we guard either way.
  * If fq_get_char_sprite() returns NULL for the requested frame, the blit
  * is skipped (no crash).
+ *
+ * Phase 23: Removed thick selection box from highlighted menu row — the
+ * ">" caret cursor is the sole selection indicator. Cleaner on e-paper.
+ * Button hint corrected: PWR (GPIO0, BTN_A) = Move, SUN (GPIO18, BTN_B) = OK.
  *
  * Constitution Priority 0: no float, no malloc, no PRNG calls.
  */
@@ -79,11 +82,11 @@
 
 /**
  * Menu text indentation.
- * cursor_x: left edge of the ">  " cursor arrow.
- * text_x  : left edge of the item label (extra 4px vs previous 16px baseline).
+ * cursor_x: left edge of the ">" cursor arrow.
+ * text_x  : left edge of the item label.
  */
 #define HOME_MENU_CURSOR_X    4   /**< ">" cursor left edge. */
-#define HOME_MENU_TEXT_X     20   /**< Item label left edge — 4px extra indent. */
+#define HOME_MENU_TEXT_X     20   /**< Item label left edge. */
 
 /**
  * Highlight bar padding: extends 1px above the row baseline for visual breathing
@@ -199,18 +202,10 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
         int16_t row_y = (int16_t)(HOME_MENU_ORIGIN_Y + (int16_t)i * HOME_MENU_ROW_H);
 
         if (i == sel) {
-            /* Highlighted row: ">" cursor + label, with a thick border box
-             * around the entire row for clear visual selection. */
+            /* Highlighted row: ">" cursor + label. */
             fq_draw_text(fb, font, HOME_MENU_CURSOR_X, row_y, ">");
             fq_draw_text(fb, font, HOME_MENU_TEXT_X, row_y,
                          s_menu_labels[i]);
-            /* Thick selection box around this row. */
-            int16_t box_y = (int16_t)(row_y - 1);
-            int16_t box_h = (int16_t)(HOME_MENU_ROW_H + 2);
-            fq_fb_draw_rect(fb, 2, box_y,
-                            (int16_t)(FQ_FB_WIDTH - 4u), box_h, 1u);
-            fq_fb_draw_rect(fb, 3, (int16_t)(box_y + 1),
-                            (int16_t)(FQ_FB_WIDTH - 6u), (int16_t)(box_h - 2), 1u);
         } else {
             /* Normal row: plain black text with matching indent. */
             fq_draw_text(fb, font, HOME_MENU_TEXT_X, row_y,
@@ -222,9 +217,13 @@ void fq_render_home(fq_fb_t *fb, const fq_vm_home_t *vm)
     /*
      * Rendered at HOME_NAV_HINT_Y=178.  With FONT_REGS_12 off_y=9, the
      * visible glyph content appears at y=187..199 — fully within the display.
+     *
+     * Phase 23: corrected to "PWR Move  SUN OK" (lab-verified 2026-04-05).
+     * PWR = ⏻ button (GPIO0, BTN_A) = cycles menu.
+     * SUN = ☀ button (GPIO18, BTN_B) = selects/OK.
      */
     {
-        static const char s_nav_hint[] = "SUN Move  PWR OK";
+        static const char s_nav_hint[] = "PWR Move  SUN OK";
         int16_t hint_w = fq_text_width(font, s_nav_hint);
         int16_t hint_x = (int16_t)((FQ_FB_WIDTH - hint_w) / 2);
         if (hint_x < 0) { hint_x = 0; }

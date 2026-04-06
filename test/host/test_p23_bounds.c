@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <limits.h>
+#include <inttypes.h>
 
 #include "test_assert.h"
 #include "hal_audio.h"

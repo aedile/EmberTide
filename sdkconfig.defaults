@@ -7,6 +7,11 @@
 #
 # These settings are applied before sdkconfig. Any key not listed here
 # uses the ESP-IDF component default.
+#
+# Phase 23 requirement: IDF 5.5.1+
+#   IDF 5.3.x has GDMA interrupt bugs #15533 and 8dfcafa that cause hard faults
+#   when I2S and SPI GDMA channels are both active. IDF 5.5.1 fixes both bugs.
+#   DO NOT downgrade without removing CONFIG_BSP_AUDIO=y from this file.
 
 # ---------------------------------------------------------------------------
 # Partition table
@@ -37,6 +42,13 @@ CONFIG_SPIRAM_BOOT_INIT=y
 # Failure to do so causes silent data corruption on DMA transfers.
 CONFIG_SPIRAM_USE_MALLOC=y
 
+# Phase 23: Keep the first 16KB of internal SRAM reserved for ESP-IDF internal
+# allocations. This ensures I2S channel handles and DMA descriptors land in
+# internal SRAM rather than PSRAM. Without this, the GDMA engine cannot reach
+# the handle structure and triggers LoadStoreAlignment exceptions.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+
 # ---------------------------------------------------------------------------
 # Target
 # ---------------------------------------------------------------------------
@@ -51,3 +63,20 @@ CONFIG_FREERTOS_HZ=1000
 # Logging (default level: INFO; errors always logged)
 # ---------------------------------------------------------------------------
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ---------------------------------------------------------------------------
+# Phase 23: Audio subsystem
+# ---------------------------------------------------------------------------
+# Enable the audio BSP path in hal_audio.c (codec_board + esp_codec_dev).
+# Requires IDF 5.5.1 for GDMA bug fixes.
+CONFIG_BSP_AUDIO=y
+
+# ES8311 stereo codec support (used on this board for audio output).
+CONFIG_CODEC_ES8311_SUPPORT=y
+
+# GDMA IRAM-safe ISR — intentionally NOT set.
+# IDF 5.3 bug: CONFIG_GDMA_ISR_IRAM_SAFE causes a crash when both I2S and SPI
+# DMA channels are active simultaneously (race in gdma_isr_handler_install).
+# Fixed in IDF 5.5.1, but we leave this flag out as a conservative safety measure
+# until we can verify no regression on the target hardware.
+# CONFIG_GDMA_ISR_IRAM_SAFE is NOT set.

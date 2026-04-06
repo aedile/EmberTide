@@ -14,8 +14,10 @@
  *
  * No I2S or DMA simulation is performed — the mock is a pure recorder.
  *
- * Phase 21: added hal_audio_write_samples() implementation and the
- * extended mock accessors for sample capture, overflow tracking.
+ * Phase 21: added hal_audio_write_samples() and extended mock accessors for
+ * sample capture, overflow tracking.
+ * Phase 23: added hal_audio_get_ring_count() — returns current ring fill level,
+ * enabling prefill_audio() tests without real hardware.
  */
 
 #include "hal_audio.h"
@@ -117,6 +119,18 @@ hal_audio_err_t hal_audio_write_samples(const int16_t *buf, size_t count)
     }
 
     return result;
+}
+
+/**
+ * hal_audio_get_ring_count — Return the current ring buffer fill level.
+ *
+ * Phase 23 addition. Returns 0 before init (s_mock_ring_fill is 0 after
+ * mock_audio_reset). Returns the running fill counter after init and writes.
+ * Does not drain — the mock has no consumer task.
+ */
+uint32_t hal_audio_get_ring_count(void)
+{
+    return s_mock_ring_fill;
 }
 
 hal_audio_err_t hal_audio_stop(void)

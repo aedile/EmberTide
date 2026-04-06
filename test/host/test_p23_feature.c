@@ -24,6 +24,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "test_assert.h"
 
@@ -90,10 +91,10 @@ static void test_home_nav_hint_pwrmove_sunok(void)
     memset(&vm, 0, sizeof(vm));
     strncpy(vm.name, "TESTER", sizeof(vm.name) - 1);
     vm.level     = 1u;
-    vm.hp_pct    = 100u;
+    vm.hp_percent    = 100u;
     vm.wins      = 0u;
     vm.losses    = 0u;
-    vm.menu_sel  = 0u;
+    vm.menu_index  = 0u;
     vm.anim_frame = 0u;
 
     fq_render_home(&fb, &vm);
@@ -113,8 +114,8 @@ static void test_inventory_footer_pwrcyc_suneq(void)
 
     fq_vm_inventory_t vm;
     memset(&vm, 0, sizeof(vm));
-    vm.count = 0u;
-    vm.sel   = 0u;
+    vm.item_count = 0u;
+    vm.cursor_index = 0u;
 
     fq_render_inventory(&fb, &vm);
 

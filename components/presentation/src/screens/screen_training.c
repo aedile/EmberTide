@@ -105,7 +105,7 @@ void fq_render_training(fq_fb_t *fb, const fq_vm_training_t *vm)
             fq_draw_text(fb, font,
                          TRAINING_MARGIN_X + 10,
                          (int16_t)(TRAINING_ACTIVITY_Y + TRAINING_ACTIVITY_H / 2 - 4),
-                         "[SUN]Start [PWR]Type");
+                         "[SUN]Type [PWR]Start");
             break;
 
         case 1u: { /* ACTIVE — moving target bar. */
@@ -227,11 +227,11 @@ void fq_render_training(fq_fb_t *fb, const fq_vm_training_t *vm)
     {
         const char *hint_str;
         if (vm->state == 0u) {
-            hint_str = "[PWR]Type [SUN]Start";
+            hint_str = "[SUN]Type [PWR]Start";
         } else if (vm->state == 1u) {
-            hint_str = "[PWR]Hit  [SUN]Exit";
+            hint_str = "[SUN]Hit  [PWR]Exit";
         } else {
-            hint_str = "[SUN] Back";
+            hint_str = "[PWR] Back";
         }
         fq_draw_header_bar(fb, font, TRAINING_FOOTER_Y, TRAINING_BAR_H, hint_str);
     }
