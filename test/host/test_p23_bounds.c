@@ -12,14 +12,21 @@
  *   3.  test_ring_count_after_stop              — returns 0 after stop.
  *   4.  test_ring_count_increments_with_writes  — count tracks samples written.
  *   5.  test_stereo_downmix_no_overflow         — (INT16_MAX + INT16_MAX)/2
- *       must NOT overflow int32_t intermediate; result clamped.
+ *       must NOT overflow int32_t intermediate; exact result = 32639.
  *   6.  test_stereo_downmix_underflow           — (INT16_MIN + INT16_MIN)/2
- *       result clamped to INT16_MIN.
+ *       exact result = -32640 (not clamped; within INT16 range).
  *   7.  test_stereo_downmix_vol_zero_silence    — vol=0 → output 0.
  *   8.  test_prefill_threshold_math             — 80% of AUDIO_RING_BUF_SAMPLES
- *       must be computed without integer overflow.
+ *       must equal exactly 35280u (no tautological re-computation).
  *   9.  test_ring_count_write_null_returns_err  — NULL buf → HAL_AUDIO_ERR_NULL.
  *   10. test_ring_count_write_before_init       — write before init → ERR_INIT.
+ *   11. test_write_zero_count_valid_buf         — write count=0 valid buf → OK,
+ *       ring count unchanged (B2 guard: zero-count write must not error).
+ *   12. test_write_zero_count_null_buf          — write count=0 NULL buf →
+ *       HAL_AUDIO_ERR_NULL (NULL guard fires before count check).
+ *   13. test_ring_fill_to_capacity_then_one_more — fill ring to exactly
+ *       AUDIO_RING_BUF_SAMPLES=44100 samples (100% capacity), then one
+ *       more sample returns HAL_AUDIO_ERR_OVERFLOW (B3 capacity boundary).
  */
 
 #include <stdint.h>
@@ -134,31 +141,32 @@ static void test_ring_count_increments_with_writes(void)
  *
  * L = INT16_MAX (32767), R = INT16_MAX (32767).
  * Intermediate: (32767 + 32767) = 65534 — fits in int32_t cleanly.
- * After /2 = 32767, vol=255: (32767 * 255)/256 = 32639 — no overflow.
+ * After /2 = 32767.
+ * vol=255: (32767 * 255) / 256 = 8355585 / 256 = 32639 (C integer truncation).
+ * Exact expected value: 32639.
  * -------------------------------------------------------------------------
  */
 static void test_stereo_downmix_no_overflow(void)
 {
     int16_t result = stereo_downmix_sample(32767, 32767, 255u);
-    /* Must be positive and at most INT16_MAX. */
-    TEST_ASSERT_EQUAL_INT(1, (int)(result > 0));
-    TEST_ASSERT_EQUAL_INT(1, (int)(result <= 32767));
+    TEST_ASSERT_EQUAL_INT(32639, (int)result);
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 6: stereo downmix — underflow clamped.
+ * Bound test 6: stereo downmix — underflow result is exact.
  *
  * L = INT16_MIN (-32768), R = INT16_MIN (-32768).
  * Intermediate: -32768 + -32768 = -65536 — fits in int32_t.
- * After /2 = -32768, vol=255: (-32768 * 255)/256 = -32640 — stays negative.
+ * After /2 = -32768.
+ * vol=255: (-32768 * 255) / 256 = -8355840 / 256 = -32640 (C truncation
+ *   toward zero: -8355840 / 256 = -32640.0 exactly → -32640).
+ * Exact expected value: -32640.
  * -------------------------------------------------------------------------
  */
 static void test_stereo_downmix_underflow(void)
 {
     int16_t result = stereo_downmix_sample(-32768, -32768, 255u);
-    /* Must be negative and at or above INT16_MIN. */
-    TEST_ASSERT_EQUAL_INT(1, (int)(result < 0));
-    TEST_ASSERT_EQUAL_INT(1, (int)(result >= -32768));
+    TEST_ASSERT_EQUAL_INT(-32640, (int)result);
 }
 
 /* -------------------------------------------------------------------------
@@ -172,27 +180,23 @@ static void test_stereo_downmix_vol_zero_silence(void)
 }
 
 /* -------------------------------------------------------------------------
- * Bound test 8: prefill threshold — 80% of AUDIO_RING_BUF_SAMPLES has no
- * integer overflow and is strictly less than capacity.
+ * Bound test 8: prefill threshold — 80% of AUDIO_RING_BUF_SAMPLES equals
+ * exactly 35280u (for AUDIO_RING_BUF_SAMPLES=44100).
  *
- * For AUDIO_RING_BUF_SAMPLES=44100: 44100 * 80 = 3,528,000 < UINT32_MAX.
- * For AUDIO_RING_BUF_SAMPLES=4096:  4096 * 80 = 327,680 < UINT32_MAX.
- * Both safe.
+ * Pinned constant: 44100 * 80 / 100 = 35280.
+ * Must not be a tautological re-computation of the same expression.
+ * If AUDIO_RING_BUF_SAMPLES changes, this test will catch the mismatch.
  * -------------------------------------------------------------------------
  */
 static void test_prefill_threshold_math(void)
 {
     uint32_t threshold = (AUDIO_RING_BUF_SAMPLES * 80u) / 100u;
 
+    /* Pinned expected value: 44100 * 80 / 100 = 35280. */
+    TEST_ASSERT_EQUAL_UINT32(35280u, threshold);
+
     /* Threshold must be strictly less than capacity (not 100%). */
     TEST_ASSERT_EQUAL_INT(1, (int)(threshold < AUDIO_RING_BUF_SAMPLES));
-
-    /* Threshold must be positive. */
-    TEST_ASSERT_EQUAL_INT(1, (int)(threshold > 0u));
-
-    /* Threshold must be exactly 80% (integer). */
-    uint32_t expected = (AUDIO_RING_BUF_SAMPLES * 80u) / 100u;
-    TEST_ASSERT_EQUAL_UINT32(expected, threshold);
 }
 
 /* -------------------------------------------------------------------------
@@ -222,6 +226,81 @@ static void test_ring_count_write_before_init(void)
 }
 
 /* -------------------------------------------------------------------------
+ * Bound test 11 (B2): write_samples with count=0 and valid buffer → OK.
+ *
+ * A zero-count write is a no-op. It must not return an error and must
+ * not change the ring fill count.
+ * -------------------------------------------------------------------------
+ */
+static void test_write_zero_count_valid_buf(void)
+{
+    mock_audio_reset();
+    hal_audio_init();
+
+    int16_t samples[4] = {0};
+    hal_audio_write_samples(samples, 10u);  /* prime ring with 10 samples */
+    uint32_t count_before = hal_audio_get_ring_count();
+    TEST_ASSERT_EQUAL_UINT32(10u, count_before);
+
+    hal_audio_err_t err = hal_audio_write_samples(samples, 0u);
+    TEST_ASSERT_EQUAL_INT((int)HAL_AUDIO_OK, (int)err);
+
+    /* Ring count must not change after a zero-count write. */
+    TEST_ASSERT_EQUAL_UINT32(10u, hal_audio_get_ring_count());
+}
+
+/* -------------------------------------------------------------------------
+ * Bound test 12 (B2): write_samples with count=0 and NULL buffer → ERR_NULL.
+ *
+ * NULL guard must fire BEFORE the count check. A NULL pointer is always
+ * an error regardless of count.
+ * -------------------------------------------------------------------------
+ */
+static void test_write_zero_count_null_buf(void)
+{
+    mock_audio_reset();
+    hal_audio_init();
+
+    hal_audio_err_t err = hal_audio_write_samples(NULL, 0u);
+    TEST_ASSERT_EQUAL_INT((int)HAL_AUDIO_ERR_NULL, (int)err);
+}
+
+/* -------------------------------------------------------------------------
+ * Bound test 13 (B3): ring fills to exactly AUDIO_RING_BUF_SAMPLES = 44100.
+ *
+ * Writing exactly AUDIO_RING_BUF_SAMPLES samples fills the ring to 100%
+ * capacity. One additional sample must then return HAL_AUDIO_ERR_OVERFLOW.
+ * This test specifically verifies the capacity boundary at the known value
+ * 44100 (AUDIO_MAX_TONE_MS=2000ms × 22050Hz = 44100 samples).
+ * -------------------------------------------------------------------------
+ */
+static void test_ring_fill_to_capacity_then_one_more(void)
+{
+    /* Compile-time sanity: capacity must be exactly 44100. */
+    _Static_assert(AUDIO_RING_BUF_SAMPLES == 44100u,
+                   "B3: ring capacity changed — update pinned constant");
+
+    mock_audio_reset();
+    hal_audio_init();
+
+    static int16_t full_buf[AUDIO_RING_BUF_SAMPLES];
+    memset(full_buf, 0, sizeof(full_buf));
+
+    /* Fill ring to 100% capacity. */
+    hal_audio_err_t fill_err = hal_audio_write_samples(full_buf, AUDIO_RING_BUF_SAMPLES);
+    TEST_ASSERT_EQUAL_INT((int)HAL_AUDIO_OK, (int)fill_err);
+    TEST_ASSERT_EQUAL_UINT32(44100u, hal_audio_get_ring_count());
+
+    /* One more sample must overflow. */
+    int16_t one_more = 0;
+    hal_audio_err_t over_err = hal_audio_write_samples(&one_more, 1u);
+    TEST_ASSERT_EQUAL_INT((int)HAL_AUDIO_ERR_OVERFLOW, (int)over_err);
+
+    /* Ring count must still be exactly at capacity — not beyond. */
+    TEST_ASSERT_EQUAL_UINT32(44100u, hal_audio_get_ring_count());
+}
+
+/* -------------------------------------------------------------------------
  * main — run all bound tests in sequence.
  * -------------------------------------------------------------------------
  */
@@ -237,6 +316,9 @@ int main(void)
     test_prefill_threshold_math();
     test_ring_count_write_null_returns_err();
     test_ring_count_write_before_init();
+    test_write_zero_count_valid_buf();
+    test_write_zero_count_null_buf();
+    test_ring_fill_to_capacity_then_one_more();
 
     return 0;
 }

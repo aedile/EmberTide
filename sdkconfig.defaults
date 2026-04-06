@@ -11,7 +11,6 @@
 # Phase 23 requirement: IDF 5.5.1+
 #   IDF 5.3.x has GDMA interrupt bugs #15533 and 8dfcafa that cause hard faults
 #   when I2S and SPI GDMA channels are both active. IDF 5.5.1 fixes both bugs.
-#   DO NOT downgrade without removing CONFIG_BSP_AUDIO=y from this file.
 
 # ---------------------------------------------------------------------------
 # Partition table
@@ -67,9 +66,13 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # ---------------------------------------------------------------------------
 # Phase 23: Audio subsystem
 # ---------------------------------------------------------------------------
-# Enable the audio BSP path in hal_audio.c (codec_board + esp_codec_dev).
-# Requires IDF 5.5.1 for GDMA bug fixes.
-CONFIG_BSP_AUDIO=y
+# ADV-1: CONFIG_BSP_AUDIO is intentionally NOT set here.
+# The symbol is defined as a private compile definition for the fq_hal
+# component via target_compile_definitions() in components/fq_hal/CMakeLists.txt.
+# Setting it here in sdkconfig.defaults would duplicate the definition and
+# could cause build warnings or unexpected behaviour if the sdkconfig value
+# is used by a different component. The fq_hal CMakeLists is the single
+# authoritative source for this flag.
 
 # ES8311 stereo codec support (used on this board for audio output).
 CONFIG_CODEC_ES8311_SUPPORT=y

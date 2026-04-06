@@ -105,6 +105,7 @@
 #include "music.h"
 #include "music_table.h"
 #include "micromod.h"  /* for MAX_MOD_FILE_SIZE */
+#include "micromod_real.h" /* ADV-A2: real micromod API — micromod_initialise, micromod_get_audio, micromod_set_gain */
 
 /* Application layer */
 #include "event_bus.h"
@@ -420,9 +421,8 @@ static void do_music_tick(void)
      * micromod_get_audio() returns stereo interleaved int16 (LRLRLR...).
      * We downmix to mono: mono = (L + R) / 2, then scale by vol/256.
      * Both operations use int32 intermediates — no overflow, no float.
+     * ADV-A2: API declared via #include "micromod_real.h" at top of file.
      */
-    extern void micromod_get_audio(short *output_buffer, long count);
-
     static int16_t s_stereo_buf[MUSIC_TICK_SAMPLES * 2];
     memset(s_stereo_buf, 0, sizeof(s_stereo_buf)); /* micromod requires zeroed buffer */
     micromod_get_audio(s_stereo_buf, (long)MUSIC_TICK_SAMPLES);
@@ -783,9 +783,8 @@ void app_main(void)
         size_t mod_len = (size_t)(mod_end - mod_start);
         ESP_LOGI(TAG, "Phase 23: loading embedded .mod (%u bytes)", (unsigned)mod_len);
 
-        extern long micromod_initialise(signed char *data, long sampling_rate);
-        extern void micromod_set_gain(long value);
-
+        /* ADV-A2: micromod_initialise and micromod_set_gain declared via
+         * #include "micromod_real.h" at top of file. */
         long ret = micromod_initialise((signed char *)mod_start, (long)AUDIO_SAMPLE_RATE_HZ);
         if (ret == 0) {
             micromod_set_gain(64);  /* 64 = unity for 4-channel MOD */

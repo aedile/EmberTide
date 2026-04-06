@@ -13,6 +13,7 @@ idf_component_register(
         "platform/audio_codec_ctrl_spi.c"
         "platform/esp_codec_dev_os.c"
         "device/es8311/es8311.c"
+        "device/es7210/es7210.c"
     INCLUDE_DIRS
         "include"
         "interface"
