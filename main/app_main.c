@@ -706,7 +706,17 @@ void app_main(void)
 
     /* -----------------------------------------------------------------------
      * HAL init.
+     * Audio FIRST — I2S needs a clean GDMA channel before SPI (e-paper)
+     * claims one. Reversing order caused LoadStoreAlignment in
+     * gdma_install_tx_interrupt (GDMA channel conflict on ESP32-S3).
      * ----------------------------------------------------------------------- */
+    hal_audio_err_t audio_err = hal_audio_init();
+    if (audio_err != HAL_AUDIO_OK) {
+        ESP_LOGW(TAG, "hal_audio_init failed: %d -- SFX disabled", (int)audio_err);
+        app.sfx_enabled    = 0u;
+        app.music_enabled  = 0u;
+    }
+
     hal_epaper_err_t epaper_err = hal_epaper_init();
     if (epaper_err != HAL_EPAPER_OK) {
         ESP_LOGE(TAG, "hal_epaper_init failed: %d", (int)epaper_err);
@@ -715,14 +725,6 @@ void app_main(void)
     hal_gpio_err_t gpio_err = hal_gpio_init(button_callback);
     if (gpio_err != HAL_GPIO_OK) {
         ESP_LOGE(TAG, "hal_gpio_init failed: %d", (int)gpio_err);
-    }
-
-    /* Phase-21: Audio init. */
-    hal_audio_err_t audio_err = hal_audio_init();
-    if (audio_err != HAL_AUDIO_OK) {
-        ESP_LOGW(TAG, "hal_audio_init failed: %d -- SFX disabled", (int)audio_err);
-        app.sfx_enabled    = 0u;
-        app.music_enabled  = 0u;
     }
 
     /* -----------------------------------------------------------------------

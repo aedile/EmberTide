@@ -29,18 +29,10 @@ CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_BOOT_INIT=y
 
-# SPIRAM allocation strategy: CAPS_ALLOC (allocation-aware).
-#
-# Previous: CONFIG_SPIRAM_USE_MALLOC=y (transparent — ALL malloc goes to PSRAM).
-# This caused I2S DMA crashes because ESP-IDF's internal i2s_new_channel()
-# calloc landed in PSRAM which isn't DMA-accessible on ESP32-S3.
-#
-# With CAPS_ALLOC: malloc()/calloc() use internal SRAM by default.
-# PSRAM must be explicitly requested via heap_caps_malloc(MALLOC_CAP_SPIRAM).
-# This is safer for DMA peripherals (SPI, I2S, USB) at the cost of requiring
-# explicit SPIRAM allocation for large buffers (.mod files, etc).
-#
-# Changed during audio lab session 2026-04-05.
+# SPIRAM: CAPS_ALLOC keeps malloc() on internal SRAM.
+# PSRAM only used via explicit heap_caps_malloc(MALLOC_CAP_SPIRAM).
+# This prevents I2S/GDMA driver allocations from landing in PSRAM
+# (which causes LoadStoreAlignment crashes on ESP32-S3).
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 
 # ---------------------------------------------------------------------------
@@ -58,3 +50,6 @@ CONFIG_FREERTOS_HZ=1000
 # ---------------------------------------------------------------------------
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_BSP_AUDIO=y
+
+# ES8311 codec support (used by codec_board for audio output)
+CONFIG_CODEC_ES8311_SUPPORT=y

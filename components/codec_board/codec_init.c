@@ -426,18 +426,7 @@ int init_codec(codec_init_cfg_t *cfg)
                 };
                 codec_res.out_codec_if = es8311_codec_new(&es8311_cfg);
             } break;
-            case CODEC_TYPE_ES8388: {
-                i2c_cfg.addr = out_cfg.i2c_addr ? out_cfg.i2c_addr : ES8388_CODEC_DEFAULT_ADDR;
-                codec_res.out_ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
-                es8388_codec_cfg_t es8388_cfg = {
-                    .codec_mode = same_codec ? ESP_CODEC_DEV_WORK_MODE_BOTH : ESP_CODEC_DEV_WORK_MODE_DAC,
-                    .ctrl_if = codec_res.out_ctrl_if,
-                    .gpio_if = codec_res.gpio_if,
-                    .pa_pin = out_cfg.pa_pin,
-                    .hw_gain.pa_gain = out_cfg.pa_gain,
-                };
-                codec_res.out_codec_if = es8388_codec_new(&es8388_cfg);
-            } break;
+            /* ES8388 not used on this board — stripped to avoid compile dep. */
             case CODEC_TYPE_DUMMY: {
                 dummy_codec_cfg_t dummy_cfg = {
                     .gpio_if = codec_res.gpio_if,
@@ -485,27 +474,7 @@ int init_codec(codec_init_cfg_t *cfg)
 #endif
         };
         switch (in_cfg.codec_type) {
-            case CODEC_TYPE_ES7210: {
-                i2c_cfg.addr = in_cfg.i2c_addr ? in_cfg.i2c_addr : ES7210_CODEC_DEFAULT_ADDR;
-                codec_res.in_ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
-                es7210_codec_cfg_t es7210_cfg = {
-                    .ctrl_if = codec_res.in_ctrl_if,
-                    .mic_selected = ES7120_SEL_MIC1 | ES7120_SEL_MIC3,
-                };
-                if (cfg->in_use_tdm || (cfg->in_mode == CODEC_I2S_MODE_TDM)) {
-                    es7210_cfg.mic_selected |= ES7120_SEL_MIC2 | ES7120_SEL_MIC4;
-                }
-                codec_res.in_codec_if = es7210_codec_new(&es7210_cfg);
-            } break;
-
-            case CODEC_TYPE_ES7243: {
-                i2c_cfg.addr = in_cfg.i2c_addr ? in_cfg.i2c_addr : ES7243_CODEC_DEFAULT_ADDR;
-                codec_res.in_ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
-                es7243_codec_cfg_t es7243_cfg = {
-                    .ctrl_if = codec_res.in_ctrl_if,
-                };
-                codec_res.in_codec_if = es7243_codec_new(&es7243_cfg);
-            } break;
+            /* ES7210 and ES7243 not used — stripped. */
 
             case CODEC_TYPE_DUMMY: {
                 dummy_codec_cfg_t dummy_cfg = {
