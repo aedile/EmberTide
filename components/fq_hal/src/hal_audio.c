@@ -169,25 +169,8 @@ static hal_audio_err_t audio_hw_init(void)
         return HAL_AUDIO_ERR_INIT;
     }
 
-    /* LAB: 440 Hz test tone for 2 seconds, direct to codec (bypass ring).
-     * Isolates whether the codec/I2S/speaker path is functional. */
-    ESP_LOGI(TAG, "LAB: Playing 440 Hz test tone...");
-    {
-        int16_t buf[512];
-        uint32_t phase = 0u;
-        const uint32_t half_period = AUDIO_SAMPLE_RATE_HZ / (2u * 440u);
-        for (int chunk = 0; chunk < 172; chunk++) {  /* 172 * 256 ≈ 44032 frames */
-            for (int i = 0; i < 256; i++) {
-                int16_t s = ((phase / half_period) % 2u == 0u)
-                            ? (int16_t)20000 : (int16_t)-20000;
-                buf[i * 2]     = s;
-                buf[i * 2 + 1] = s;
-                phase++;
-            }
-            esp_codec_dev_write(s_play_dev, buf, sizeof(buf));
-        }
-    }
-    ESP_LOGI(TAG, "LAB: Test tone complete");
+    /* Test tone removed — audio pipeline verified working on IDF 5.5.1.
+     * SFX now flows through the ring buffer → drain task → codec path. */
 
     return HAL_AUDIO_OK;
 }

@@ -34,5 +34,5 @@ idf_component_register(
 # SPIRAM config. Root cause: esp_codec_dev managed component (v1.5.7) may have
 # ABI mismatch with ESP-IDF 5.3.4. Needs investigation with matching IDF version
 # or raw I2S driver without esp_codec_dev.
-# Audio DISABLED until IDF upgrade to 5.5.1 (bugs #15533 + #8dfcafa).
-# target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_BSP_AUDIO=1)
+# Audio — IDF 5.5.1 fixes GDMA interrupt bugs #15533 + #8dfcafa.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_BSP_AUDIO=1)
