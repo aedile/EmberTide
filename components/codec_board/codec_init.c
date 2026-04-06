@@ -9,6 +9,7 @@
 
 #include <string.h>
 #include <stdint.h>
+#include "esp_heap_caps.h"
 #include "driver/i2c.h"
 #include "esp_idf_version.h"
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
@@ -147,7 +148,10 @@ static int _i2s_init(uint8_t port, esp_codec_dev_type_t dev_type, codec_init_cfg
     ESP_LOGI(TAG, "Init i2s %d type: %d mclk:%d bclk:%d ws:%d din:%d dout:%d",
              port, dev_type, i2s_cfg.mclk,
              i2s_cfg.bclk, i2s_cfg.ws, i2s_cfg.din, i2s_cfg.dout);
-    i2s_keep[port] = (i2s_keep_t *)calloc(1, sizeof(i2s_keep_t));
+    /* MUST use internal RAM — PSRAM is not DMA-accessible on ESP32-S3.
+     * CONFIG_SPIRAM_USE_MALLOC=y routes default calloc to PSRAM. */
+    i2s_keep[port] = (i2s_keep_t *)heap_caps_calloc(1, sizeof(i2s_keep_t),
+                                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (i2s_keep[port] == NULL) {
         return -1;
     }

@@ -29,7 +29,9 @@ idf_component_register(
         joltwallet__littlefs
 )
 
-# Audio hardware path — enabled via factory codec_board component port.
-# Previous direct i2c_new_master_bus() approach crashed on boot (LoadProhibited).
-# codec_board component handles I2C/I2S/ES8311 init and owns esp_codec_dev dep.
-target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_BSP_AUDIO=1)
+# Audio hardware path — DISABLED.
+# LoadStoreAlignment crash in i2s_channel_init_std_mode persists regardless of
+# SPIRAM config. Root cause: esp_codec_dev managed component (v1.5.7) may have
+# ABI mismatch with ESP-IDF 5.3.4. Needs investigation with matching IDF version
+# or raw I2S driver without esp_codec_dev.
+# target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_BSP_AUDIO=1)
