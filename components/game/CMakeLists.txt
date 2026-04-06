@@ -27,6 +27,7 @@ idf_component_register(
         # music.c wraps micromod with play/stop/render API.
         # music_table.c provides state→track category mapping.
         "lib/micromod.c"
+        "lib/micromod_real.c"
         "src/music.c"
         "src/music_table.c"
     INCLUDE_DIRS

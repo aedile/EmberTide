@@ -381,15 +381,38 @@ static void do_music_tick(void)
         vol = (uint8_t)(((uint32_t)vol * 153u) / 256u);
     }
 
-    fq_music_err_t merr = fq_music_render(&s_music_ctx, s_music_buf, MUSIC_TICK_SAMPLES, vol);
-    if (merr == FQ_MUSIC_ERR_NULL) {
-        /* Should not happen — buf is valid. */
-        return;
-    }
-    /* On LOOP_GUARD or OK: s_music_buf contains valid PCM (zeros on guard). */
+    /* LAB: Use REAL micromod. Output is stereo (interleaved L/R int16).
+     * We need mono for our ring buffer, so average L+R. */
+    extern void micromod_get_audio(short *output_buffer, long count);
 
-    /* Write to ring buffer.
-     * If ring is full (overflow), samples are dropped — acceptable for music. */
+    static int16_t s_stereo_buf[MUSIC_TICK_SAMPLES * 2];
+    memset(s_stereo_buf, 0, sizeof(s_stereo_buf));  /* micromod requires zeroed buffer */
+    micromod_get_audio(s_stereo_buf, MUSIC_TICK_SAMPLES);
+
+    /* Downmix stereo to mono and apply volume. */
+    for (size_t i = 0; i < MUSIC_TICK_SAMPLES; i++) {
+        int32_t l = s_stereo_buf[i * 2];
+        int32_t r = s_stereo_buf[i * 2 + 1];
+        int32_t mono = (l + r) / 2;
+        mono = (mono * (int32_t)vol) / 256;
+        s_music_buf[i] = (int16_t)mono;
+    }
+
+    /* LAB: log first few ticks. */
+    {
+        static uint32_t tick_log_count = 0u;
+        if (tick_log_count < 5u) {
+            int32_t max_abs = 0;
+            for (size_t i = 0; i < MUSIC_TICK_SAMPLES; i++) {
+                int32_t v = (s_music_buf[i] < 0) ? -s_music_buf[i] : s_music_buf[i];
+                if (v > max_abs) max_abs = v;
+            }
+            ESP_LOGI("music_dbg", "tick %lu: vol=%u max_sample=%ld",
+                     (unsigned long)tick_log_count, (unsigned)vol, (long)max_abs);
+            tick_log_count++;
+        }
+    }
+
     hal_audio_write_samples(s_music_buf, MUSIC_TICK_SAMPLES);
 }
 
@@ -717,6 +740,26 @@ void app_main(void)
         app.music_enabled  = 0u;
     }
 
+    /* LAB: Play embedded .mod using the REAL micromod (Martin Cameron). */
+    if (audio_err == HAL_AUDIO_OK) {
+        extern const uint8_t mod_start[] asm("_binary_test_music_mod_start");
+        extern const uint8_t mod_end[]   asm("_binary_test_music_mod_end");
+        size_t mod_len = (size_t)(mod_end - mod_start);
+        ESP_LOGI(TAG, "LAB: loading embedded .mod (%u bytes)", (unsigned)mod_len);
+
+        /* Real micromod uses signed char* and global state. */
+        extern long micromod_initialise(signed char *data, long sampling_rate);
+        extern void micromod_set_gain(long value);
+
+        long ret = micromod_initialise((signed char *)mod_start, AUDIO_SAMPLE_RATE_HZ);
+        if (ret == 0) {
+            micromod_set_gain(64);  /* 64 = unity for 4-channel */
+            ESP_LOGI(TAG, "LAB: real micromod init OK — music should play!");
+        } else {
+            ESP_LOGW(TAG, "LAB: real micromod init failed: %ld", ret);
+        }
+    }
+
     hal_epaper_err_t epaper_err = hal_epaper_init();
     if (epaper_err != HAL_EPAPER_OK) {
         ESP_LOGE(TAG, "hal_epaper_init failed: %d", (int)epaper_err);
@@ -737,8 +780,9 @@ void app_main(void)
 
     /* -----------------------------------------------------------------------
      * Phase-22: Load initial music track for the starting state.
+     * LAB: Skipped — using embedded .mod file loaded above.
      * ----------------------------------------------------------------------- */
-    do_music_load(app.state, app.tick_count);
+    /* do_music_load(app.state, app.tick_count); */
 
     /* -----------------------------------------------------------------------
      * Initial render.
@@ -870,9 +914,10 @@ void app_main(void)
                     do_auto_save(&app, &player, &inventory);
                 }
 
-                /* Phase-22: State transition → stop-start music (no crossfade). */
-                fq_music_stop(&s_music_ctx);
-                do_music_load(app.state, app.tick_count);
+                /* Phase-22: State transition → stop-start music (no crossfade).
+                 * LAB: disabled — embedded .mod plays continuously. */
+                /* fq_music_stop(&s_music_ctx);
+                do_music_load(app.state, app.tick_count); */
 
                 needs_redraw     = 1u;
                 last_state       = app.state;

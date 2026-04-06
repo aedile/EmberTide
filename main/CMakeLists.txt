@@ -16,4 +16,6 @@ idf_component_register(
     # hal_epaper_init/flush, hal_gpio_init, hal_flash_init/read/write directly.
     # Architecture note: main/ is the ONLY module permitted to span all layers.
     # game/, presentation/, and connectivity/ still MUST NOT depend on fq_hal.
+    EMBED_FILES
+        "test_music.mod"
 )
