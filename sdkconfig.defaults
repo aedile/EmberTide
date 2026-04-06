@@ -29,11 +29,21 @@ CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_BOOT_INIT=y
 
-# SPIRAM: CAPS_ALLOC keeps malloc() on internal SRAM.
-# PSRAM only used via explicit heap_caps_malloc(MALLOC_CAP_SPIRAM).
-# This prevents I2S/GDMA driver allocations from landing in PSRAM
-# (which causes LoadStoreAlignment crashes on ESP32-S3).
-CONFIG_SPIRAM_USE_CAPS_ALLOC=y
+# SPIRAM: match factory firmware settings.
+# USE_MALLOC routes default malloc to PSRAM; ALWAYSINTERNAL keeps small
+# allocations (<16KB, including I2S/GDMA handles) in internal SRAM.
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+
+# ---------------------------------------------------------------------------
+# GDMA safety — CRITICAL for I2S audio on ESP32-S3 with PSRAM.
+# Without these, GDMA interrupt descriptors can land in cache-mapped
+# PSRAM and cause LoadStoreAlignment crashes.
+# (Discovered missing during audio lab session 2026-04-05)
+# ---------------------------------------------------------------------------
+CONFIG_GDMA_ISR_IRAM_SAFE=y
+CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y
 
 # ---------------------------------------------------------------------------
 # Target

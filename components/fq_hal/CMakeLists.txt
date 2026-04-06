@@ -35,3 +35,6 @@ idf_component_register(
 # ABI mismatch with ESP-IDF 5.3.4. Needs investigation with matching IDF version
 # or raw I2S driver without esp_codec_dev.
 # target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_BSP_AUDIO=1)
+# PROGRESS: I2S handles now in internal SRAM (0x3FCA range) with ALWAYSINTERNAL=16384.
+# Still crashes in GDMA interrupt setup — likely uninitialized struct field or
+# IDF 5.3 bug in intr_alloc path. Need to decode EXCVADDR=0x400556e5.
