@@ -21,8 +21,9 @@
 #include "hal_audio.h"
 #include "sfx.h"
 #include <stdint.h>
-#include <stdio.h>
 #include <stddef.h>
+#include <string.h>
+#include <stdio.h>
 
 /* Forward-declare mock accessors (defined in mock_hal_audio.c). */
 void     mock_audio_reset(void);
@@ -48,6 +49,16 @@ uint16_t mock_audio_get_last_duration_ms(void);
         }                                                                   \
         printf("PASS [%s]\n", (label));                                     \
     } while (0)
+
+/*
+ * SFX_BUF_SIZE — Local buffer capacity for fq_sfx_play() calls.
+ *
+ * Phase 23 increased AUDIO_RING_BUF_SAMPLES to 44100 (2 seconds). The SFX
+ * generator output is bounded by SFXR_MAX_DURATION_MS (500ms) at 22050Hz,
+ * so 500ms * 22.050 = ~11025 samples maximum. Use 12000 as a safe ceiling
+ * that is independent of the ring buffer size.
+ */
+#define SFX_BUF_SIZE  12000u
 
 int main(void)
 {
@@ -90,11 +101,11 @@ int main(void)
     mock_audio_reset();
     hal_audio_init();
     {
-        static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
+        static int16_t sfx_buf[SFX_BUF_SIZE];
         size_t         samples_out = 0u;
         game_err_t     err = fq_sfx_play(SFX_BTN_PRESS,
                                           sfx_buf,
-                                          AUDIO_RING_BUF_SAMPLES,
+                                          SFX_BUF_SIZE,
                                           &samples_out);
         ASSERT_EQ("sfx_btn_press_ok",         (uint32_t)GAME_OK, (uint32_t)err);
         ASSERT_TRUE("sfx_btn_press_nonzero",  samples_out > 0u);
@@ -104,11 +115,11 @@ int main(void)
      * 5. fq_sfx_play(SFX_COMBAT_HIT) generates > 0 samples.
      * ----------------------------------------------------------------------- */
     {
-        static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
+        static int16_t sfx_buf[SFX_BUF_SIZE];
         size_t         samples_out = 0u;
         game_err_t     err = fq_sfx_play(SFX_COMBAT_HIT,
                                           sfx_buf,
-                                          AUDIO_RING_BUF_SAMPLES,
+                                          SFX_BUF_SIZE,
                                           &samples_out);
         ASSERT_EQ("sfx_combat_hit_ok",        (uint32_t)GAME_OK, (uint32_t)err);
         ASSERT_TRUE("sfx_combat_hit_nonzero", samples_out > 0u);
@@ -118,37 +129,37 @@ int main(void)
      * 6. fq_sfx_play(SFX_LEVEL_UP) generates > 0 samples.
      * ----------------------------------------------------------------------- */
     {
-        static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
+        static int16_t sfx_buf[SFX_BUF_SIZE];
         size_t         samples_out = 0u;
         game_err_t     err = fq_sfx_play(SFX_LEVEL_UP,
                                           sfx_buf,
-                                          AUDIO_RING_BUF_SAMPLES,
+                                          SFX_BUF_SIZE,
                                           &samples_out);
         ASSERT_EQ("sfx_level_up_ok",        (uint32_t)GAME_OK, (uint32_t)err);
         ASSERT_TRUE("sfx_level_up_nonzero", samples_out > 0u);
     }
 
     /* -----------------------------------------------------------------------
-     * 7. Rapid SFX spam — 10 rapid calls pushing to the ring buffer.
-     *    After filling beyond AUDIO_RING_BUF_SAMPLES, the overflow flag must
-     *    be set. This asserts the overflow detection is functional, not a
-     *    tautology.
+     * 7. Ring overflow detection — fill ring to capacity + 1, overflow must fire.
+     *
+     * Phase 23 note: AUDIO_RING_BUF_SAMPLES was enlarged from 4096 to 44100.
+     * The previous approach (10x BTN_PRESS ~= 13230 samples) no longer
+     * overflows the enlarged ring. Instead we write AUDIO_RING_BUF_SAMPLES + 1
+     * samples directly to guarantee the overflow flag regardless of ring size.
      * ----------------------------------------------------------------------- */
     {
-        static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
-        size_t         samples_out = 0u;
+        static int16_t fill_buf[AUDIO_RING_BUF_SAMPLES];
+        memset(fill_buf, 0, sizeof(fill_buf));
+
         mock_audio_reset();
         hal_audio_init();
 
-        for (int i = 0; i < 10; i++) {
-            samples_out = 0u;
-            /* Write samples directly to test ring overflow resilience. */
-            fq_sfx_play(SFX_BTN_PRESS, sfx_buf, AUDIO_RING_BUF_SAMPLES,
-                        &samples_out);
-            hal_audio_write_samples(sfx_buf, samples_out);
-        }
-        /* 10 BTN_PRESS calls each push ~1323 samples (60ms at 22050Hz).
-         * 10 * 1323 = 13230 > AUDIO_RING_BUF_SAMPLES (4096) — overflow must fire. */
+        /* Fill the ring to capacity. */
+        hal_audio_write_samples(fill_buf, AUDIO_RING_BUF_SAMPLES);
+        /* Write one more — this must set the overflow flag. */
+        int16_t one = 0;
+        hal_audio_write_samples(&one, 1u);
+
         ASSERT_EQ("rapid_spam_overflow_flag_set",
                   1u,
                   mock_audio_get_overflow_flag());
@@ -158,7 +169,7 @@ int main(void)
      * 8. All 10 SFX IDs succeed without crash.
      * ----------------------------------------------------------------------- */
     {
-        static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
+        static int16_t sfx_buf[SFX_BUF_SIZE];
         size_t         samples_out = 0u;
         int            all_ok      = 1;
 
@@ -166,7 +177,7 @@ int main(void)
             samples_out = 0u;
             game_err_t err = fq_sfx_play((fq_sfx_id_t)id,
                                           sfx_buf,
-                                          AUDIO_RING_BUF_SAMPLES,
+                                          SFX_BUF_SIZE,
                                           &samples_out);
             if (err != GAME_OK || samples_out == 0u) {
                 printf("FAIL [all_sfx_ids_succeed]: id=%d err=%d samples=%u\n",
@@ -181,35 +192,35 @@ int main(void)
      * 9. Return type is game_err_t — GAME_OK for all valid IDs.
      * ----------------------------------------------------------------------- */
     {
-        static int16_t sfx_buf[AUDIO_RING_BUF_SAMPLES];
+        static int16_t sfx_buf[SFX_BUF_SIZE];
         size_t         samples_out = 0u;
 
         /* Spot-check three IDs. */
         ASSERT_EQ("sfx_rebirth_ok",
                   (uint32_t)GAME_OK,
                   (uint32_t)fq_sfx_play(SFX_REBIRTH, sfx_buf,
-                                         AUDIO_RING_BUF_SAMPLES, &samples_out));
+                                         SFX_BUF_SIZE, &samples_out));
         ASSERT_EQ("sfx_death_ok",
                   (uint32_t)GAME_OK,
                   (uint32_t)fq_sfx_play(SFX_DEATH, sfx_buf,
-                                         AUDIO_RING_BUF_SAMPLES, &samples_out));
+                                         SFX_BUF_SIZE, &samples_out));
         ASSERT_EQ("sfx_item_equip_ok",
                   (uint32_t)GAME_OK,
                   (uint32_t)fq_sfx_play(SFX_ITEM_EQUIP, sfx_buf,
-                                         AUDIO_RING_BUF_SAMPLES, &samples_out));
+                                         SFX_BUF_SIZE, &samples_out));
     }
 
     /* -----------------------------------------------------------------------
      * 10. BTN_PRESS and DEATH produce different first samples (distinct presets).
      * ----------------------------------------------------------------------- */
     {
-        static int16_t buf_press[AUDIO_RING_BUF_SAMPLES];
-        static int16_t buf_death[AUDIO_RING_BUF_SAMPLES];
+        static int16_t buf_press[SFX_BUF_SIZE];
+        static int16_t buf_death[SFX_BUF_SIZE];
         size_t         cnt_press = 0u;
         size_t         cnt_death = 0u;
 
-        fq_sfx_play(SFX_BTN_PRESS, buf_press, AUDIO_RING_BUF_SAMPLES, &cnt_press);
-        fq_sfx_play(SFX_DEATH,     buf_death, AUDIO_RING_BUF_SAMPLES, &cnt_death);
+        fq_sfx_play(SFX_BTN_PRESS, buf_press, SFX_BUF_SIZE, &cnt_press);
+        fq_sfx_play(SFX_DEATH,     buf_death, SFX_BUF_SIZE, &cnt_death);
 
         /* At least one of the first 4 samples must differ — presets are distinct. */
         int differs = 0;

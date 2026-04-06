@@ -118,5 +118,5 @@ void fq_render_onboarding(fq_fb_t *fb, const fq_vm_onboarding_t *vm)
 
     /* ── Footer bar: nav hints ─────────────────────────────────────────── */
     fq_draw_header_bar(fb, font, OB_FOOTER_Y, OB_FOOTER_H,
-                       "[PWR]Cycle [SUN]OK");
+                       "[SUN]Cycle [PWR]OK");
 }

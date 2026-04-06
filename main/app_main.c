@@ -33,7 +33,7 @@
  *       so idle does not fire before the first user interaction.
  *
  *   Animation design:
- *     - s_anim_frame alternates between 0 and 2 every ANIM_FRAME_US (0.8s).
+ *     - s_anim_frame alternates between 0 and 2 every ANIM_FRAME_US (5s).
  *     - Frame 0 = idle pose; Frame 2 = mid-step.
  *     - Animation timer resets when leaving HOME state.
  *     - Animation is suppressed while s_idle_active is set.
@@ -45,8 +45,9 @@
  *     - State-change redraws continue to use hal_epaper_flush() (full).
  *
  *   Onboarding UX fixes (hardware test):
- *     - Bug 1: BTN_A in ONBOARDING added to special-case needs_redraw block
- *       (state never changes on class-cycle so app.state!=last_state is false).
+ *     - Bug 1: BTN_A in ONBOARDING only sets needs_redraw on button events,
+ *       not TIMER_TICK. TIMER_TICK fired every 50ms and caused continuous
+ *       e-paper refreshes (~1.8s each) making the screen unusable.
  *     - Bug 2: Save-fail no longer forces state back to ONBOARDING. Character
  *       is valid in memory; the user stays in HOME and can play immediately.
  *     - Partial refresh: class carousel uses render_onboarding_partial().
@@ -74,6 +75,22 @@
  *
  *   SPSC contract: do_music_tick() and do_sfx() are ONLY called from the
  *   main loop task. The HAL ring buffer has no mutex — sole producer model.
+ *
+ * Phase 23: UX Hardware Fixes + Audio Foundation.
+ *   - Audio init moved BEFORE e-paper init.
+ *     I2S GDMA channel must be allocated before SPI GDMA channel to avoid
+ *     LoadStoreAlignment crash in gdma_install_tx_interrupt on ESP32-S3.
+ *   - Real micromod (Martin Cameron, public domain) replaces Phase-22 stub.
+ *     micromod_initialise() called at boot with embedded test_music.mod.
+ *     micromod_get_audio() renders stereo PCM; downmixed to mono in do_music_tick().
+ *   - Downmix: mono = (L + R) / 2, scaled by vol/256. Integer only, no float.
+ *   - s_music_loaded_state guards against retry spam when state does not change.
+ *   - ANIM_FRAME_US updated to 5s (partial refresh takes ~1.8s on real hardware).
+ *   - Idle wake: ONLY on BTN_A_PRESS or BTN_B_PRESS (not TIMER_TICK).
+ *   - Onboarding redraw: ONLY on button events (not TIMER_TICK — prevents 50ms
+ *     continuous full-refresh loop that made the screen unusable in the field).
+ *   - do_sfx_tracked uses SFX_BUF_SIZE (12000) not AUDIO_RING_BUF_SAMPLES (44100)
+ *     to avoid a 88KB static buffer on the stack section.
  */
 
 #include <stdint.h>
@@ -88,6 +105,7 @@
 #include "music.h"
 #include "music_table.h"
 #include "micromod.h"  /* for MAX_MOD_FILE_SIZE */
+#include "micromod_real.h" /* ADV-A2: real micromod API — micromod_initialise, micromod_get_audio, micromod_set_gain */
 
 /* Application layer */
 #include "event_bus.h"
@@ -144,9 +162,11 @@ _Static_assert(SFXR_SAMPLE_RATE_HZ == AUDIO_SAMPLE_RATE_HZ,
 #define IDLE_TIMEOUT_US    (30ULL * 1000000ULL)
 
 /**
- * Animation frame interval: 0.8 seconds per walk frame.
+ * Animation frame interval: 5 seconds per walk frame.
+ * Phase 23: increased from 800ms to 5s because partial refresh takes ~1.8s
+ * on real hardware — the old 800ms value caused back-to-back flush storms.
  */
-#define ANIM_FRAME_US      (800000ULL)
+#define ANIM_FRAME_US      (5000000ULL)
 
 /* BLOCKER 2 fix: Compile-time guard -- ANIM_FRAME_US must be non-zero. */
 _Static_assert(ANIM_FRAME_US > 0ULL,
@@ -163,6 +183,16 @@ _Static_assert(ANIM_FRAME_US > 0ULL,
  */
 #define MUSIC_TICK_SAMPLES  1102u
 
+/**
+ * SFX_BUF_SIZE — Dedicated static buffer for SFX generation in do_sfx_tracked().
+ *
+ * Phase 23: Using a fixed 12000-sample buffer instead of AUDIO_RING_BUF_SAMPLES
+ * (44100). SFX is bounded by SFXR_MAX_DURATION_MS (500ms) at 22050Hz, yielding
+ * at most ~11025 samples. 12000 provides a safe ceiling without allocating the
+ * full 88KB of the enlarged ring buffer as a static array in the .bss section.
+ */
+#define SFX_BUF_SIZE       12000u
+
 /* -------------------------------------------------------------------------
  * Phase-22: MOD buffer — allocated on SPIRAM on target.
  *
@@ -174,6 +204,14 @@ _Static_assert(ANIM_FRAME_US > 0ULL,
 static uint8_t *s_mod_buf;  /* SPIRAM-allocated in do_music_load() */
 static size_t  s_mod_buf_len;
 static fq_music_ctx_t s_music_ctx; /* Application-layer owner of music player state. */
+
+/**
+ * s_music_loaded_state — Tracks which state we last attempted music load for.
+ *
+ * Phase 23: Prevents retry spam when .mod files are absent or when idle wake
+ * resumes the same state. Initialised to 0xFF (sentinel "no state loaded").
+ */
+static fq_app_state_t s_music_loaded_state = (fq_app_state_t)0xFFu;
 
 /* -------------------------------------------------------------------------
  * clamp16 — Clamp int32 to signed 16-bit range.
@@ -263,6 +301,13 @@ static void do_music_load(fq_app_state_t state, uint32_t tick_count)
         return;
     }
 
+    /* Don't retry music load for the same state — prevents spam when
+     * .mod files are absent from the flash partition. */
+    if (state == s_music_loaded_state) {
+        return;
+    }
+    s_music_loaded_state = state;
+
     fq_music_cat_t cat = music_cat_for_state(state);
     if ((unsigned)cat >= (unsigned)FQ_MUSIC_CAT_COUNT) {
         /* No music for this state. */
@@ -317,24 +362,17 @@ static void do_music_load(fq_app_state_t state, uint32_t tick_count)
  * do_music_tick — Render and mix one tick of music + pending SFX.
  *
  * Phase-22 core function. Called every main loop iteration (50ms).
+ * Phase-23: Rewired to use real micromod (Martin Cameron, public domain).
+ *
  * Steps:
- *   1. If music disabled or not playing: write silence for this tick.
- *   2. Render MUSIC_TICK_SAMPLES of music PCM via fq_music_render().
- *   3. Check if any SFX samples are pending in the HAL ring (not possible
- *      with the current SPSC model — instead we detect SFX by checking
- *      whether do_sfx was called this tick via a flag).
- *   4. Mix: if SFX chunk is non-zero, apply ducking (60% music vol).
- *   5. Write combined output to HAL ring buffer.
+ *   1. Get volume from app context (0 if music disabled).
+ *   2. Apply ducking if SFX was emitted this tick (~60% of vol).
+ *   3. Render MUSIC_TICK_SAMPLES stereo pairs via micromod_get_audio().
+ *   4. Downmix stereo to mono: mono = (L + R) / 2. Integer only, no float.
+ *   5. Scale by vol/256. Integer only.
+ *   6. Write combined mono output to HAL ring buffer.
  *
- * NOTE: In this SPSC implementation, SFX is written to the ring BEFORE
- * do_music_tick() is called each tick (SFX triggers happen in the event
- * drain loop above). Music ticks write AFTER SFX in the same main-loop
- * iteration. The ring buffer serializes them.
- *
- * The ducking check here looks at s_sfx_pending_this_tick — a flag set
- * by do_sfx_with_duck_flag() when SFX was emitted this tick.
- *
- * CONCURRENCY: ONLY called from the main loop task.
+ * CONCURRENCY: ONLY called from the main loop task (SPSC producer).
  * -------------------------------------------------------------------------
  */
 
@@ -347,9 +385,14 @@ static void do_sfx_tracked(fq_sfx_id_t id)
     if (!s_app || !s_app->sfx_enabled) {
         return;
     }
-    static int16_t s_sfx_buf[AUDIO_RING_BUF_SAMPLES];
+    /*
+     * Phase 23: Use SFX_BUF_SIZE (12000) not AUDIO_RING_BUF_SAMPLES (44100).
+     * SFX output is bounded by SFXR_MAX_DURATION_MS at 22050 Hz (~11025 max).
+     * The 44100-sample ring buffer size should not leak into SFX buffer sizing.
+     */
+    static int16_t s_sfx_buf[SFX_BUF_SIZE];
     size_t samples_out = 0u;
-    if (fq_sfx_play(id, s_sfx_buf, AUDIO_RING_BUF_SAMPLES, &samples_out)
+    if (fq_sfx_play(id, s_sfx_buf, SFX_BUF_SIZE, &samples_out)
         == GAME_OK && samples_out > 0u) {
         hal_audio_write_samples(s_sfx_buf, samples_out);
         s_sfx_emitted_this_tick = 1u;
@@ -364,7 +407,7 @@ static void do_music_tick(void)
 
     static int16_t s_music_buf[MUSIC_TICK_SAMPLES];
 
-    /* Render music into s_music_buf. */
+    /* Get volume — 0 if music disabled. */
     uint8_t vol = s_app->music_enabled ? s_app->music_vol : 0u;
 
     /* Apply ducking if SFX was emitted this tick. */
@@ -373,15 +416,26 @@ static void do_music_tick(void)
         vol = (uint8_t)(((uint32_t)vol * 153u) / 256u);
     }
 
-    fq_music_err_t merr = fq_music_render(&s_music_ctx, s_music_buf, MUSIC_TICK_SAMPLES, vol);
-    if (merr == FQ_MUSIC_ERR_NULL) {
-        /* Should not happen — buf is valid. */
-        return;
-    }
-    /* On LOOP_GUARD or OK: s_music_buf contains valid PCM (zeros on guard). */
+    /*
+     * Phase 23: Use REAL micromod (Martin Cameron, public domain).
+     * micromod_get_audio() returns stereo interleaved int16 (LRLRLR...).
+     * We downmix to mono: mono = (L + R) / 2, then scale by vol/256.
+     * Both operations use int32 intermediates — no overflow, no float.
+     * ADV-A2: API declared via #include "micromod_real.h" at top of file.
+     */
+    static int16_t s_stereo_buf[MUSIC_TICK_SAMPLES * 2];
+    memset(s_stereo_buf, 0, sizeof(s_stereo_buf)); /* micromod requires zeroed buffer */
+    micromod_get_audio(s_stereo_buf, (long)MUSIC_TICK_SAMPLES);
 
-    /* Write to ring buffer.
-     * If ring is full (overflow), samples are dropped — acceptable for music. */
+    /* Downmix stereo to mono and apply volume. */
+    for (size_t i = 0u; i < MUSIC_TICK_SAMPLES; i++) {
+        int32_t l    = (int32_t)s_stereo_buf[i * 2u];
+        int32_t r    = (int32_t)s_stereo_buf[i * 2u + 1u];
+        int32_t mono = (l + r) / 2;
+        mono         = (mono * (int32_t)vol) / 256;
+        s_music_buf[i] = clamp16(mono);
+    }
+
     hal_audio_write_samples(s_music_buf, MUSIC_TICK_SAMPLES);
 }
 
@@ -698,7 +752,48 @@ void app_main(void)
 
     /* -----------------------------------------------------------------------
      * HAL init.
+     *
+     * Phase 23: Audio FIRST — I2S GDMA channel must be allocated before SPI
+     * (e-paper) GDMA channel. Reversing this order caused LoadStoreAlignment
+     * in gdma_install_tx_interrupt on ESP32-S3 when both channels are active.
+     * Verified on lab hardware (ESP32-S3-PICO-1-N8R8) 2026-04-05.
      * ----------------------------------------------------------------------- */
+    hal_audio_err_t audio_err = hal_audio_init();
+    if (audio_err != HAL_AUDIO_OK) {
+        ESP_LOGW(TAG, "hal_audio_init failed: %d -- SFX disabled", (int)audio_err);
+        app.sfx_enabled    = 0u;
+        app.music_enabled  = 0u;
+    }
+
+    /* -----------------------------------------------------------------------
+     * Phase 23: Real micromod — play embedded .mod file.
+     *
+     * test_music.mod is embedded via EMBED_FILES in main/CMakeLists.txt.
+     * The linker exports:
+     *   _binary_test_music_mod_start  — pointer to first byte of the file
+     *   _binary_test_music_mod_end    — pointer to one-past-end byte
+     *
+     * micromod_initialise() accepts signed char* and sampling rate.
+     * Returns 0 on success; non-zero on bad header.
+     * micromod_set_gain(64) = unity gain for 4-channel MOD.
+     * ----------------------------------------------------------------------- */
+    if (audio_err == HAL_AUDIO_OK) {
+        extern const uint8_t mod_start[] asm("_binary_test_music_mod_start");
+        extern const uint8_t mod_end[]   asm("_binary_test_music_mod_end");
+        size_t mod_len = (size_t)(mod_end - mod_start);
+        ESP_LOGI(TAG, "Phase 23: loading embedded .mod (%u bytes)", (unsigned)mod_len);
+
+        /* ADV-A2: micromod_initialise and micromod_set_gain declared via
+         * #include "micromod_real.h" at top of file. */
+        long ret = micromod_initialise((signed char *)mod_start, (long)AUDIO_SAMPLE_RATE_HZ);
+        if (ret == 0) {
+            micromod_set_gain(64);  /* 64 = unity for 4-channel MOD */
+            ESP_LOGI(TAG, "Phase 23: real micromod init OK — music playing");
+        } else {
+            ESP_LOGW(TAG, "Phase 23: real micromod init failed: %ld", ret);
+        }
+    }
+
     hal_epaper_err_t epaper_err = hal_epaper_init();
     if (epaper_err != HAL_EPAPER_OK) {
         ESP_LOGE(TAG, "hal_epaper_init failed: %d", (int)epaper_err);
@@ -707,14 +802,6 @@ void app_main(void)
     hal_gpio_err_t gpio_err = hal_gpio_init(button_callback);
     if (gpio_err != HAL_GPIO_OK) {
         ESP_LOGE(TAG, "hal_gpio_init failed: %d", (int)gpio_err);
-    }
-
-    /* Phase-21: Audio init. */
-    hal_audio_err_t audio_err = hal_audio_init();
-    if (audio_err != HAL_AUDIO_OK) {
-        ESP_LOGW(TAG, "hal_audio_init failed: %d -- SFX disabled", (int)audio_err);
-        app.sfx_enabled    = 0u;
-        app.music_enabled  = 0u;
     }
 
     /* -----------------------------------------------------------------------
@@ -727,8 +814,9 @@ void app_main(void)
 
     /* -----------------------------------------------------------------------
      * Phase-22: Load initial music track for the starting state.
+     * Phase-23: Disabled — using embedded .mod loaded above via real micromod.
      * ----------------------------------------------------------------------- */
-    do_music_load(app.state, app.tick_count);
+    /* do_music_load(app.state, app.tick_count); */
 
     /* -----------------------------------------------------------------------
      * Initial render.
@@ -767,8 +855,13 @@ void app_main(void)
             fq_app_state_t pre_state = app.state;
             fq_app_dispatch(&app, &evt);
 
-            /* Wake from idle on any button press. */
-            if (s_idle_active) {
+            /*
+             * Phase 23: Wake from idle ONLY on button press — not TIMER_TICK.
+             * Previous code woke on ANY event, including TIMER_TICK which fires
+             * every 50ms. This caused spurious wake-ups in the field.
+             */
+            if (s_idle_active &&
+                (evt.id == FQ_EVT_BTN_A_PRESS || evt.id == FQ_EVT_BTN_B_PRESS)) {
                 s_idle_active    = 0u;
                 s_anim_frame     = 0u;
                 s_last_anim_us   = now_us;
@@ -776,8 +869,11 @@ void app_main(void)
                 last_state       = app.state;
                 last_menu_index  = app.home_menu_index;
 
-                /* Phase-22: Resume music on idle wake. */
-                do_music_load(app.state, app.tick_count);
+                /* Phase-22: Resume music on idle wake. Reset guard so
+                 * do_music_load retries for the same state after idle.
+                 * Phase-23: disabled — embedded .mod plays continuously. */
+                /* s_music_loaded_state = (fq_app_state_t)0xFFu;
+                do_music_load(app.state, app.tick_count); */
             }
 
             /* Phase-21: Button SFX — triggered in main loop task only. */
@@ -857,9 +953,10 @@ void app_main(void)
                     do_auto_save(&app, &player, &inventory);
                 }
 
-                /* Phase-22: State transition → stop-start music (no crossfade). */
-                fq_music_stop(&s_music_ctx);
-                do_music_load(app.state, app.tick_count);
+                /* Phase-22: State transition → stop-start music (no crossfade).
+                 * Phase-23: Disabled — embedded .mod plays continuously. */
+                /* fq_music_stop(&s_music_ctx);
+                do_music_load(app.state, app.tick_count); */
 
                 needs_redraw     = 1u;
                 last_state       = app.state;
@@ -874,11 +971,15 @@ void app_main(void)
                 needs_redraw = 1u;
             } else if (app.state == FQ_STATE_TRAINING) {
                 needs_redraw = 1u;
-            } else if (app.state == FQ_STATE_ONBOARDING) {
-                /* Bug 1 fix: BTN_A in ONBOARDING only changes class_index,
-                 * not app.state, so app.state != last_state is always false.
-                 * Force a redraw on every dispatch while in ONBOARDING so the
-                 * class carousel redraws after each BTN_A press. */
+            } else if (app.state == FQ_STATE_ONBOARDING &&
+                       (evt.id == FQ_EVT_BTN_A_PRESS ||
+                        evt.id == FQ_EVT_BTN_B_PRESS)) {
+                /*
+                 * Phase 23: Only redraw onboarding on BUTTON events, not TIMER_TICK.
+                 * TIMER_TICK fires every 50ms and triggered continuous e-paper
+                 * refreshes (~1.8s each per partial), making the carousel unusable
+                 * in the field. Hardware-verified fix (lab 2026-04-05).
+                 */
                 needs_redraw = 1u;
             }
 
@@ -893,13 +994,14 @@ void app_main(void)
             s_idle_active    = 1u;
             needs_redraw     = 0u;
 
-            /* Phase-22: Stop music during idle (save power). */
-            fq_music_stop(&s_music_ctx);
+            /* Phase-22: Stop music during idle (save power).
+             * Phase-23: Disabled — embedded .mod plays continuously. */
+            /* fq_music_stop(&s_music_ctx); */
 
             render_idle(&app, &framebuffer, &player);
         }
 
-        /* Home screen animation tick. */
+        /* Home screen animation tick — uses partial refresh (lab-tuned). */
         if (!s_idle_active                                    &&
             app.state == FQ_STATE_HOME                        &&
             (now_us - s_last_anim_us) > (int64_t)ANIM_FRAME_US)
