@@ -182,8 +182,7 @@ and lists the bootloader, partition table, app image, and OTA data at their corr
 
 ```bash
 # Apply production overlay (ERROR-only logging, -Os, silent assertions)
-cp sdkconfig.production sdkconfig
-idf.py build
+tools/idf.sh -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production" build
 ```
 
 ---

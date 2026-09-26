@@ -35,6 +35,7 @@ PORT_BINDING_PATTERNS=(
     "make"
     "ctest"
     "idf.py"
+    "idf.sh"
     "ninja"
     "pytest"
     "python"

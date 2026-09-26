@@ -2,20 +2,23 @@
 
 ---
 
-## 1. Install ESP-IDF
+## 1. Build Toolchain
 
-**Recommended:** VS Code + Espressif IDF extension (installs the toolchain automatically).
+**Recommended:** `tools/idf.sh` — wraps `idf.py` in the pinned `espressif/idf:v5.5.1` Docker
+image, no local ESP-IDF install needed. See the root `README.md` for the FiestaQuest firmware
+build (`tools/idf.sh build`). The vendor reference examples under `example/` in this repo are
+standalone projects (each with their own `CMakeLists.txt`), so point the same image at the
+example's directory instead:
 
-1. Install [VS Code](https://code.visualstudio.com/)
-2. Install the **Espressif IDF** extension from the VS Code Marketplace
-3. Follow the extension wizard to install ESP-IDF v5.x (v5.1+ recommended)
-
-**CLI alternative:**
 ```bash
-# Install prerequisites (macOS)
-brew install cmake ninja dfu-util python3
+docker run --rm -v "$(pwd):/project" -w /project/example/Example/ESP-IDF/V2/07_BATT_PWR_Test \
+  espressif/idf:v5.5.1 idf.py build
+```
 
-# Clone and install ESP-IDF
+**Optional fallback (native install):** only needed for VS Code + Espressif IDF extension
+workflows or if Docker isn't available.
+```bash
+brew install cmake ninja dfu-util python3
 mkdir -p ~/esp && cd ~/esp
 git clone --recursive https://github.com/espressif/esp-idf.git
 cd esp-idf && ./install.sh esp32s3
@@ -99,20 +102,23 @@ Each ESP-IDF example follows this layout:
 
 ## 6. Build & Flash
 
+Build in Docker (downloads LVGL via component manager on first run):
 ```bash
-cd example/Example/ESP-IDF/V2/07_BATT_PWR_Test
-
-# First build (downloads LVGL via component manager)
-idf.py build
-
-# Flash + monitor (replace /dev/tty.usbmodem* with your port)
-idf.py -p /dev/tty.usbmodem* flash monitor
-
-# Monitor only
-idf.py -p /dev/tty.usbmodem* monitor
+docker run --rm -v "$(pwd):/project" -w /project/example/Example/ESP-IDF/V2/07_BATT_PWR_Test \
+  espressif/idf:v5.5.1 idf.py build
 ```
 
-Exit monitor with **Ctrl+]**.
+Flash and monitor from the host with `esptool` — Docker on macOS can't pass through USB
+(run from the example's `build/` dir, which is where `flash_args` lands; replace the port
+with your board's):
+```bash
+cd example/Example/ESP-IDF/V2/07_BATT_PWR_Test/build
+esptool.py --chip esp32s3 -p /dev/cu.usbmodem1101 -b 460800 \
+  --before default_reset --after hard_reset write_flash "@flash_args"
+python3 -m serial.tools.miniterm /dev/cu.usbmodem1101 115200   # or: screen /dev/cu.usbmodem1101 115200
+```
+
+Exit `miniterm` with **Ctrl+]**; exit `screen` with **Ctrl-A, K**.
 
 ---
 

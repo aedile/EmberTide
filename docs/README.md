@@ -39,5 +39,5 @@ cd test/visual && cmake -B build && cmake --build build
 ./build/render_all_screens && python3 diff_screens.py
 
 # ESP32 target
-. ~/esp/esp-idf/export.sh && idf.py build
+tools/idf.sh build
 ```
