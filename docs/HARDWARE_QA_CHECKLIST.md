@@ -8,11 +8,11 @@ All items must be checked before a production firmware release.
 ## Prerequisites
 
 - [ ] Two ESP32-S3-ePaper-1.54 boards (Waveshare variant of ESP32-S3-PICO-1-N8R8)
-- [ ] ESP-IDF v5.x installed with Xtensa LX7 toolchain
+- [ ] Docker (for `tools/idf.sh build`) and host `esptool.py` installed for flashing
 - [ ] Both devices flashed with firmware built from the SAME git SHA
-- [ ] Serial monitor open on both devices (`idf.py monitor` at 115200 baud)
+- [ ] Serial monitor open on both devices (`screen /dev/cu.usbmodemXXXX 115200`, one per port)
 - [ ] nRF Connect app available on iOS or Android for BLE inspection
-- [ ] `idf.py build` produced zero warnings under `-Wall -Werror`
+- [ ] `tools/idf.sh build` produced zero warnings under `-Wall -Werror`
 - [ ] Host test gate passed: `ctest --output-on-failure` — 63/63
 
 ---
@@ -106,8 +106,8 @@ All items must be checked before a production firmware release.
 - [ ] No NVS corruption, no assert, no mount failure logged
 
 ### Cross-Architecture Divergence (Production sdkconfig)
-- [ ] Flash Device A with production build: `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production" build`
-- [ ] Flash Device B with development build: `idf.py build` (default sdkconfig.defaults)
+- [ ] Flash Device A with production build: `tools/idf.sh -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production" build`
+- [ ] Flash Device B with development build: `tools/idf.sh build` (default sdkconfig.defaults)
 - [ ] Conduct full BLE combat session
 - [ ] Round 1 hash on Device A == Round 1 hash on Device B
 - [ ] If hashes diverge: BLOCKER — struct padding differs between optimization levels.
@@ -126,10 +126,10 @@ All items must be checked before a production firmware release.
 
 ## Production Binary Validation
 
-- [ ] `idf.py size-components` run on production build
+- [ ] `tools/idf.sh size-components` run on production build
 - [ ] Total binary (`.bin`) size < 1 MB
 - [ ] Flash usage breakdown logged: `app`, `ota_0`, `nvs`, `storage`, `factory`
-- [ ] `idf.py build` with `sdkconfig.production` produces zero warnings under `-Wall -Werror`
+- [ ] `tools/idf.sh build` with `sdkconfig.production` produces zero warnings under `-Wall -Werror`
 - [ ] Factory bin (`build/fiestaquest.bin`) generated and archived with firmware SHA tag
 
 ---

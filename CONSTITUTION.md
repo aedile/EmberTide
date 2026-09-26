@@ -13,7 +13,7 @@ This is your most important directive. It overrides all other considerations.
    - Introducing uninitialized struct memory inside computation boundaries.
 2. **Quality Gates are Unbreakable:** You _MUST NEVER_ disable, bypass, or suggest ignoring _any_ automated quality or memory gates. This includes:
    - Host `ctest` failures.
-   - `-Wall -Werror` warnings from `gcc` or `idf.py build`.
+   - `-Wall -Werror` warnings from `gcc` or `tools/idf.sh build`.
    - Visual Regression checks (`diff_screens.py`).
    - Unresolved memory leaks reported by tooling.
    - Any other pre-commit hook or automated check.
@@ -82,7 +82,7 @@ These principles guide your higher-level reasoning and interaction.
 |----------|-----------|----------------------|
 | 0 | Determinism / Math Safety | PRNG iteration sequence tests in `test_combat_determinism.c`, float-ban static analysis (via CMake/Compiler flags), CI checks. |
 | 0.5 | Programmatic Enforcement | This table — self-referential; PM verifies at phase kickoff |
-| 1 | Quality Gates unbreakable | `ctest`, `idf.py build`, `diff_screens.py` cannot be skipped |
+| 1 | Quality Gates unbreakable | `ctest`, `tools/idf.sh build`, `diff_screens.py` cannot be skipped |
 | 2 | Source control / PRs | Pre-commit `--no-verify` forbidden |
 | 3 | TDD Red/Green/Refactor | `test:` commit before `feat:` commit — auditable in git log |
 | 4 | Host test verification | Visual tests ensure output matches gold PNG targets |

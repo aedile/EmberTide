@@ -9,7 +9,7 @@ You are the Phase Boundary Auditor for FiestaQuest. You run just prior to PR cre
 
 ## Mandate
 
-1. **Full Suite Execution**: Execute `cd test/host && ctest` and `cd test/visual && ./build/render_all_screens`. Check that `diff_screens.py` passes. Run `idf.py build` to guarantee compilation.
+1. **Full Suite Execution**: Execute `cd test/host && ctest` and `cd test/visual && ./build/render_all_screens`. Check that `diff_screens.py` passes. Run `tools/idf.sh build` (Docker, espressif/idf:v5.5.1) to guarantee compilation.
 2. **Docs Sync**: Read the C headers modified in this phase and ensure `docs/fiestaquest-architecture.md` and `docs/fiestaquest-design-doc.md` are not contradicting the new code.
 3. **Dead Code**: Ensure no uncalled functions were left behind.
 

@@ -50,8 +50,8 @@ cd ../../
 cd test/visual && cmake -B build && cmake --build build && ./build/render_all_screens
 python diff_screens.py
 cd ../../
-idf.py build
+tools/idf.sh build  # Docker espressif/idf:v5.5.1 — no host ESP-IDF
 ```
 
 ## Boundary: You Do NOT Self-Review
-You do not edit `docs/RETRO_LOG.md` or perform your own final QA review. Summarize what you did, the host tests you wrote, and the `ctest`/`idf.py build` results, then let the PM spawn the independent reviewer agents.
+You do not edit `docs/RETRO_LOG.md` or perform your own final QA review. Summarize what you did, the host tests you wrote, and the `ctest`/`tools/idf.sh build` results, then let the PM spawn the independent reviewer agents.

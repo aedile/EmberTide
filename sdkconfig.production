@@ -4,15 +4,15 @@
 #
 # USAGE
 # -----
-# Apply on top of sdkconfig.defaults before running idf.py build:
+# Apply on top of sdkconfig.defaults before running tools/idf.sh build:
 #
 #   cp sdkconfig.defaults sdkconfig
 #   cat sdkconfig.production >> sdkconfig
-#   idf.py build
+#   tools/idf.sh build
 #
 # Or using the SDKCONFIG_DEFAULTS CMake variable (preferred for CI):
 #
-#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production" build
+#   tools/idf.sh -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production" build
 #
 # WHY THIS FILE EXISTS
 # --------------------

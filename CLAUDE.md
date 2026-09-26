@@ -120,7 +120,7 @@ Clean workspace, clear organization, determinism by default, minimal memory foot
 cd test/host && cmake -B build && cmake --build build && ctest --output-on-failure
 cd test/visual && cmake -B build && cmake --build build && ./build/render_all_screens
 python diff_screens.py
-idf.py build  # Verify cross-compilation target succeeds
+tools/idf.sh build  # Cross-compile in espressif/idf:v5.5.1 Docker image (no host ESP-IDF needed)
 ```
 
 **Two-gate test policy**: Host Unit tests (mocks OK, `-W error`) + Visual tests (framebuffer PNGs). Both must pass.
@@ -177,7 +177,7 @@ Cross-module dependencies between `game/` and `hal/` are FORBIDDEN. `game/` modu
 ```
 BEFORE CODING:   Read spec → Check advisories → Branch → Failing test
 WHILE CODING:    Minimal impl → Pass tests → Refactor
-BEFORE COMMIT:   git status → git diff → ctest → idf.py build
+BEFORE COMMIT:   git status → git diff → ctest → tools/idf.sh build
 AFTER CODE:      Spawn reviewers (qa+devops+balance always; visual/arch conditional) → review commit
 COMMIT TYPES:    test: feat: fix: refactor: review: docs: chore:
 REVIEWERS:       QA+DevOps+Balance always | Visual: presentation | Arch: game | Challenger: pre-dev
