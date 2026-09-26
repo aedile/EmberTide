@@ -8,7 +8,7 @@ All items must be checked before a production firmware release.
 ## Prerequisites
 
 - [ ] Two ESP32-S3-ePaper-1.54 boards (Waveshare variant of ESP32-S3-PICO-1-N8R8)
-- [ ] ESP-IDF v5.x installed with Xtensa LX7 toolchain
+- [ ] Docker (for `tools/idf.sh build`) and host `esptool.py` installed for flashing
 - [ ] Both devices flashed with firmware built from the SAME git SHA
 - [ ] Serial monitor open on both devices (`screen /dev/cu.usbmodemXXXX 115200`, one per port)
 - [ ] nRF Connect app available on iOS or Android for BLE inspection

@@ -10,9 +10,17 @@
  * Requires: Two ESP32-S3-ePaper-1.54 boards (Waveshare variant of
  *           ESP32-S3-PICO-1-N8R8) with FiestaQuest firmware flashed.
  *
- * Run:
- *   idf.py -p /dev/ttyUSB0 flash monitor   # Device A (Host)
- *   idf.py -p /dev/ttyUSB1 flash monitor   # Device B (Client)
+ * Build:
+ *   tools/idf.sh build
+ *
+ * Flash + monitor from the host (Docker can't do USB passthrough on macOS;
+ * run from build/, which is where flash_args lands):
+ *   esptool.py --chip esp32s3 -p /dev/ttyUSB0 -b 460800 --before default_reset \
+ *     --after hard_reset write_flash "@flash_args"        # Device A (Host)
+ *   esptool.py --chip esp32s3 -p /dev/ttyUSB1 -b 460800 --before default_reset \
+ *     --after hard_reset write_flash "@flash_args"        # Device B (Client)
+ *   screen /dev/ttyUSB0 115200   # Device A monitor
+ *   screen /dev/ttyUSB1 115200   # Device B monitor
  *
  * This file is NOT compiled by the host test suite (test/host/).
  * It requires the ESP-IDF toolchain, NimBLE stack, and physical BLE
@@ -84,9 +92,10 @@
  *       (no BLE buffer leak). Verify via esp_get_free_heap_size() log line.
  *
  * STEP 6 — NEGATIVE TEST N2: CROSS-ARCHITECTURE DIVERGENCE CHECK
- *   [ ] Flash Device A with: idf.py build (default -Os optimization)
- *   [ ] Flash Device B with: idf.py build with CONFIG_COMPILER_OPTIMIZATION_NONE=y
- *       (i.e., -O0, no optimization)
+ *   [ ] Flash Device A with: tools/idf.sh build (default -Os optimization),
+ *       then esptool.py write_flash "@flash_args" from build/
+ *   [ ] Flash Device B with: tools/idf.sh build with CONFIG_COMPILER_OPTIMIZATION_NONE=y
+ *       (i.e., -O0, no optimization), then esptool.py write_flash "@flash_args"
  *   [ ] Repeat Steps 1-4.
  *   [ ] Verify: Round 1 hash on Device A == Round 1 hash on Device B.
  *   [ ] If hashes DIVERGE at Round 1: struct padding differs between -Os

@@ -32,7 +32,8 @@ source export.sh
 Every project must be configured for the ESP32-S3 before the first build:
 
 ```bash
-idf.py set-target esp32s3
+docker run --rm -v "$(pwd):/project" -w /project/example/Example/ESP-IDF/V2/07_BATT_PWR_Test \
+  espressif/idf:v5.5.1 idf.py set-target esp32s3
 ```
 
 ---
@@ -49,10 +50,11 @@ The examples include a `sdkconfig.defaults` that pre-sets the critical options. 
 | `CONFIG_PARTITION_TABLE_CUSTOM`      | `y`                | Use `partitions.csv`                |
 | `CONFIG_USB_CDC_ENABLED`             | `y`                | USB CDC (Serial over USB-C)         |
 
-After initial `idf.py set-target esp32s3`, copy `sdkconfig.defaults` from an example to your project root or run:
+After the initial `set-target` above, copy `sdkconfig.defaults` from an example to your project root or run (needs `-it` for the interactive menu):
 
 ```bash
-idf.py menuconfig
+docker run --rm -it -v "$(pwd):/project" -w /project/example/Example/ESP-IDF/V2/07_BATT_PWR_Test \
+  espressif/idf:v5.5.1 idf.py menuconfig
 ```
 
 ---
